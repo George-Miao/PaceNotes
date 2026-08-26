@@ -1,0 +1,55 @@
+name: pacenotes
+
+x-app-build: &app-build
+  context: ./app
+
+services:
+  db:
+    image: postgres:18.6-alpine
+    environment:
+      POSTGRES_DB: pacenotes
+      POSTGRES_USER: pacenotes
+      POSTGRES_PASSWORD: pacenotes-local
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pacenotes -d pacenotes"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+
+  migrate:
+    image: pacenotes:local
+    build: *app-build
+    command: ["node", ".output/migrate/index.mjs"]
+    environment:
+      DATABASE_URL: postgres://pacenotes:pacenotes-local@db:5432/pacenotes
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  web:
+    image: pacenotes:local
+    build: *app-build
+    environment:
+      DATABASE_URL: postgres://pacenotes:pacenotes-local@db:5432/pacenotes
+      RATE_LIMIT_SALT: ${RATE_LIMIT_SALT:-pacenotes-local-only}
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:?GOOGLE_MAPS_API_KEY is required}
+      GOOGLE_MAP_ID: ${GOOGLE_MAP_ID:?GOOGLE_MAP_ID is required}
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health/ready').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+volumes:
+  postgres-data:

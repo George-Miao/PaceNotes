@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/sync/**/*.ts", "src/db/**/*.ts", "src/features/trip/model.ts"],
+  "exclude": ["src/**/*.test.ts"],
+  "compilerOptions": {
+    "noEmit": false,
+    "isolatedModules": false,
+    "rootDir": "src",
+    "outDir": ".output/sync",
+    "sourceMap": true
+  }
+}

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="PaceNotes">
+  <rect width="512" height="512" fill="#3e6796"/>
+  <path d="M150 362V150h95c58 0 96 29 96 78 0 51-38 82-98 82h-37v52h-56Zm56-103h36c27 0 42-11 42-30s-15-29-42-29h-36v59Z" fill="#fff"/>
+  <circle cx="351" cy="350" r="27" fill="#fff"/>
+</svg>

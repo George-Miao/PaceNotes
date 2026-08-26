@@ -1,0 +1,969 @@
+.planner {
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --canvas: #eceff1;
+  --surface: #fafafa;
+  --surface-subtle: #f1f3f4;
+  --surface-raised: #f7f8f8;
+  --ink: #24272b;
+  --muted: #626971;
+  --line: #c9ced3;
+  --line-strong: #9ca3aa;
+  --map-water: #dbe4e8;
+  --map-park: #dfe6df;
+  --map-road: #f8f8f7;
+  --map-block: #dfe3e5;
+  --shadow-control: 0 0.125rem 0.375rem rgb(22 26 29 / 14%);
+  --transition: 160ms cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+  width: 100%;
+  height: 100dvh;
+  min-height: 36rem;
+  overflow: hidden;
+  color: var(--ink);
+  background: var(--canvas);
+  color-scheme: light;
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.planner[data-theme="dark"] {
+  --canvas: #202327;
+  --surface: #1b1e22;
+  --surface-subtle: #24282d;
+  --surface-raised: #202429;
+  --ink: #eceff1;
+  --muted: #adb4bc;
+  --line: #3d434a;
+  --line-strong: #626a73;
+  --map-water: #29373f;
+  --map-park: #29362e;
+  --map-road: #2d3136;
+  --map-block: #272b30;
+  --shadow-control: 0 0.125rem 0.375rem rgb(0 0 0 / 28%);
+  color-scheme: dark;
+}
+
+.planner[data-accent="blue"] {
+  --accent: #315f91;
+  --accent-strong: #21476f;
+  --accent-soft: #dbe7f3;
+  --on-accent: #fff;
+}
+
+.planner[data-accent="teal"] {
+  --accent: #176562;
+  --accent-strong: #0f4d4b;
+  --accent-soft: #d8e9e7;
+  --on-accent: #fff;
+}
+
+.planner[data-accent="green"] {
+  --accent: #376844;
+  --accent-strong: #275134;
+  --accent-soft: #dce9df;
+  --on-accent: #fff;
+}
+
+.planner[data-accent="coral"] {
+  --accent: #9b4538;
+  --accent-strong: #793329;
+  --accent-soft: #f2dfdc;
+  --on-accent: #fff;
+}
+
+.planner[data-theme="dark"][data-accent="blue"] {
+  --accent: #91b7e3;
+  --accent-strong: #b4d1f0;
+  --accent-soft: #27394d;
+  --on-accent: #11161c;
+}
+
+.planner[data-theme="dark"][data-accent="teal"] {
+  --accent: #76c7c1;
+  --accent-strong: #9ddbd6;
+  --accent-soft: #203c3b;
+  --on-accent: #101716;
+}
+
+.planner[data-theme="dark"][data-accent="green"] {
+  --accent: #8ac897;
+  --accent-strong: #acd8b5;
+  --accent-soft: #283c2d;
+  --on-accent: #111713;
+}
+
+.planner[data-theme="dark"][data-accent="coral"] {
+  --accent: #ee9b8b;
+  --accent-strong: #f5b8ac;
+  --accent-soft: #49302d;
+  --on-accent: #1a1211;
+}
+
+.planner button {
+  color: inherit;
+  font: inherit;
+}
+
+.planner button:focus-visible {
+  outline: 0.1875rem solid var(--accent);
+  outline-offset: 0.125rem;
+}
+
+.map {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--canvas);
+}
+
+.mapArt {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.mapBase {
+  fill: var(--canvas);
+}
+
+.mapGrid {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 1;
+  opacity: 0.5;
+}
+
+.water,
+.park,
+.majorRoads,
+.minorRoads,
+.routeHalo,
+.routeLine {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.water {
+  stroke: var(--map-water);
+  stroke-width: 86;
+}
+
+.park {
+  stroke: var(--map-park);
+  stroke-width: 250;
+  opacity: 0.8;
+}
+
+.majorRoads {
+  stroke: var(--map-road);
+  stroke-width: 22;
+}
+
+.minorRoads {
+  stroke: var(--map-road);
+  stroke-width: 10;
+  opacity: 0.82;
+}
+
+.blocks {
+  fill: var(--map-block);
+}
+
+.routeHalo {
+  stroke: var(--surface);
+  stroke-width: 13;
+}
+
+.routeLine {
+  stroke: var(--accent);
+  stroke-width: 6;
+}
+
+.mapLabels {
+  fill: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.routeCard {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  display: grid;
+  width: min(20rem, calc(100% - 25rem));
+  min-width: 14rem;
+  padding: var(--space-3);
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.6875rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
+.routeCard > strong {
+  margin-top: var(--space-1);
+  font-size: 0.875rem;
+}
+
+.routeCard p {
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.routeFacts {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  color: var(--accent-strong);
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+.routeFacts span + span {
+  padding-left: var(--space-2);
+  border-left: 0.0625rem solid var(--line);
+}
+
+.routeStatus {
+  justify-self: start;
+  margin-top: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 0.0625rem solid var(--accent);
+  border-radius: 999px;
+  color: var(--accent-strong);
+  font-size: 0.6875rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.mapControls {
+  position: absolute;
+  right: var(--space-4);
+  bottom: 5.5rem;
+  display: grid;
+  overflow: hidden;
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-control);
+}
+
+.mapControls button {
+  display: grid;
+  min-width: 2.25rem;
+  height: 2.25rem;
+  padding: 0 var(--space-2);
+  place-items: center;
+  border: 0;
+  border-bottom: 0.0625rem solid var(--line);
+  background: transparent;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.mapControls button:last-child {
+  border-bottom: 0;
+}
+
+.mapControls button:hover {
+  background: var(--surface-subtle);
+}
+
+.marker,
+.candidateMarker {
+  position: absolute;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+}
+
+.marker {
+  display: grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  place-items: center;
+  border: 0.125rem solid var(--surface);
+  border-radius: 50%;
+  color: var(--ink);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-control);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.marker:hover,
+.markerSelected {
+  color: var(--on-accent);
+  background: var(--accent);
+}
+
+.candidateMarker {
+  display: grid;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  place-items: center;
+  border: 0.125rem solid var(--surface);
+  border-radius: 50%;
+  color: var(--muted);
+  background: var(--surface-subtle);
+  box-shadow: var(--shadow-control);
+  font-size: 0.875rem;
+  font-weight: 800;
+}
+
+.candidateMarker:hover {
+  color: var(--ink);
+  background: var(--surface);
+}
+
+.rail {
+  position: absolute;
+  z-index: 5;
+  inset: 0 auto 0 0;
+  display: flex;
+  width: clamp(20rem, 27vw, 23rem);
+  flex-direction: column;
+  border-right: 0.0625rem solid var(--line);
+  background: var(--surface);
+}
+
+.sheetHandle,
+.sheetLevels {
+  display: none;
+}
+
+.railHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 3rem var(--space-3) var(--space-2);
+  border-bottom: 0.0625rem solid var(--line);
+}
+
+.tripHeading {
+  min-width: 0;
+}
+
+.railHeader h1,
+.daySummary h2,
+.sectionTitle h3 {
+  margin: 0;
+  font-weight: 700;
+}
+
+.railHeader h1 {
+  margin-top: var(--space-1);
+  overflow: hidden;
+  font-size: 1.125rem;
+  letter-spacing: -0.015em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.headerActions {
+  display: grid;
+  flex: 0 0 auto;
+  gap: var(--space-2);
+  justify-items: end;
+}
+
+.themeToggle {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  padding: var(--space-1);
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
+}
+
+.themeToggle button {
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  background: transparent;
+  font-size: 0.6875rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.themeToggle button[aria-pressed="true"] {
+  color: var(--on-accent);
+  background: var(--accent);
+}
+
+.editors {
+  display: flex;
+  align-items: center;
+}
+
+.editor {
+  display: grid;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-left: -0.25rem;
+  place-items: center;
+  border: 0.125rem solid var(--surface);
+  border-radius: 50%;
+  color: var(--ink);
+  background: var(--surface-subtle);
+  font-size: 0.625rem;
+  font-weight: 800;
+}
+
+.editor:first-child {
+  margin-left: 0;
+}
+
+.online {
+  margin-left: var(--space-1);
+  color: var(--muted);
+  font-size: 0.6875rem;
+  white-space: nowrap;
+}
+
+.editorActivity {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  overflow-x: auto;
+  border-bottom: 0.0625rem solid var(--line);
+  color: var(--muted);
+  font-size: 0.6875rem;
+  white-space: nowrap;
+}
+
+.editorActivity span {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.editorActivity i {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.editorActivity strong {
+  color: var(--ink);
+}
+
+.dayStrip {
+  display: grid;
+  grid-auto-columns: minmax(3rem, 1fr);
+  grid-auto-flow: column;
+  gap: var(--space-1);
+  margin: var(--space-2) var(--space-3) 0;
+  padding: var(--space-1);
+  overflow-x: auto;
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
+}
+
+.dayStrip button {
+  display: grid;
+  min-height: 2.5rem;
+  padding: var(--space-1);
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+
+.dayStrip button:hover {
+  background: var(--surface-raised);
+}
+
+.dayStrip button span {
+  color: var(--muted);
+  font-size: 0.625rem;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.dayStrip button strong {
+  font-size: 0.8125rem;
+}
+
+.dayStrip .daySelected {
+  color: var(--on-accent);
+  background: var(--accent);
+}
+
+.dayStrip .daySelected span {
+  color: var(--on-accent);
+}
+
+.scrollArea {
+  min-height: 0;
+  margin-top: var(--space-3);
+  padding: 0 var(--space-3) 6rem;
+  overflow-y: auto;
+  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-width: thin;
+}
+
+.daySummary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 0.0625rem solid var(--line);
+}
+
+.daySummary h2 {
+  margin-top: var(--space-1);
+  font-size: 1rem;
+}
+
+.daySummary p {
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.daySummary > span {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.sectionTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) 0 var(--space-2);
+}
+
+.sectionTitle h3 {
+  font-size: 0.875rem;
+}
+
+.sectionTitle > span {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.itemList {
+  position: relative;
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.itemList::before {
+  position: absolute;
+  top: var(--space-4);
+  bottom: var(--space-4);
+  left: 0.875rem;
+  width: 0.0625rem;
+  background: var(--line);
+  content: "";
+}
+
+.itemList li {
+  position: relative;
+  overflow: hidden;
+  border: 0.0625rem solid transparent;
+  border-radius: var(--radius-md);
+}
+
+.itemList li:hover {
+  background: var(--surface-subtle);
+}
+
+.itemList .itemSelected {
+  border-color: var(--accent);
+  background: var(--surface-raised);
+}
+
+.itemButton {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 1.5rem minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2);
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.itemNumber {
+  z-index: 1;
+  display: grid;
+  width: 1.375rem;
+  height: 1.375rem;
+  place-items: center;
+  border: 0.0625rem solid var(--line-strong);
+  border-radius: 50%;
+  color: var(--ink);
+  background: var(--surface);
+  font-size: 0.6875rem;
+  font-weight: 800;
+}
+
+.itemSelected .itemNumber {
+  border-color: var(--accent);
+  color: var(--on-accent);
+  background: var(--accent);
+}
+
+.itemCopy {
+  display: grid;
+  min-width: 0;
+}
+
+.itemTime {
+  color: var(--accent-strong);
+  font-size: 0.6875rem;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.itemCopy strong {
+  margin-top: var(--space-1);
+  overflow: hidden;
+  font-size: 0.8125rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itemCopy > span:last-child {
+  margin-top: var(--space-1);
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itemArrow {
+  color: var(--muted);
+  font-size: 1rem;
+}
+
+.itemDetail {
+  margin: 0 var(--space-2) var(--space-2) 2.5rem;
+  padding: var(--space-2);
+  border-left: 0.1875rem solid var(--accent);
+  background: var(--surface-subtle);
+}
+
+.itemDetail p {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.itemDetail dl {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-2) 0;
+}
+
+.itemDetail dl div {
+  display: grid;
+  grid-template-columns: 3.25rem minmax(0, 1fr);
+  gap: var(--space-2);
+  font-size: 0.6875rem;
+}
+
+.itemDetail dt {
+  color: var(--muted);
+}
+
+.itemDetail dd {
+  margin: 0;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.tags span {
+  padding: var(--space-1) var(--space-2);
+  border: 0.0625rem solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--surface);
+  font-size: 0.6875rem;
+}
+
+.primaryAction {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 0.0625rem solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: var(--on-accent) !important;
+  background: var(--accent);
+  font-size: 0.75rem !important;
+  font-weight: 750 !important;
+  cursor: pointer;
+}
+
+.primaryAction:hover {
+  background: var(--accent-strong);
+}
+
+.candidates {
+  margin-top: var(--space-3);
+  padding-top: var(--space-1);
+  border-top: 0.0625rem solid var(--line);
+}
+
+.candidates > button {
+  display: grid;
+  width: 100%;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.candidates > button:hover {
+  background: var(--surface-subtle);
+}
+
+.candidates > button > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+}
+
+.candidates strong,
+.candidates small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidates strong {
+  font-size: 0.75rem;
+}
+
+.candidates small {
+  margin-top: var(--space-1);
+  color: var(--muted);
+  font-size: 0.6875rem;
+}
+
+.candidates > button > span:last-child {
+  color: var(--muted);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.candidateDot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border: 0.0625rem solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--surface);
+}
+
+.candidates > p {
+  margin: 0;
+  padding: var(--space-3);
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  background: var(--surface-subtle);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+@media (max-width: 720px) {
+  .planner {
+    min-height: 34rem;
+  }
+
+  .mapArt {
+    transform: scale(1.4) translate(-7%, -8%);
+  }
+
+  .routeCard {
+    top: var(--space-3);
+    right: var(--space-3);
+    width: 11.5rem;
+    min-width: 0;
+  }
+
+  .routeCard p {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .routeFacts {
+    gap: var(--space-1);
+  }
+
+  .routeFacts span + span {
+    padding-left: var(--space-1);
+  }
+
+  .mapControls {
+    top: 10rem;
+    right: var(--space-3);
+    bottom: auto;
+  }
+
+  .rail {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: min(72dvh, 38rem);
+    overflow: visible;
+    border-top: 0.0625rem solid var(--line);
+    border-right: 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    box-shadow: 0 -0.25rem 0.75rem rgb(22 26 29 / 12%);
+    transition: transform var(--transition);
+  }
+
+  .sheet_map {
+    transform: translateY(calc(100% - 9rem));
+  }
+
+  .sheet_list {
+    transform: translateY(calc(100% - 24rem));
+  }
+
+  .sheet_detail {
+    transform: translateY(0);
+  }
+
+  .sheetHandle {
+    display: block;
+    width: 2.5rem;
+    height: 0.25rem;
+    margin: var(--space-2) auto 0;
+    border-radius: 999px;
+    background: var(--line-strong);
+  }
+
+  .sheetLevels {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-1);
+    margin: var(--space-1) var(--space-3) 0;
+    padding: var(--space-1);
+    border-radius: var(--radius-md);
+    background: var(--surface-subtle);
+  }
+
+  .sheetLevels button {
+    padding: var(--space-1) var(--space-2);
+    border: 0;
+    border-radius: var(--radius-sm);
+    color: var(--muted);
+    background: transparent;
+    font-size: 0.6875rem;
+    font-weight: 750;
+    cursor: pointer;
+  }
+
+  .sheetLevels button[aria-pressed="true"] {
+    color: var(--on-accent);
+    background: var(--accent);
+  }
+
+  .railHeader {
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .railHeader h1 {
+    font-size: 1rem;
+  }
+
+  .online {
+    display: none;
+  }
+
+  .editorActivity {
+    display: none;
+  }
+
+  .dayStrip {
+    margin-top: 0;
+  }
+
+  .scrollArea {
+    margin-top: var(--space-2);
+    padding-bottom: 6rem;
+  }
+}
+
+@media (max-width: 430px) {
+  .routeCard {
+    width: 10.5rem;
+  }
+
+  .routeCard p,
+  .routeFacts span:nth-child(3) {
+    display: none;
+  }
+
+  .editor:nth-child(n + 3) {
+    display: none;
+  }
+
+  .themeToggle button {
+    padding-inline: var(--space-1);
+  }
+
+  .itemDetail {
+    margin-left: var(--space-2);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail,
+  .mapControls button {
+    transition: none;
+  }
+}

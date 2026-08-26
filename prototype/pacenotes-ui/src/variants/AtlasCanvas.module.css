@@ -1,0 +1,1011 @@
+.atlas {
+  --atlas-blue: #476c82;
+  --atlas-blue-deep: #284a5d;
+  --atlas-blue-pale: #dce8eb;
+  --atlas-pine: #315c50;
+  --atlas-pine-pale: #dfe9e2;
+  --atlas-stone-050: #f5f3ed;
+  --atlas-stone-100: #e9e5dc;
+  --atlas-stone-200: #d3cec2;
+  --atlas-stone-500: #777369;
+  --atlas-stone-700: #48463f;
+  --atlas-ink: #252c2d;
+  --atlas-cream: #fbf8ef;
+  --atlas-water: #d6e5e8;
+  --atlas-focus: #1f6688;
+  --atlas-panel: rgb(251 248 239 / 0.94);
+  --atlas-panel-strong: rgb(251 248 239 / 0.98);
+  --atlas-border-soft: rgb(72 70 63 / 0.12);
+  --atlas-space-1: 0.25rem;
+  --atlas-space-2: 0.5rem;
+  --atlas-space-3: 0.75rem;
+  --atlas-space-4: 1rem;
+  --atlas-space-5: 1.25rem;
+  --atlas-space-6: 1.5rem;
+  --atlas-space-8: 2rem;
+  --atlas-space-10: 2.5rem;
+  --atlas-radius-sm: 0.375rem;
+  --atlas-radius-md: 0.75rem;
+  --atlas-radius-lg: 1.125rem;
+  --atlas-shadow-rail: 0.5rem 0 2rem rgb(37 44 45 / 0.13);
+  --atlas-shadow-float: 0 0.25rem 1rem rgb(37 44 45 / 0.14);
+  --atlas-shadow-marker: 0 0.1875rem 0.625rem rgb(37 44 45 / 0.25);
+  --atlas-shadow-candidate: 0 0.125rem 0.5rem rgb(37 44 45 / 0.2);
+  --atlas-shadow-selected: 0 0.125rem 0.625rem rgb(37 44 45 / 0.07);
+  --atlas-shadow-sheet: 0 -0.5rem 2rem rgb(37 44 45 / 0.14);
+  --atlas-shadow-control: 0 0.0625rem 0.25rem rgb(37 44 45 / 0.12);
+  --atlas-transition: 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+  width: 100%;
+  height: 100dvh;
+  min-height: 38rem;
+  overflow: hidden;
+  color: var(--atlas-ink);
+  background: var(--atlas-stone-050);
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.atlas button {
+  color: inherit;
+  font: inherit;
+}
+
+.atlas button:focus-visible {
+  outline: 0.1875rem solid var(--atlas-focus);
+  outline-offset: 0.1875rem;
+}
+
+.map {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--atlas-stone-050);
+}
+
+.mapArt {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.mapBase {
+  fill: var(--atlas-stone-050);
+}
+
+.mapGrid {
+  fill: none;
+  stroke: var(--atlas-stone-100);
+  stroke-width: 1;
+}
+
+.water {
+  fill: none;
+  stroke: var(--atlas-water);
+  stroke-width: 86;
+}
+
+.parkEdge {
+  fill: none;
+  stroke: var(--atlas-pine-pale);
+  stroke-width: 250;
+  opacity: 0.72;
+}
+
+.majorRoads,
+.minorRoads {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.majorRoads {
+  stroke: var(--atlas-cream);
+  stroke-width: 22;
+  filter: drop-shadow(0 0 0.0625rem var(--atlas-stone-200));
+}
+
+.minorRoads {
+  stroke: var(--atlas-cream);
+  stroke-width: 10;
+  opacity: 0.95;
+}
+
+.blocks {
+  fill: var(--atlas-stone-100);
+  opacity: 0.65;
+}
+
+.routeHalo,
+.routeLine {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.routeHalo {
+  stroke: var(--atlas-cream);
+  stroke-width: 14;
+}
+
+.routeLine {
+  stroke: var(--atlas-blue);
+  stroke-width: 7;
+}
+
+.mapLabels {
+  fill: var(--atlas-stone-500);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.13em;
+}
+
+.mapHeader {
+  position: absolute;
+  top: var(--atlas-space-6);
+  right: var(--atlas-space-6);
+  display: grid;
+  min-width: 14rem;
+  padding: var(--atlas-space-3) var(--atlas-space-4);
+  border: 0.0625rem solid var(--atlas-border-soft);
+  border-radius: var(--atlas-radius-md);
+  background: var(--atlas-panel);
+  box-shadow: var(--atlas-shadow-float);
+  backdrop-filter: blur(0.5rem);
+}
+
+.mapHeader strong {
+  margin-top: var(--atlas-space-1);
+  font-family: ui-serif, Georgia, serif;
+  font-size: 1.05rem;
+}
+
+.mapHeader > strong + span {
+  margin-top: var(--atlas-space-1);
+  max-width: 20rem;
+  color: var(--atlas-stone-500);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.routeFacts {
+  display: flex;
+  gap: var(--atlas-space-2);
+  margin-top: var(--atlas-space-3);
+  color: var(--atlas-blue-deep);
+  font-size: 0.65rem;
+  font-weight: 760;
+}
+
+.routeFacts span + span {
+  padding-left: var(--atlas-space-2);
+  border-left: 0.0625rem solid var(--atlas-stone-200);
+}
+
+.routeState {
+  justify-self: start;
+  margin-top: var(--atlas-space-2);
+  padding: var(--atlas-space-1) var(--atlas-space-2);
+  border-radius: 999px;
+  color: var(--atlas-pine);
+  background: var(--atlas-pine-pale);
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.mapTools {
+  position: absolute;
+  right: var(--atlas-space-6);
+  bottom: 6rem;
+  display: grid;
+  overflow: hidden;
+  border: 0.0625rem solid var(--atlas-stone-200);
+  border-radius: var(--atlas-radius-md);
+  background: var(--atlas-cream);
+  box-shadow: var(--atlas-shadow-float);
+}
+
+.mapTools button {
+  display: grid;
+  width: 2.625rem;
+  height: 2.625rem;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-bottom: 0.0625rem solid var(--atlas-stone-200);
+  background: transparent;
+  cursor: pointer;
+}
+
+.mapTools button:last-child {
+  border-bottom: 0;
+}
+
+.mapTools button:last-child {
+  width: auto;
+  padding: 0 var(--atlas-space-2);
+  font-size: 0.625rem;
+  font-weight: 760;
+}
+
+.mapTools button:hover {
+  background: var(--atlas-stone-100);
+}
+
+.scale {
+  position: absolute;
+  right: var(--atlas-space-6);
+  bottom: var(--atlas-space-6);
+  display: flex;
+  align-items: center;
+  gap: var(--atlas-space-2);
+  color: var(--atlas-stone-700);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.scale span {
+  width: 4rem;
+  height: 0.375rem;
+  border: solid var(--atlas-stone-700);
+  border-width: 0 0.125rem 0.125rem;
+}
+
+.marker,
+.candidate {
+  position: absolute;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+}
+
+.marker {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  place-items: center;
+  border: 0.1875rem solid var(--atlas-cream);
+  border-radius: 50% 50% 50% var(--atlas-radius-sm);
+  color: var(--atlas-cream) !important;
+  background: var(--atlas-blue-deep);
+  box-shadow: var(--atlas-shadow-marker);
+  font-size: 0.72rem !important;
+  font-weight: 800 !important;
+  rotate: -45deg;
+}
+
+.marker:hover,
+.markerSelected {
+  background: var(--atlas-pine);
+  scale: 1.14;
+}
+
+.marker > span {
+  rotate: 45deg;
+}
+
+.candidate {
+  width: 1.625rem;
+  height: 1.625rem;
+  padding: 0;
+  border: 0.125rem solid var(--atlas-cream);
+  border-radius: 50%;
+  background: var(--atlas-pine-pale);
+  box-shadow: var(--atlas-shadow-candidate);
+}
+
+.candidate span {
+  display: block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin: auto;
+  border-radius: 50%;
+  background: var(--atlas-pine);
+}
+
+.rail {
+  position: absolute;
+  z-index: 5;
+  inset: 0 auto 0 0;
+  display: flex;
+  width: clamp(23rem, 30vw, 27rem);
+  flex-direction: column;
+  border-right: 0.0625rem solid var(--atlas-stone-200);
+  background: var(--atlas-panel-strong);
+  box-shadow: var(--atlas-shadow-rail);
+}
+
+.resizeEdge {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: -0.3125rem;
+  bottom: 0;
+  width: 0.625rem;
+  cursor: ew-resize;
+}
+
+.resizeEdge::after {
+  position: absolute;
+  top: 50%;
+  left: 0.125rem;
+  width: 0.1875rem;
+  height: 2.5rem;
+  border-radius: 999px;
+  background: var(--atlas-stone-200);
+  content: '';
+  transform: translateY(-50%);
+}
+
+.sheetHandle,
+.sheetLevels {
+  display: none;
+}
+
+.railHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--atlas-space-4);
+  padding: var(--atlas-space-6) var(--atlas-space-6) var(--atlas-space-4);
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--atlas-stone-500);
+  font-size: 0.625rem;
+  font-weight: 760;
+  letter-spacing: 0.12em;
+  line-height: 1.35;
+  text-transform: uppercase;
+}
+
+.railHeader h1,
+.daySummary h2,
+.agendaTitle h3,
+.candidateList h3 {
+  margin: 0;
+  font-family: ui-serif, Georgia, serif;
+  font-weight: 620;
+}
+
+.railHeader h1 {
+  margin-top: var(--atlas-space-1);
+  font-size: clamp(1.35rem, 2.2vw, 1.75rem);
+  letter-spacing: -0.02em;
+}
+
+.editors {
+  display: flex;
+  align-items: center;
+  padding-top: var(--atlas-space-1);
+}
+
+.editor {
+  display: grid;
+  width: 1.625rem;
+  height: 1.625rem;
+  margin-left: -0.375rem;
+  place-items: center;
+  border: 0.125rem solid var(--atlas-cream);
+  border-radius: 50%;
+  color: var(--atlas-cream);
+  background: var(--atlas-blue);
+  font-size: 0.58rem;
+  font-weight: 800;
+}
+
+.editor:first-child {
+  margin-left: 0;
+}
+
+.editor[data-color='moss'] {
+  background: var(--atlas-pine);
+}
+
+.editor[data-color='persimmon'] {
+  background: var(--atlas-stone-700);
+}
+
+.online {
+  position: relative;
+  margin-left: var(--atlas-space-2);
+  padding-left: var(--atlas-space-3);
+  color: var(--atlas-stone-500);
+  font-size: 0.625rem;
+  white-space: nowrap;
+}
+
+.online::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 0.4375rem;
+  height: 0.4375rem;
+  border-radius: 50%;
+  background: var(--atlas-pine);
+  content: '';
+  transform: translateY(-50%);
+}
+
+.editorActivity {
+  display: flex;
+  gap: var(--atlas-space-3);
+  margin: 0 var(--atlas-space-6) var(--atlas-space-3);
+  overflow-x: auto;
+  color: var(--atlas-stone-500);
+  font-size: 0.6rem;
+  white-space: nowrap;
+}
+
+.editorActivity > span {
+  display: flex;
+  align-items: center;
+  gap: var(--atlas-space-1);
+}
+
+.editorActivity i {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 50%;
+  background: var(--atlas-pine);
+}
+
+.editorActivity strong {
+  color: var(--atlas-stone-700);
+  font-weight: 760;
+}
+
+.days {
+  display: grid;
+  grid-auto-columns: minmax(3.5rem, 1fr);
+  grid-auto-flow: column;
+  gap: var(--atlas-space-1);
+  margin: 0 var(--atlas-space-6);
+  padding: var(--atlas-space-1);
+  overflow-x: auto;
+  border: 0.0625rem solid var(--atlas-stone-200);
+  border-radius: var(--atlas-radius-md);
+  background: var(--atlas-stone-050);
+}
+
+.days button {
+  display: grid;
+  min-height: 3.25rem;
+  padding: var(--atlas-space-2);
+  place-items: center;
+  border: 0;
+  border-radius: var(--atlas-radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+
+.days button:hover {
+  background: var(--atlas-stone-100);
+}
+
+.days button span {
+  color: var(--atlas-stone-500);
+  font-size: 0.58rem;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.days button strong {
+  margin-top: 0.125rem;
+  font-family: ui-serif, Georgia, serif;
+  font-size: 0.84rem;
+}
+
+.days .dayActive {
+  color: var(--atlas-cream);
+  background: var(--atlas-blue-deep);
+}
+
+.days .dayActive span {
+  color: var(--atlas-blue-pale);
+}
+
+.agenda {
+  min-height: 0;
+  margin-top: var(--atlas-space-4);
+  padding: 0 var(--atlas-space-6) 7rem;
+  overflow-y: auto;
+  scrollbar-color: var(--atlas-stone-200) transparent;
+  scrollbar-width: thin;
+}
+
+.daySummary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--atlas-space-4);
+  padding-bottom: var(--atlas-space-4);
+  border-bottom: 0.0625rem solid var(--atlas-stone-200);
+}
+
+.daySummary h2 {
+  margin-top: var(--atlas-space-1);
+  font-size: 1.15rem;
+}
+
+.daySummary p {
+  margin: var(--atlas-space-1) 0 0;
+  color: var(--atlas-stone-500);
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+
+.daySummary > span {
+  flex: 0 0 auto;
+  padding-top: var(--atlas-space-1);
+  color: var(--atlas-blue-deep);
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+
+.agendaTitle {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: var(--atlas-space-4) 0 var(--atlas-space-3);
+}
+
+.agendaTitle h3 {
+  font-size: 0.86rem;
+}
+
+.agendaTitle > span {
+  color: var(--atlas-stone-500);
+  font-size: 0.68rem;
+}
+
+.itemList {
+  position: relative;
+  display: grid;
+  gap: var(--atlas-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.itemList::before {
+  position: absolute;
+  top: var(--atlas-space-5);
+  bottom: var(--atlas-space-5);
+  left: 1rem;
+  width: 0.0625rem;
+  background: var(--atlas-stone-200);
+  content: '';
+}
+
+.itemList li {
+  position: relative;
+  overflow: hidden;
+  border: 0.0625rem solid transparent;
+  border-radius: var(--atlas-radius-md);
+}
+
+.itemList li:hover {
+  background: var(--atlas-stone-050);
+}
+
+.itemList .itemSelected {
+  border-color: var(--atlas-stone-200);
+  background: var(--atlas-cream);
+  box-shadow: var(--atlas-shadow-selected);
+}
+
+.itemButton {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 2rem minmax(0, 1fr) auto;
+  gap: var(--atlas-space-3);
+  align-items: center;
+  padding: var(--atlas-space-3);
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.itemNumber {
+  z-index: 1;
+  display: grid;
+  width: 1.5rem;
+  height: 1.5rem;
+  place-items: center;
+  border: 0.125rem solid var(--atlas-cream);
+  border-radius: 50%;
+  color: var(--atlas-cream);
+  background: var(--atlas-blue);
+  box-shadow: 0 0 0 0.0625rem var(--atlas-blue);
+  font-size: 0.625rem;
+  font-weight: 800;
+}
+
+.itemSelected .itemNumber {
+  background: var(--atlas-pine);
+  box-shadow: 0 0 0 0.0625rem var(--atlas-pine);
+}
+
+.itemCopy {
+  display: grid;
+  min-width: 0;
+}
+
+.itemTime {
+  color: var(--atlas-blue);
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.itemCopy strong {
+  margin-top: 0.125rem;
+  overflow: hidden;
+  font-family: ui-serif, Georgia, serif;
+  font-size: 0.9rem;
+  font-weight: 640;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itemCopy > span:last-child {
+  margin-top: 0.125rem;
+  overflow: hidden;
+  color: var(--atlas-stone-500);
+  font-size: 0.67rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itemAction {
+  color: var(--atlas-stone-500);
+  font-size: 1.25rem;
+}
+
+.reservation {
+  margin: 0 var(--atlas-space-3) var(--atlas-space-3) 3.5rem;
+  padding: var(--atlas-space-3);
+  border-left: 0.1875rem solid var(--atlas-pine);
+  border-radius: 0 var(--atlas-radius-sm) var(--atlas-radius-sm) 0;
+  background: var(--atlas-pine-pale);
+}
+
+.reservationTop {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.64rem;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.reservationTop strong {
+  color: var(--atlas-pine);
+}
+
+.reservation dl {
+  display: grid;
+  gap: var(--atlas-space-2);
+  margin: var(--atlas-space-3) 0;
+}
+
+.reservation dl div {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  gap: var(--atlas-space-2);
+  font-size: 0.67rem;
+}
+
+.reservation dt {
+  color: var(--atlas-stone-500);
+}
+
+.reservation dd {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reservationActions {
+  display: flex;
+  gap: var(--atlas-space-2);
+}
+
+.reservationActions button {
+  padding: var(--atlas-space-2) var(--atlas-space-3);
+  border: 0.0625rem solid var(--atlas-pine);
+  border-radius: var(--atlas-radius-sm);
+  background: transparent;
+  color: var(--atlas-pine);
+  font-size: 0.64rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.reservationActions button:first-child {
+  color: var(--atlas-cream);
+  background: var(--atlas-pine);
+}
+
+.itemNote {
+  margin: 0 var(--atlas-space-3) var(--atlas-space-3) 3.5rem;
+  padding: var(--atlas-space-3);
+  border-left: 0.1875rem solid var(--atlas-blue);
+  border-radius: 0 var(--atlas-radius-sm) var(--atlas-radius-sm) 0;
+  background: var(--atlas-blue-pale);
+}
+
+.itemNote > span {
+  color: var(--atlas-blue-deep);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.itemNote p {
+  margin: var(--atlas-space-2) 0;
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.itemNote div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--atlas-space-1);
+}
+
+.itemNote div span {
+  padding: var(--atlas-space-1) var(--atlas-space-2);
+  border-radius: 999px;
+  color: var(--atlas-blue-deep);
+  background: var(--atlas-cream);
+  font-size: 0.6rem;
+}
+
+.candidateList {
+  margin-top: var(--atlas-space-5);
+  padding-top: var(--atlas-space-4);
+  border-top: 0.0625rem solid var(--atlas-stone-200);
+}
+
+.candidateList > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--atlas-space-2);
+}
+
+.candidateList h3 {
+  font-size: 0.94rem;
+}
+
+.candidateList > div span {
+  color: var(--atlas-stone-500);
+  font-size: 0.68rem;
+}
+
+.candidateList > button {
+  display: grid;
+  width: 100%;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--atlas-space-2);
+  align-items: center;
+  padding: var(--atlas-space-2);
+  border: 0;
+  border-radius: var(--atlas-radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.candidateList > button:hover {
+  background: var(--atlas-stone-050);
+}
+
+.candidateList > button span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.72rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidateList small {
+  margin-top: var(--atlas-space-1);
+  overflow: hidden;
+  color: var(--atlas-stone-500);
+  font-size: 0.6rem;
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+
+.candidateList > button span:last-child {
+  color: var(--atlas-blue);
+  font-size: 0.64rem;
+  font-weight: 760;
+}
+
+.candidateList > p {
+  margin: 0;
+  padding: var(--atlas-space-3);
+  border-radius: var(--atlas-radius-sm);
+  color: var(--atlas-stone-500);
+  background: var(--atlas-stone-050);
+  font-size: 0.68rem;
+}
+
+.candidateDot {
+  width: 0.5625rem;
+  height: 0.5625rem;
+  border: 0.125rem solid var(--atlas-pine-pale);
+  border-radius: 50%;
+  background: var(--atlas-pine);
+}
+
+@media (max-width: 720px) {
+  .atlas {
+    min-height: 34rem;
+  }
+
+  .mapArt {
+    transform: scale(1.45) translate(-8%, -8%);
+  }
+
+  .mapHeader {
+    top: var(--atlas-space-4);
+    right: var(--atlas-space-4);
+    min-width: 0;
+    max-width: 11rem;
+  }
+
+  .mapHeader strong,
+  .mapHeader > strong + span,
+  .mapHeader > span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mapTools {
+    right: var(--atlas-space-4);
+    bottom: 10.5rem;
+  }
+
+  .scale {
+    display: none;
+  }
+
+  .rail {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: min(76dvh, 42rem);
+    overflow: visible;
+    border-top: 0.0625rem solid var(--atlas-stone-200);
+    border-right: 0;
+    border-radius: var(--atlas-radius-lg) var(--atlas-radius-lg) 0 0;
+    box-shadow: var(--atlas-shadow-sheet);
+    transition: transform var(--atlas-transition);
+  }
+
+  .sheet_peek {
+    transform: translateY(calc(100% - 10.5rem));
+  }
+
+  .sheet_list {
+    transform: translateY(calc(100% - 27rem));
+  }
+
+  .sheet_detail {
+    transform: translateY(0);
+  }
+
+  .resizeEdge {
+    display: none;
+  }
+
+  .sheetHandle {
+    display: block;
+    width: 2.5rem;
+    height: 0.25rem;
+    margin: var(--atlas-space-2) auto 0;
+    border-radius: 999px;
+    background: var(--atlas-stone-200);
+  }
+
+  .railHeader {
+    padding: var(--atlas-space-3) var(--atlas-space-4) var(--atlas-space-2);
+  }
+
+  .railHeader h1 {
+    font-size: 1.25rem;
+  }
+
+  .editors .online {
+    display: none;
+  }
+
+  .editorActivity {
+    margin-right: var(--atlas-space-4);
+    margin-left: var(--atlas-space-4);
+  }
+
+  .days {
+    margin: 0 var(--atlas-space-4);
+  }
+
+  .sheetLevels {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--atlas-space-1);
+    margin: var(--atlas-space-2) var(--atlas-space-4) 0;
+    padding: var(--atlas-space-1);
+    border-radius: var(--atlas-radius-md);
+    background: var(--atlas-stone-100);
+  }
+
+  .sheetLevels button {
+    padding: var(--atlas-space-2);
+    border: 0;
+    border-radius: var(--atlas-radius-sm);
+    background: transparent;
+    color: var(--atlas-stone-500);
+    font-size: 0.67rem;
+    font-weight: 760;
+    cursor: pointer;
+  }
+
+  .sheetLevels button[aria-pressed='true'] {
+    color: var(--atlas-blue-deep);
+    background: var(--atlas-cream);
+    box-shadow: var(--atlas-shadow-control);
+  }
+
+  .agenda {
+    margin-top: var(--atlas-space-2);
+    padding: 0 var(--atlas-space-4) 7rem;
+  }
+
+  .agendaTitle {
+    position: sticky;
+    z-index: 2;
+    top: 0;
+    padding-top: var(--atlas-space-3);
+    background: var(--atlas-cream);
+  }
+
+  .marker {
+    width: 1.875rem;
+    height: 1.875rem;
+  }
+}
+
+@media (max-width: 430px) {
+  .editor:nth-child(n + 3) {
+    display: none;
+  }
+
+  .days {
+    grid-auto-columns: minmax(3.125rem, 1fr);
+  }
+
+  .reservation {
+    margin-left: var(--atlas-space-3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail {
+    transition: none;
+  }
+}
