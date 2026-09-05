@@ -11,10 +11,6 @@ function Roadmap() {
     >
       <h2>Next</h2>
       <ul>
-        <li>
-          Smart placement of a new place within the active day, based on route cost and schedule
-          fit.
-        </li>
         <li>Authentication, named accounts, roles, and controlled trip access.</li>
         <li>Secret-link rotation and stronger sharing controls.</li>
         <li>Operator-selectable place and route providers.</li>

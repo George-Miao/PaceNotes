@@ -1,6 +1,5 @@
 import { useState } from "react";
 import type { GooglePlaceSelection } from "~/features/google/google";
-import type { PlaceReference } from "~/features/trip/model";
 import { GooglePlacePicker } from "./GooglePlacePicker";
 import { PlaceDetails } from "./PlaceDetails";
 
@@ -9,10 +8,12 @@ export function PlaceSearch({
   onAdd,
 }: {
   bias?: { latitude: number; longitude: number } | undefined;
-  onAdd: (place: PlaceReference, label: string) => void;
+  onAdd: (place: GooglePlaceSelection, label: string) => Promise<void>;
 }) {
   const [selected, setSelected] = useState<GooglePlaceSelection | null>(null);
   const [label, setLabel] = useState("");
+  const [placing, setPlacing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   return (
     <section className="place-search" aria-labelledby="place-search-title">
@@ -36,15 +37,24 @@ export function PlaceSearch({
           <button
             type="button"
             className="primary-button"
-            disabled={!label.trim()}
-            onClick={() => {
-              onAdd(selected.reference, label.trim());
-              setSelected(null);
-              setLabel("");
+            disabled={!label.trim() || placing}
+            onClick={async () => {
+              setPlacing(true);
+              setError(null);
+              try {
+                await onAdd(selected, label.trim());
+                setSelected(null);
+                setLabel("");
+              } catch (cause) {
+                setError(cause instanceof Error ? cause.message : "Could not add this place");
+              } finally {
+                setPlacing(false);
+              }
             }}
           >
-            Add to day
+            {placing ? "Finding best place…" : "Add to day"}
           </button>
+          {error ? <p className="field-error">{error}</p> : null}
           <PlaceDetails placeId={selected.reference.placeId} />
         </>
       ) : null}
