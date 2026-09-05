@@ -76,7 +76,7 @@
           dockerImage = pkgs.dockerTools.buildLayeredImage {
             name = "pacenotes";
             tag = "0.1.0";
-            copyToRoot = pkgs.buildEnv {
+            contents = pkgs.buildEnv {
               name = "pacenotes-root";
               paths = [
                 pkgs.nodejs_24
