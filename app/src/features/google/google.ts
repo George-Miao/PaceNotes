@@ -41,6 +41,7 @@ export function loadRoutesLibrary(): Promise<google.maps.RoutesLibrary> {
 
 export type GooglePlaceSelection = {
   reference: { placeId: string };
+  location: { latitude: number; longitude: number };
 };
 
 export type GooglePlaceView = {
@@ -52,9 +53,13 @@ export type GooglePlaceView = {
 export async function readGooglePlaceSelection(
   place: google.maps.places.Place,
 ): Promise<GooglePlaceSelection> {
-  await place.fetchFields({ fields: ["id"] });
+  await place.fetchFields({ fields: ["id", "location"] });
   if (!place.id) throw new Error("Google did not return a place ID");
-  return { reference: { placeId: place.id } };
+  if (!place.location) throw new Error("Google did not return a place location");
+  return {
+    reference: { placeId: place.id },
+    location: { latitude: place.location.lat(), longitude: place.location.lng() },
+  };
 }
 
 export async function resolveGooglePlace(placeId: string): Promise<GooglePlaceView> {

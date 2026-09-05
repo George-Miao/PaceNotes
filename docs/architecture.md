@@ -31,6 +31,8 @@ Google Maps Platform supplies place search, transient place fields, the map, and
 
 Route order comes from visible itinerary order. A stale route stays visible and marked stale until the new route is ready. If Google routing fails, the itinerary remains usable and the leg reports that the route is unavailable.
 
+When an editor adds a place to the active day, `features/trip/place-placement.ts` ranks every visible insertion point. It first minimizes schedule overflow, including open-item durations and elapsed time across clock changes, then minimizes the Google route minutes introduced by the place. Google place coordinates and route matrices remain transient; the collaboration document receives only the item label and Place ID. Partial or unavailable routing falls back to the schedule evidence that is available.
+
 ## Time
 
 Saved local item times use the assigned day and an IANA time-zone ID. `Temporal` converts the local value to an instant. A missing daylight-saving time is rejected. A duplicated time requires an explicit earlier or later choice.
