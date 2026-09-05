@@ -14,6 +14,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react
 import {
   addTripItem,
   deleteTripDay,
+  readTripDocument,
   removeTripItem,
   scheduleTripItem,
   setTripField,
@@ -21,16 +22,18 @@ import {
   updateTripItem,
 } from "~/features/collaboration/document";
 import { useTripDocument } from "~/features/collaboration/use-trip-document";
+import type { GooglePlaceSelection } from "~/features/google/google";
+import { readGooglePlacementTravelTimes } from "~/features/google/place-placement-routes";
 import { type MapStop, type RouteLeg, useRouteLegs } from "~/features/google/route-legs";
 import { useGooglePlaceViews } from "~/features/google/use-place-views";
 import {
   type ItemType,
   itemForCreate,
-  type PlaceReference,
   reorder,
   resolveLocalTime,
   type TripItem,
 } from "~/features/trip/model";
+import { findBestPlaceInsertion } from "~/features/trip/place-placement";
 import { deleteTrip } from "~/features/trip/trip.functions";
 import { ItineraryList } from "./ItineraryList";
 import { PlaceSearch } from "./PlaceSearch";
@@ -196,12 +199,47 @@ export function Planner({ tripId }: { tripId: string }) {
     addTripItem(document, item);
     setSelectedId(item.id);
   };
-  const addPlace = (place: PlaceReference, label: string) => {
-    const item = itemForCreate("place", activeDay, {
+  const addPlace = async (place: GooglePlaceSelection, label: string) => {
+    const placementDay = activeDay ?? snapshot.days[0]?.id ?? snapshot.startDate;
+    const item = itemForCreate("place", placementDay, {
       title: label,
-      place,
+      place: place.reference,
+      travelMode: snapshot.defaultTravelMode,
     });
-    addTripItem(document, item);
+    const candidateStop = {
+      id: item.id,
+      latitude: place.location.latitude,
+      longitude: place.location.longitude,
+      travelMode: item.travelMode,
+    };
+    const placementRoutes = await readGooglePlacementTravelTimes(stops, candidateStop);
+    const currentRoutes = legs.flatMap((leg) =>
+      leg.durationMinutes === null
+        ? []
+        : [
+            {
+              fromId: leg.fromId,
+              toId: leg.toId,
+              mode: leg.mode,
+              minutes: leg.durationMinutes,
+            },
+          ],
+    );
+    const visibleIndex = findBestPlaceInsertion({
+      items: dayItems,
+      item,
+      travelTimes: [...currentRoutes, ...placementRoutes],
+      date: placementDay,
+      timeZone: snapshot.timeZone,
+    });
+    const beforeId = dayItems[visibleIndex]?.id;
+    const latestOrder = readTripDocument(document).order;
+    const beforeIndex = beforeId ? latestOrder.indexOf(beforeId) : -1;
+    const dayIds = new Set(dayItems.map((dayItem) => dayItem.id));
+    const lastDayIndex = latestOrder.findLastIndex((id) => dayIds.has(id));
+    const destinationIndex =
+      beforeIndex >= 0 ? beforeIndex : lastDayIndex >= 0 ? lastDayIndex + 1 : latestOrder.length;
+    addTripItem(document, item, destinationIndex);
     setSelectedId(item.id);
     setSearchOpen(false);
   };

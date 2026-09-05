@@ -3,6 +3,7 @@
 ## Current MVP
 
 - Fixed-date trips with places and free-form itinerary items
+- Smart placement of new places by schedule fit and Google route cost
 - Live Yjs collaboration for up to 10 editors
 - Random full-access trip URLs without accounts
 - Google place search, map, routes, and transient place details
@@ -11,7 +12,6 @@
 
 ## Next
 
-- Smart placement of a new place within the active day, based on route cost and schedule fit
 - Authentication, named accounts, roles, and controlled trip access
 - Secret-link rotation and stronger sharing controls
 - Operator-selectable place and route providers
