@@ -68,7 +68,7 @@
             doCheck = true;
             checkPhase = ''
               runHook preCheck
-              pnpm lint
+              ${lib.getExe pkgs.biome} check .
               pnpm test
               runHook postCheck
             '';
