@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title description">
+  <title id="title">PaceNotes</title>
+  <desc id="description">The PaceNotes logo on a light neutral background.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#f8f8f7"/>
+      <stop offset="1" stop-color="#edf5f7"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(600 315) rotate(90) scale(330 520)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#69cbe7" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#69cbe7" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0V48" fill="none" stroke="#6f9eac" stroke-opacity="0.12" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#background)"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  <image href="logo.svg" x="270" y="220" width="660" height="189" preserveAspectRatio="xMidYMid meet"/>
+</svg>

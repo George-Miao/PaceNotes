@@ -7,6 +7,9 @@ import { IconButtonTooltips } from "~/components/IconButtonTooltips";
 import { getPublicConfig } from "~/features/config/public-config";
 import appCss from "~/styles/app.css?url";
 
+const siteDescription =
+  "Plan a fixed-date trip together with shared itineraries, places, routes, and live updates.";
+
 export const Route = createRootRoute({
   loader: () => getPublicConfig(),
   head: () => ({
@@ -17,7 +20,27 @@ export const Route = createRootRoute({
       { name: "theme-color", content: "#f8f8f7" },
       {
         name: "description",
-        content: "Fast collaborative trip planning with React and TanStack Start.",
+        content: siteDescription,
+      },
+      { property: "og:title", content: "PaceNotes" },
+      { property: "og:type", content: "website" },
+      { property: "og:description", content: siteDescription },
+      { property: "og:site_name", content: "PaceNotes" },
+      { property: "og:image", content: "/opengraph.png" },
+      { property: "og:image:type", content: "image/png" },
+      { property: "og:image:width", content: "1200" },
+      { property: "og:image:height", content: "630" },
+      {
+        property: "og:image:alt",
+        content: "PaceNotes logo on a light neutral background.",
+      },
+      { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: "PaceNotes" },
+      { name: "twitter:description", content: siteDescription },
+      { name: "twitter:image", content: "/opengraph.png" },
+      {
+        name: "twitter:image:alt",
+        content: "PaceNotes logo on a light neutral background.",
       },
     ],
     links: [
