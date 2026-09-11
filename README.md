@@ -2,19 +2,7 @@
 
 PaceNotes is an open source, high-performance web itinerary planner. Several people can edit one fixed-date trip in real time without an account.
 
-## MVP
-
-- React 19 and TanStack Start
-- Places, notes, reservations, lodging, and transport items
-- Google place search, maps, routes, and transient place details
-- Place ID-only storage for provider places
-- Yjs and Hocuspocus live collaboration
-- PostgreSQL 18 durable storage
-- Desktop split view and mobile bottom sheet
-- Installable PWA shell with an explicit update prompt
-- AGPL-3.0-or-later
-
-A random trip URL gives full edit and delete access. The MVP has no authentication, role, discovery, or offline editing contract.
+![PaceNotes trip planner showing a Maine itinerary and route map](assets/pacenotes-trip.webp)
 
 ## Start locally
 
@@ -49,7 +37,7 @@ Run `pnpm --dir app test:e2e` after the web process and PostgreSQL are ready. Ru
 
 ## Deployment
 
-`compose.yaml` runs one web process, a one-shot migration process, and PostgreSQL 18.6. The web process serves HTTP and the `/sync` WebSocket route on one port. The release workflow accepts signed `vMAJOR.MINOR.PATCH` tags and publishes the image to GHCR.
+`compose.yaml` runs one web process, a one-shot migration process, and PostgreSQL 18.6. The web process serves HTTP and the `/sync` WebSocket route on one port. The image workflow builds the Nix image for AMD64. A push to `main` publishes `main-SHA` and `latest-unstable`. A `vMAJOR.MINOR.PATCH` tag publishes the version and `latest`, then creates a GitHub release.
 
 The Nix image is available as `.#docker` on Linux. Set these runtime values:
 
@@ -58,11 +46,9 @@ The Nix image is available as `.#docker` on Linux. Set these runtime values:
 - `GOOGLE_MAPS_API_KEY`
 - `GOOGLE_MAP_ID`
 
-
 ## Documentation
 
 - [Architecture](docs/architecture.md)
 - [Deployment](docs/deployment.md)
 - [Security](docs/security.md)
-- [Roadmap](docs/roadmap.md)
 - [License](LICENSE)

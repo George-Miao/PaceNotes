@@ -28,7 +28,7 @@ function Privacy() {
       </p>
       <h2>Logs</h2>
       <p>
-        Production logs must not contain trip URLs, Google query text, notes, or provider request
+        Production logs do not contain trip URLs, Google query text, notes, or provider request
         parameters.
       </p>
     </StaticPage>

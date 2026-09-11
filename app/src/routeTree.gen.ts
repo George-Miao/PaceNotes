@@ -12,7 +12,6 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LicenseRouteImport } from './routes/license'
 import { Route as PrivacyRouteImport } from './routes/privacy'
-import { Route as RoadmapRouteImport } from './routes/roadmap'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as HealthLiveRouteImport } from './routes/health/live'
 import { Route as HealthReadyRouteImport } from './routes/health/ready'
@@ -31,11 +30,6 @@ const LicenseRoute = LicenseRouteImport.update({
 const PrivacyRoute = PrivacyRouteImport.update({
   id: '/privacy',
   path: '/privacy',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const RoadmapRoute = RoadmapRouteImport.update({
-  id: '/roadmap',
-  path: '/roadmap',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TermsRoute = TermsRouteImport.update({
@@ -63,7 +57,6 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/license': typeof LicenseRoute
   '/privacy': typeof PrivacyRoute
-  '/roadmap': typeof RoadmapRoute
   '/terms': typeof TermsRoute
   '/health/live': typeof HealthLiveRoute
   '/health/ready': typeof HealthReadyRoute
@@ -73,7 +66,6 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/license': typeof LicenseRoute
   '/privacy': typeof PrivacyRoute
-  '/roadmap': typeof RoadmapRoute
   '/terms': typeof TermsRoute
   '/health/live': typeof HealthLiveRoute
   '/health/ready': typeof HealthReadyRoute
@@ -84,7 +76,6 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/license': typeof LicenseRoute
   '/privacy': typeof PrivacyRoute
-  '/roadmap': typeof RoadmapRoute
   '/terms': typeof TermsRoute
   '/health/live': typeof HealthLiveRoute
   '/health/ready': typeof HealthReadyRoute
@@ -96,7 +87,6 @@ export interface FileRouteTypes {
     | '/'
     | '/license'
     | '/privacy'
-    | '/roadmap'
     | '/terms'
     | '/health/live'
     | '/health/ready'
@@ -106,7 +96,6 @@ export interface FileRouteTypes {
     | '/'
     | '/license'
     | '/privacy'
-    | '/roadmap'
     | '/terms'
     | '/health/live'
     | '/health/ready'
@@ -116,7 +105,6 @@ export interface FileRouteTypes {
     | '/'
     | '/license'
     | '/privacy'
-    | '/roadmap'
     | '/terms'
     | '/health/live'
     | '/health/ready'
@@ -127,7 +115,6 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LicenseRoute: typeof LicenseRoute
   PrivacyRoute: typeof PrivacyRoute
-  RoadmapRoute: typeof RoadmapRoute
   TermsRoute: typeof TermsRoute
   HealthLiveRoute: typeof HealthLiveRoute
   HealthReadyRoute: typeof HealthReadyRoute
@@ -155,13 +142,6 @@ declare module '@tanstack/react-router' {
       path: '/privacy'
       fullPath: '/privacy'
       preLoaderRoute: typeof PrivacyRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/roadmap': {
-      id: '/roadmap'
-      path: '/roadmap'
-      fullPath: '/roadmap'
-      preLoaderRoute: typeof RoadmapRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/terms': {
@@ -199,7 +179,6 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LicenseRoute: LicenseRoute,
   PrivacyRoute: PrivacyRoute,
-  RoadmapRoute: RoadmapRoute,
   TermsRoute: TermsRoute,
   HealthLiveRoute: HealthLiveRoute,
   HealthReadyRoute: HealthReadyRoute,

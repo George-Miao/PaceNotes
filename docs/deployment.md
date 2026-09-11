@@ -10,7 +10,6 @@ Set these values on the web process:
 - `GOOGLE_MAP_ID`: Google cloud map ID for Advanced Markers.
 - `PORT`: Web port. The default is `3000`.
 
-
 ## Create the required values
 
 Only `GOOGLE_MAPS_API_KEY` comes from Google as a credential. `GOOGLE_MAP_ID` is a public identifier. Create `RATE_LIMIT_SALT` locally. Obtain the production `DATABASE_URL` from the PostgreSQL operator. Set `PORT` from the deployment address.
@@ -116,7 +115,7 @@ Use a reverse proxy with TLS. Route normal requests and WebSocket upgrades for `
 
 ## Backups
 
-Back up PostgreSQL with a tool that supports PostgreSQL 18. Test restore steps on a separate database. A Docker named volume only keeps data across container replacement. It is not a backup.
+Back up PostgreSQL with a tool that supports PostgreSQL 18. Test restore steps on a separate database.
 
 The supported upgrade flow is:
 
@@ -126,14 +125,8 @@ The supported upgrade flow is:
 4. Replace the web process.
 5. Check `/health/ready` and `/health/live`.
 
-Yjs schema changes before 1.0 must be forward-compatible. Use idempotent document migrations during the one-host deployment. Keep a database backup before each migration.
-
 ## Provider configuration
 
 Use separate development and production provider projects. Restrict the Google browser key by exact production origins and required interfaces. Configure quota alerts and billing limits.
 
 PaceNotes stores only Google Place IDs. Google names, addresses, coordinates, reviews, and photos stay in memory and render only on allowed Google map and Places UI Kit surfaces.
-
-## Release image
-
-A signed tag with the exact form `vMAJOR.MINOR.PATCH` starts the release workflow. The workflow verifies the tag, builds `.#docker`, and pushes the version and `latest` tags to GHCR. Set the GHCR package visibility to public before the first public release.
