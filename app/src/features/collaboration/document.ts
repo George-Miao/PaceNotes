@@ -1,9 +1,14 @@
 import * as Y from "yjs";
 import {
+  distanceUnitSchema,
   placeReferenceSchema,
   type TripItem,
+  type TripSettings,
   type TripSnapshot,
+  travelModeSchema,
   tripItemSchema,
+  tripLanguageSchema,
+  tripSettingsSchema,
 } from "../trip/model";
 
 const metadataKey = "metadata";
@@ -21,6 +26,8 @@ export function initializeTripDocument(document: Y.Doc, snapshot: TripSnapshot):
     metadata.set("timeZone", snapshot.timeZone);
     metadata.set("destination", snapshot.destination);
     metadata.set("defaultTravelMode", snapshot.defaultTravelMode);
+    metadata.set("language", snapshot.language);
+    metadata.set("distanceUnit", snapshot.distanceUnit);
 
     const days = document.getArray<{ id: string; date: string }>(daysKey);
     if (days.length > 0) days.delete(0, days.length);
@@ -44,6 +51,9 @@ export function readTripDocument(document: Y.Doc): TripSnapshot {
     if (parsed.success) items[key] = parsed.data;
   });
   const destination = placeReferenceSchema.safeParse(metadata.get("destination"));
+  const language = tripLanguageSchema.safeParse(metadata.get("language"));
+  const distanceUnit = distanceUnitSchema.safeParse(metadata.get("distanceUnit"));
+  const defaultTravelMode = travelModeSchema.safeParse(metadata.get("defaultTravelMode"));
 
   return {
     id: String(metadata.get("id") ?? ""),
@@ -52,8 +62,9 @@ export function readTripDocument(document: Y.Doc): TripSnapshot {
     endDate: String(metadata.get("endDate") ?? ""),
     timeZone: String(metadata.get("timeZone") ?? "UTC"),
     destination: destination.success ? destination.data : { placeId: "" },
-    defaultTravelMode: (metadata.get("defaultTravelMode") ??
-      "DRIVING") as TripSnapshot["defaultTravelMode"],
+    language: language.success ? language.data : "en",
+    distanceUnit: distanceUnit.success ? distanceUnit.data : "metric",
+    defaultTravelMode: defaultTravelMode.success ? defaultTravelMode.data : "DRIVING",
     days: document.getArray<{ id: string; date: string }>(daysKey).toArray(),
     order: document.getArray<string>(orderKey).toArray(),
     items,
@@ -68,8 +79,25 @@ export function setTripField(
   document.transact(() => document.getMap(metadataKey).set(field, value), "trip-field");
 }
 
+export function setTripSettings(document: Y.Doc, settings: TripSettings): void {
+  const parsed = tripSettingsSchema.parse(settings);
+  document.transact(() => {
+    const metadata = document.getMap(metadataKey);
+    metadata.set("language", parsed.language);
+    metadata.set("distanceUnit", parsed.distanceUnit);
+    metadata.set("defaultTravelMode", parsed.defaultTravelMode);
+  }, "trip-settings");
+}
+
+function requireReservationSchedule(item: TripItem): TripItem {
+  if (item.type === "reservation" && (!item.dayId || !item.startTime)) {
+    throw new Error("Choose a date and time for this reservation");
+  }
+  return item;
+}
+
 export function addTripItem(document: Y.Doc, item: TripItem, destinationIndex?: number): void {
-  const parsed = tripItemSchema.parse(item);
+  const parsed = requireReservationSchedule(tripItemSchema.parse(item));
   document.transact(() => {
     document.getMap<Y.Map<unknown>>(itemsKey).set(parsed.id, itemToMap(parsed));
     const order = document.getArray<string>(orderKey);
@@ -86,7 +114,7 @@ export function updateTripItem(document: Y.Doc, id: string, patch: Partial<TripI
   const item = items.get(id);
   if (!item) return;
   const current = tripItemSchema.parse(item.toJSON());
-  const next = tripItemSchema.parse({ ...current, ...patch, id });
+  const next = requireReservationSchedule(tripItemSchema.parse({ ...current, ...patch, id }));
   document.transact(() => {
     for (const [key, value] of Object.entries(next)) item.set(key, value);
   }, "update-item");
@@ -127,6 +155,27 @@ export function setTripOrder(document: Y.Doc, ids: string[]): void {
   }, "reorder-item");
 }
 
+export function moveTripItem(
+  document: Y.Doc,
+  id: string,
+  dayId: string | null,
+  startTime: string | null,
+  ids: string[],
+): void {
+  const item = document.getMap<Y.Map<unknown>>(itemsKey).get(id);
+  if (!item) return;
+  const next = requireReservationSchedule(
+    tripItemSchema.parse({ ...item.toJSON(), id, dayId, startTime }),
+  );
+  const order = document.getArray<string>(orderKey);
+  document.transact(() => {
+    item.set("dayId", next.dayId);
+    item.set("startTime", next.startTime);
+    if (order.length > 0) order.delete(0, order.length);
+    if (ids.length > 0) order.insert(0, ids);
+  }, "reorder-item");
+}
+
 export function scheduleTripItem(
   document: Y.Doc,
   id: string,
@@ -135,7 +184,9 @@ export function scheduleTripItem(
 ): void {
   const item = document.getMap<Y.Map<unknown>>(itemsKey).get(id);
   if (!item) return;
-  const next = tripItemSchema.parse({ ...item.toJSON(), id, startTime });
+  const next = requireReservationSchedule(
+    tripItemSchema.parse({ ...item.toJSON(), id, startTime }),
+  );
   const order = document.getArray<string>(orderKey);
   document.transact(() => {
     item.set("startTime", next.startTime);
@@ -150,6 +201,13 @@ export function deleteTripDay(document: Y.Doc, dayId: string): void {
     const current = days.toArray();
     const deletedIndex = current.findIndex((day) => day.id === dayId);
     if (deletedIndex < 0 || current.length === 1) return;
+    const items = document.getMap<Y.Map<unknown>>(itemsKey);
+    const containsReservation = Array.from(items.values()).some(
+      (item) => item.get("type") === "reservation" && item.get("dayId") === dayId,
+    );
+    if (containsReservation) {
+      throw new Error("Move or delete reservations before deleting this day");
+    }
 
     const shiftedIds = new Map<string, string>();
     const remaining = current.flatMap((day, index) => {
@@ -162,21 +220,12 @@ export function deleteTripDay(document: Y.Doc, dayId: string): void {
     days.delete(0, days.length);
     days.insert(0, remaining);
 
-    const items = document.getMap<Y.Map<unknown>>(itemsKey);
     items.forEach((item) => {
       const itemDay = item.get("dayId");
       if (itemDay === dayId) item.set("dayId", null);
       else if (typeof itemDay === "string") {
         const shiftedDay = shiftedIds.get(itemDay);
         if (shiftedDay) item.set("dayId", shiftedDay);
-      }
-
-      const reservation = item.get("reservation") as TripItem["reservation"];
-      if (reservation?.bookingDate && reservation.bookingDate >= dayId) {
-        item.set("reservation", {
-          ...reservation,
-          bookingDate: shiftDate(reservation.bookingDate, -1),
-        });
       }
     });
 

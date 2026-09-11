@@ -7,6 +7,7 @@ import { gfmTaskListItem } from "micromark-extension-gfm-task-list-item";
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import type { Plugin } from "unified";
+import { useTripText } from "~/features/trip/language";
 
 type ParserData = {
   micromarkExtensions?: unknown[];
@@ -43,7 +44,8 @@ const safeSchema = {
 };
 
 export function MarkdownPreview({ source }: { source: string }) {
-  if (!source.trim()) return <p className="markdown-empty">Nothing to preview.</p>;
+  const text = useTripText();
+  if (!source.trim()) return <p className="markdown-empty">{text("nothingToPreview")}</p>;
   return (
     <div className="markdown-preview">
       <ReactMarkdown

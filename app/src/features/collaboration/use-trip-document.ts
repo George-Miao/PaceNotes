@@ -124,6 +124,6 @@ export function useTripDocument(tripId: string) {
 function collaboratorColor(name: string): string {
   let hash = 0;
   for (const character of name) hash = (hash * 31 + character.charCodeAt(0)) | 0;
-  const palette = ["#3e6796", "#397257", "#946c23", "#8b5578", "#536f8a", "#715f43"];
-  return palette[Math.abs(hash) % palette.length] ?? "#3e6796";
+  const palette = ["#007bb8", "#397257", "#946c23", "#8b5578", "#536f8a", "#715f43"];
+  return palette[Math.abs(hash) % palette.length] ?? "#007bb8";
 }

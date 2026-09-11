@@ -1,0 +1,183 @@
+.title {
+  display: flex;
+  flex-wrap: wrap;
+  flex: 1;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 1.5rem;
+  position: relative;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.text {
+  flex: 1 1 0;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.edit {
+  display: inline-grid;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex: 0 0 1.5rem;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-s);
+  color: var(--muted);
+  background: transparent;
+}
+
+.titleTrigger {
+  min-width: 0;
+  flex: 0 1 auto;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: start;
+  cursor: text;
+}
+
+.titleTrigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.edit svg {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.edit:hover {
+  color: var(--ink);
+  background: var(--surface);
+}
+
+.placeActions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--space-1);
+  margin-left: var(--space-2);
+}
+
+.input {
+  width: auto;
+  max-width: 100%;
+  flex: 1 1 8rem;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  height: 1.5rem;
+  padding: 0 var(--space-1);
+  border: var(--line) solid var(--border-strong);
+  border-radius: var(--radius-s);
+  color: var(--ink);
+  background: var(--raised);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.headerActions {
+  display: contents;
+}
+
+.headerAction {
+  height: 2rem;
+  min-height: 2rem;
+  flex: 0 0 2rem;
+}
+
+.titleEditAction {
+  width: 1.5rem;
+  height: 1.5rem;
+  min-height: 1.5rem;
+  flex-basis: 1.5rem;
+  padding: 0;
+}
+
+.titleEditAction svg {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.actionSpacer {
+  min-width: var(--space-2);
+  flex: 1 1 auto;
+}
+
+.placeField {
+  min-width: 0;
+}
+
+.placeField :global(.place-picker) {
+  min-width: 0;
+  gap: var(--space-1);
+}
+
+.placeField :global(.google-place-picker) {
+  display: block;
+  box-sizing: border-box;
+  min-height: 2.25rem;
+  border: var(--line) solid var(--border);
+  border-radius: var(--radius-s);
+  color: var(--ink);
+  background: var(--raised);
+}
+
+.placeField :global(.google-place-picker):hover {
+  border-color: var(--border-strong);
+}
+
+.placeField :global(.google-place-picker):focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.compactPlace {
+  display: contents;
+}
+
+.compactPlacePanel {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  order: 1;
+  flex: 1 0 100%;
+  gap: var(--space-1);
+  padding-top: var(--space-1);
+}
+
+.notesLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.markdownCue {
+  display: block;
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 1rem;
+}
+
+.stayFields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+@media (max-width: 720px) {
+  .stayFields {
+    grid-template-columns: 1fr;
+  }
+}

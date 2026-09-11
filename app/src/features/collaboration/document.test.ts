@@ -5,7 +5,9 @@ import {
   addTripItem,
   deleteTripDay,
   initializeTripDocument,
+  moveTripItem,
   readTripDocument,
+  setTripSettings,
   updateTripItem,
 } from "./document";
 
@@ -29,8 +31,34 @@ function seedDocument(): Y.Doc {
 }
 
 describe("collaboration document", () => {
-  it("returns a loading snapshot for an empty document", () => {
-    expect(readTripDocument(new Y.Doc()).destination).toEqual({ placeId: "" });
+  it("uses default settings for documents without settings metadata", () => {
+    expect(readTripDocument(new Y.Doc())).toMatchObject({
+      destination: { placeId: "" },
+      language: "en",
+      distanceUnit: "metric",
+      defaultTravelMode: "DRIVING",
+    });
+  });
+
+  it("updates all trip settings in one transaction", () => {
+    const document = seedDocument();
+    let transactions = 0;
+    document.on("afterTransaction", (transaction) => {
+      if (transaction.origin === "trip-settings") transactions += 1;
+    });
+
+    setTripSettings(document, {
+      language: "fr",
+      distanceUnit: "imperial",
+      defaultTravelMode: "WALKING",
+    });
+
+    expect(transactions).toBe(1);
+    expect(readTripDocument(document)).toMatchObject({
+      language: "fr",
+      distanceUnit: "imperial",
+      defaultTravelMode: "WALKING",
+    });
   });
 
   it("converges after ten editors add items at the same time", () => {
@@ -78,6 +106,58 @@ describe("collaboration document", () => {
     );
   });
 
+  it("keeps a place when its custom label is cleared and synchronized", () => {
+    const source = seedDocument();
+    const copy = new Y.Doc();
+    addTripItem(
+      source,
+      itemForCreate("place", "2027-01-01", {
+        id: "meeting-point",
+        title: "Meeting point",
+        place: { placeId: "place-2" },
+      }),
+    );
+    updateTripItem(source, "meeting-point", { title: "   " });
+    Y.applyUpdate(copy, Y.encodeStateAsUpdate(source));
+    expect(readTripDocument(copy).items["meeting-point"]).toMatchObject({
+      title: "",
+      dayId: "2027-01-01",
+      place: { placeId: "place-2" },
+    });
+    source.destroy();
+    copy.destroy();
+  });
+
+  it("does not save a reservation without its date and time", () => {
+    const document = seedDocument();
+    const reservation = itemForCreate("reservation", "2027-01-01", {
+      id: "reservation",
+      place: { placeId: "restaurant" },
+      startTime: "19:30",
+      reservation: { provider: "", confirmation: "" },
+    });
+    addTripItem(document, reservation);
+
+    expect(() =>
+      addTripItem(document, { ...reservation, id: "missing-time", startTime: null }),
+    ).toThrow("Choose a date and time");
+    expect(() => updateTripItem(document, reservation.id, { dayId: null })).toThrow(
+      "Choose a date and time",
+    );
+    expect(() => moveTripItem(document, reservation.id, null, null, [reservation.id])).toThrow(
+      "Choose a date and time",
+    );
+    expect(readTripDocument(document).items.reservation).toMatchObject({
+      dayId: "2027-01-01",
+      startTime: "19:30",
+    });
+    expect(() => deleteTripDay(document, "2027-01-01")).toThrow(
+      "Move or delete reservations before deleting this day",
+    );
+    expect(readTripDocument(document).days).toHaveLength(5);
+    document.destroy();
+  });
+
   it("deletes a middle day, shifts later planning days, and preserves lodging dates", () => {
     const document = seedDocument();
     addTripItem(document, itemForCreate("note", "2027-01-03", { id: "deleted-day" }));
@@ -85,13 +165,16 @@ describe("collaboration document", () => {
       document,
       itemForCreate("reservation", "2027-01-04", {
         id: "later",
-        reservation: { provider: "Rail", confirmation: "A1", bookingDate: "2027-01-04" },
+        place: { placeId: "station" },
+        startTime: "12:00",
+        reservation: { provider: "Rail", confirmation: "A1" },
       }),
     );
     addTripItem(
       document,
       itemForCreate("lodging", "2027-01-04", {
         id: "stay",
+        place: { placeId: "hotel" },
         lodging: { startDate: "2027-01-01", endDate: "2027-01-05" },
       }),
     );
@@ -107,7 +190,6 @@ describe("collaboration document", () => {
     expect(snapshot.endDate).toBe("2027-01-04");
     expect(snapshot.items["deleted-day"]?.dayId).toBeNull();
     expect(snapshot.items.later?.dayId).toBe("2027-01-03");
-    expect(snapshot.items.later?.reservation?.bookingDate).toBe("2027-01-03");
     expect(snapshot.items.stay?.lodging).toEqual({
       startDate: "2027-01-01",
       endDate: "2027-01-05",

@@ -1,0 +1,73 @@
+@layer modules {
+  .root {
+    display: inline-flex;
+  }
+
+  .controls {
+    position: relative;
+    width: max-content;
+  }
+
+  .group {
+    display: inline-flex;
+  }
+
+  .place {
+    border-radius: var(--radius-s) 0 0 var(--radius-s);
+  }
+
+  .more {
+    width: 2rem;
+    padding: 0;
+    border-left-color: rgb(255 255 255 / 35%);
+    border-radius: 0 var(--radius-s) var(--radius-s) 0;
+  }
+
+  .more svg {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  .menu {
+    position: absolute;
+    z-index: 7;
+    top: calc(100% + var(--space-1));
+    right: 0;
+    display: grid;
+    min-width: 10rem;
+    margin: 0;
+    overflow: hidden;
+    padding: var(--space-1);
+    border: var(--line) solid var(--border-strong);
+    border-radius: var(--radius-s);
+    background: var(--raised);
+    box-shadow: var(--shadow-panel);
+  }
+
+  .menu button {
+    display: flex;
+    min-height: 2rem;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 0 var(--space-2);
+    border: 0;
+    border-radius: var(--radius-s);
+    color: var(--ink);
+    background: transparent;
+    font: inherit;
+    font-size: 0.75rem;
+    font-weight: 620;
+    text-align: left;
+  }
+
+  .menu button:hover,
+  .menu button:focus-visible {
+    background: var(--muted-surface);
+  }
+
+  .menu svg {
+    width: 1rem;
+    height: 1rem;
+    color: var(--muted);
+  }
+}

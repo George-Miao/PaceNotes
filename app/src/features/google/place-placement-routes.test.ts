@@ -29,12 +29,16 @@ describe("Google placement routes", () => {
       travelMode: "TRANSIT",
     }));
 
-    const travelTimes = await readGooglePlacementTravelTimes(stops, {
-      id: "new",
-      latitude: 35,
-      longitude: 139,
-      travelMode: "TRANSIT",
-    });
+    const travelTimes = await readGooglePlacementTravelTimes(
+      stops,
+      {
+        id: "new",
+        latitude: 35,
+        longitude: 139,
+        travelMode: "TRANSIT",
+      },
+      "en",
+    );
 
     expect(computeRouteMatrix).toHaveBeenCalledTimes(6);
     for (const [request] of computeRouteMatrix.mock.calls) {

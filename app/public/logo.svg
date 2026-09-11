@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 120" role="img" aria-label="PaceNotes">
+  <style>
+    .notes {
+      fill: #24272d;
+    }
+    @media (prefers-color-scheme: dark) {
+      .notes {
+        fill: #f5f7f9;
+      }
+    }
+  </style>
+  <svg x="0" y="8" width="104" height="104" viewBox="0 0 527 527" aria-hidden="true">
+    <defs>
+      <path id="p" d="M43 38h232c86 0 155 68 155 152 0 85-66 153-152 153h-88v136H43Z"/>
+      <path
+        id="route"
+        d="M159 163c36 7 105 23 142 36 15 5 24 12 24 20s-8 15-22 25c-54 38-154 106-219 150-24 17-38 36-41 55H24v-83h19c3-17 16-31 37-44 46-28 110-63 156-89 11-6 16-10 15-16 0-5-5-9-14-13-24-12-54-23-78-30Z"
+      />
+      <mask id="p-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="527" height="527">
+        <rect width="527" height="527" fill="#fff"/>
+        <use href="#route" fill="#000" transform="translate(0 -30)"/>
+      </mask>
+      <linearGradient id="blue" x1="43" y1="38" x2="430" y2="479" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#0094c6"/>
+        <stop offset="1" stop-color="#168ebc"/>
+      </linearGradient>
+    </defs>
+    <g transform="translate(24.5 24.5) scale(.907)">
+      <use href="#p" fill="url(#blue)" mask="url(#p-mask)"/>
+    </g>
+  </svg>
+  <text
+    x="116"
+    y="79"
+    font-family="Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    font-size="56"
+    font-weight="800"
+    letter-spacing="-2"
+  ><tspan fill="#0094c6">Pace</tspan><tspan class="notes">Notes</tspan></text>
+</svg>

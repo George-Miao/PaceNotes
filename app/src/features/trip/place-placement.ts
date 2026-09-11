@@ -9,6 +9,8 @@ export type PlacementTravelTime = {
 
 export type PlacePlacementInput = {
   items: readonly TripItem[];
+  previousBoundary?: TripItem;
+  nextBoundary?: TripItem;
   item: TripItem;
   travelTimes: readonly PlacementTravelTime[];
   date: string;
@@ -21,6 +23,8 @@ export type PlacePlacementInput = {
  */
 export function findBestPlaceInsertion({
   items,
+  previousBoundary,
+  nextBoundary,
   item,
   travelTimes,
   date,
@@ -38,8 +42,16 @@ export function findBestPlaceInsertion({
 
   const candidates = Array.from({ length: items.length + 1 }, (_, index) => {
     const withItem = items.toSpliced(index, 0, item);
-    const schedule = scheduleCost(withItem, index, readMinutes, date, timeZone);
-    const route = routeCost(withItem, index, readMinutes);
+    const schedule = scheduleCost(
+      withItem,
+      index,
+      readMinutes,
+      date,
+      timeZone,
+      previousBoundary,
+      nextBoundary,
+    );
+    const route = routeCost(withItem, index, readMinutes, previousBoundary, nextBoundary);
     return {
       index,
       overflowMinutes: schedule.overflowMinutes,
@@ -49,13 +61,14 @@ export function findBestPlaceInsertion({
       distanceFromAppend: items.length - index,
     };
   });
+  const routingComplete = candidates.every(
+    (candidate) => candidate.routeKnown && candidate.unknownScheduleLegs === 0,
+  );
 
   candidates.sort(
     (left, right) =>
       left.overflowMinutes - right.overflowMinutes ||
-      left.unknownScheduleLegs - right.unknownScheduleLegs ||
-      Number(right.routeKnown) - Number(left.routeKnown) ||
-      left.routeMinutes - right.routeMinutes ||
+      (routingComplete ? left.routeMinutes - right.routeMinutes : 0) ||
       left.distanceFromAppend - right.distanceFromAppend,
   );
   return candidates[0]?.index ?? items.length;
@@ -67,6 +80,8 @@ function scheduleCost(
   readMinutes: (from: TripItem, to: TripItem) => number | null,
   date: string,
   timeZone: string,
+  previousBoundary?: TripItem,
+  nextBoundary?: TripItem,
 ): { overflowMinutes: number; unknownLegs: number } {
   let previousTimedIndex = -1;
   for (let index = itemIndex - 1; index >= 0; index -= 1) {
@@ -93,10 +108,20 @@ function scheduleCost(
     return total + (openItem.startTime ? 0 : openItem.durationMinutes);
   }, 0);
 
+  const previousRouteItem = previousTimed?.place
+    ? previousTimed
+    : previousBoundary?.place
+      ? previousBoundary
+      : undefined;
+  const nextRouteItem = nextTimed?.place
+    ? nextTimed
+    : nextBoundary?.place
+      ? nextBoundary
+      : undefined;
   const routeItems = [
-    ...(previousTimed?.place ? [previousTimed] : []),
+    ...(previousRouteItem ? [previousRouteItem] : []),
     ...openItems.filter((openItem) => openItem.place),
-    ...(nextTimed?.place ? [nextTimed] : []),
+    ...(nextRouteItem ? [nextRouteItem] : []),
   ];
   let unknownLegs = 0;
   for (let index = 1; index < routeItems.length; index += 1) {
@@ -119,14 +144,20 @@ function routeCost(
   items: readonly TripItem[],
   itemIndex: number,
   readMinutes: (from: TripItem, to: TripItem) => number | null,
+  previousBoundary?: TripItem,
+  nextBoundary?: TripItem,
 ): number | null {
   const item = items[itemIndex];
   if (!item) return null;
-  const previous = items
-    .slice(0, itemIndex)
-    .toReversed()
-    .find((candidate) => candidate.place);
-  const next = items.slice(itemIndex + 1).find((candidate) => candidate.place);
+  const previous =
+    items
+      .slice(0, itemIndex)
+      .toReversed()
+      .find((candidate) => candidate.place) ??
+    (previousBoundary?.place ? previousBoundary : undefined);
+  const next =
+    items.slice(itemIndex + 1).find((candidate) => candidate.place) ??
+    (nextBoundary?.place ? nextBoundary : undefined);
 
   let introducedMinutes = 0;
   if (previous) {

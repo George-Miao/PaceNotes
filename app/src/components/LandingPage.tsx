@@ -1,6 +1,7 @@
 import { Icon } from "@iconify/react";
 import arrowIcon from "@iconify-icons/lucide/arrow-right";
 import copyIcon from "@iconify-icons/lucide/copy";
+import githubIcon from "@iconify-icons/lucide/github";
 import mapIcon from "@iconify-icons/lucide/map";
 import routeIcon from "@iconify-icons/lucide/route";
 import sparkIcon from "@iconify-icons/lucide/sparkles";
@@ -9,15 +10,22 @@ import usersIcon from "@iconify-icons/lucide/users";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import type { GooglePlaceSelection } from "~/features/google/google";
+import { useTripTitle } from "~/features/google/use-trip-title";
 import { createTrip, deleteTrip } from "~/features/trip/trip.functions";
+import { Brand } from "./Brand";
 import { DestinationPicker } from "./DestinationPicker";
 
-type RecentTrip = { id: string; title: string; href: string; openedAt: string };
+type RecentTrip = {
+  id: string;
+  title: string;
+  destinationPlaceId?: string;
+  href: string;
+  openedAt: string;
+};
 
 export function LandingPage() {
   const navigate = useNavigate();
   const today = new Date();
-  const [title, setTitle] = useState("");
   const [startDate, setStartDate] = useState(today.toISOString().slice(0, 10));
   const [endDate, setEndDate] = useState(
     new Date(today.getTime() + 4 * 86_400_000).toISOString().slice(0, 10),
@@ -40,7 +48,6 @@ export function LandingPage() {
     try {
       const { id } = await createTrip({
         data: {
-          title,
           startDate,
           endDate,
           destination: destination.reference,
@@ -58,8 +65,8 @@ export function LandingPage() {
     localStorage.setItem("pacenotes-recent-trips", JSON.stringify(next));
     setRecent(next);
   };
-  const remove = async (trip: RecentTrip) => {
-    if (!confirm(`Delete ${trip.title} for everyone?`)) return;
+  const remove = async (trip: RecentTrip, displayTitle: string) => {
+    if (!confirm(`Delete ${displayTitle} for everyone?`)) return;
     await deleteTrip({ data: { id: trip.id } });
     forget(trip.id);
   };
@@ -67,15 +74,16 @@ export function LandingPage() {
   return (
     <main className="landing">
       <header className="site-header">
-        <a className="brand" href="/">
-          PaceNotes
-        </a>
+        <Brand />
         <nav aria-label="Main navigation">
-          <a href="#features">Features</a>
-          <a href="https://github.com/George-Miao/PaceNotes" rel="noreferrer">
-            Source
+          <a
+            className="icon-button"
+            href="https://github.com/George-Miao/PaceNotes"
+            rel="noreferrer"
+            aria-label="GitHub repository"
+          >
+            <Icon icon={githubIcon} />
           </a>
-          <a href="/roadmap">Roadmap</a>
         </nav>
       </header>
       <section className="hero">
@@ -99,16 +107,6 @@ export function LandingPage() {
             <h2>Create a trip</h2>
             <span>No account needed</span>
           </div>
-          <label className="field">
-            <span>Trip title</span>
-            <input
-              required
-              maxLength={200}
-              value={title}
-              placeholder="Japan spring route"
-              onChange={(event) => setTitle(event.target.value)}
-            />
-          </label>
           <div className="date-field-row">
             <label className="field">
               <span>Start date</span>
@@ -138,7 +136,7 @@ export function LandingPage() {
           <button
             type="submit"
             className="primary-button large-button"
-            disabled={creating || !destination || !title.trim()}
+            disabled={creating || !destination}
           >
             {creating ? "Creating trip" : "Create trip"}
             <Icon icon={arrowIcon} />
@@ -158,7 +156,7 @@ export function LandingPage() {
         <article>
           <Icon icon={usersIcon} />
           <h2>Edit together</h2>
-          <p>Shared changes, presence, undo, and clear sync state without an account.</p>
+          <p>Shared changes in real time.</p>
         </article>
         <article>
           <Icon icon={routeIcon} />
@@ -168,34 +166,8 @@ export function LandingPage() {
         <article>
           <Icon icon={sparkIcon} />
           <h2>Stay fast at scale</h2>
-          <p>Built for 30 days, 500 places, and ten active editors on desktop or mobile.</p>
+          <p>Built for all your friends and families.</p>
         </article>
-      </section>
-
-      <section className="product-preview" aria-labelledby="preview-title">
-        <div>
-          <span className="eyebrow">Map-first planning</span>
-          <h2 id="preview-title">Enough detail to act. No dashboard noise.</h2>
-          <p>
-            Compact itinerary cards keep time, place type, route leg, and booking state visible.
-            Rich Google place details load only when you expand an item.
-          </p>
-        </div>
-        <div className="preview-window" aria-hidden="true">
-          <div className="preview-list">
-            <span>Thu 14</span>
-            <strong>Nezu Shrine</strong>
-            <small>09:00 - Bunkyo</small>
-            <i />
-            <strong>Shibuya Sky</strong>
-            <small>12:30 - Confirmed</small>
-          </div>
-          <div className="preview-map">
-            <b>1</b>
-            <b>2</b>
-            <b>3</b>
-          </div>
-        </div>
       </section>
 
       <section className="recent-section" aria-labelledby="recent-title">
@@ -206,36 +178,7 @@ export function LandingPage() {
         {recent.length ? (
           <div className="recent-list">
             {recent.map((trip) => (
-              <article key={trip.id}>
-                <a href={trip.href}>
-                  <strong>{trip.title}</strong>
-                  <span>
-                    Opened{" "}
-                    {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(
-                      new Date(trip.openedAt),
-                    )}
-                  </span>
-                </a>
-                <button
-                  type="button"
-                  className="icon-button"
-                  aria-label={`Copy ${trip.title} link`}
-                  onClick={() => navigator.clipboard.writeText(trip.href)}
-                >
-                  <Icon icon={copyIcon} />
-                </button>
-                <button type="button" className="ghost-button" onClick={() => forget(trip.id)}>
-                  Forget
-                </button>
-                <button
-                  type="button"
-                  className="icon-button danger-icon"
-                  aria-label={`Delete ${trip.title}`}
-                  onClick={() => remove(trip)}
-                >
-                  <Icon icon={trashIcon} />
-                </button>
-              </article>
+              <RecentTripCard key={trip.id} trip={trip} onForget={forget} onDelete={remove} />
             ))}
           </div>
         ) : (
@@ -254,13 +197,56 @@ export function LandingPage() {
           <a href="https://github.com/George-Miao/PaceNotes" rel="noreferrer">
             Source
           </a>
-          <a href="/roadmap">Roadmap</a>
           <a href="/privacy">Privacy</a>
           <a href="/terms">Terms</a>
           <a href="/license">License</a>
         </nav>
       </footer>
     </main>
+  );
+}
+
+function RecentTripCard({
+  trip,
+  onForget,
+  onDelete,
+}: {
+  trip: RecentTrip;
+  onForget: (id: string) => void;
+  onDelete: (trip: RecentTrip, displayTitle: string) => Promise<void>;
+}) {
+  const title = useTripTitle(trip.title, trip.destinationPlaceId ?? "", "en");
+  return (
+    <article>
+      <a href={trip.href}>
+        <strong>{title}</strong>
+        <span>
+          Opened{" "}
+          {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(
+            new Date(trip.openedAt),
+          )}
+        </span>
+      </a>
+      <button
+        type="button"
+        className="icon-button"
+        aria-label={`Copy ${title} link`}
+        onClick={() => navigator.clipboard.writeText(trip.href)}
+      >
+        <Icon icon={copyIcon} />
+      </button>
+      <button type="button" className="ghost-button" onClick={() => onForget(trip.id)}>
+        Forget
+      </button>
+      <button
+        type="button"
+        className="icon-button danger-icon"
+        aria-label={`Delete ${title}`}
+        onClick={() => onDelete(trip, title)}
+      >
+        <Icon icon={trashIcon} />
+      </button>
+    </article>
   );
 }
 

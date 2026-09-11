@@ -1,0 +1,69 @@
+.panel {
+  position: absolute;
+  z-index: 2;
+  right: var(--space-3);
+  bottom: 1.75rem;
+  left: var(--space-3);
+  display: flex;
+  max-height: min(60%, 32rem);
+  flex-direction: column;
+  border: var(--line) solid var(--border-strong);
+  border-radius: var(--radius-m);
+  background: var(--raised);
+  box-shadow: 0 4px 20px rgb(25 30 36 / 20%);
+}
+
+.header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--line) solid var(--border);
+}
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.add {
+  min-height: 2rem;
+  padding-inline: var(--space-3);
+  white-space: nowrap;
+}
+
+.header h2 {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.content {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-radius: 0 0 var(--radius-m) var(--radius-m);
+}
+
+.content :global(.google-place-details) {
+  width: 100%;
+  max-height: none;
+  overflow: visible;
+  border: 0;
+}
+
+.content :global(.place-details-status) {
+  margin: 0;
+  padding: var(--space-4);
+  color: var(--muted);
+}
+
+@media (max-width: 44rem) {
+  .panel {
+    right: var(--space-2);
+    left: var(--space-2);
+    max-height: 65%;
+  }
+}

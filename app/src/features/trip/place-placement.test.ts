@@ -45,6 +45,48 @@ describe("smart place placement", () => {
     expect(insertion(items, candidate, travelTimes)).toBe(1);
   });
 
+  it("places an open stop before the day's destination boundary", () => {
+    const portland = place("portland", "13:00");
+    const ellsworth = place("ellsworth:end");
+    const camden = place("camden");
+    const travelTimes = [
+      leg("camden", "portland", 100),
+      leg("portland", "camden", 105),
+      leg("camden", "ellsworth:end", 60),
+      leg("portland", "ellsworth:end", 145),
+    ];
+    const input = {
+      items: [portland],
+      item: camden,
+      travelTimes,
+      date: day,
+      timeZone: "UTC",
+      nextBoundary: ellsworth,
+    };
+
+    expect(findBestPlaceInsertion(input)).toBe(1);
+  });
+
+  it("does not favor an endpoint while a boundary route is unavailable", () => {
+    const portland = place("portland", "13:00");
+    const ellsworth = place("ellsworth:end");
+    const camden = place("camden");
+    const input = {
+      items: [portland],
+      item: camden,
+      travelTimes: [
+        leg("camden", "portland", 100),
+        leg("portland", "camden", 105),
+        leg("camden", "ellsworth:end", 60),
+      ],
+      date: day,
+      timeZone: "UTC",
+      nextBoundary: ellsworth,
+    };
+
+    expect(findBestPlaceInsertion(input)).toBe(1);
+  });
+
   it("prefers a schedule gap that fits over a cheaper route that does not", () => {
     const items = [place("a", "09:00"), place("b", "10:30"), place("c", "13:00")];
     const candidate = place("new");

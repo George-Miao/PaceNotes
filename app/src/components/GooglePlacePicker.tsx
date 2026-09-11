@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import {
   type GooglePlaceSelection,
   loadPlacesLibrary,
   type PlaceSelectionEvent,
   readGooglePlaceSelection,
 } from "~/features/google/google";
+import { languageTag, useTripLanguage, useTripText } from "~/features/trip/language";
 
 export type GooglePlacePickerProps = {
   label: string;
@@ -14,7 +15,10 @@ export type GooglePlacePickerProps = {
 
 export function GooglePlacePicker({ label, bias, onSelect }: GooglePlacePickerProps) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const language = useTripLanguage();
+  const text = useTripText();
   const [error, setError] = useState<string | null>(null);
+  const selectPlace = useEffectEvent(onSelect);
 
   useEffect(() => {
     let disposed = false;
@@ -22,26 +26,29 @@ export function GooglePlacePicker({ label, bias, onSelect }: GooglePlacePickerPr
 
     const setup = async () => {
       try {
-        const { PlaceAutocompleteElement } = await loadPlacesLibrary();
+        const { PlaceAutocompleteElement } = await loadPlacesLibrary(language);
         if (disposed || !hostRef.current) return;
         element = new PlaceAutocompleteElement();
         element.className = "google-place-picker";
+        element.requestedLanguage = languageTag(language);
         element.setAttribute("aria-label", label);
         if (bias) element.locationBias = { lat: bias.latitude, lng: bias.longitude };
         const handleSelect = async (event: Event) => {
           try {
             const place = (event as PlaceSelectionEvent).placePrediction.toPlace();
-            onSelect(await readGooglePlaceSelection(place));
+            const selection = await readGooglePlaceSelection(place);
+            if (disposed) return;
+            selectPlace(selection);
             setError(null);
           } catch (cause) {
-            setError(cause instanceof Error ? cause.message : "Could not load this Google place");
+            setError(cause instanceof Error ? cause.message : text("couldNotLoadGooglePlace"));
           }
         };
         element.addEventListener("gmp-select", handleSelect);
         hostRef.current.replaceChildren(element);
       } catch (cause) {
         if (!disposed) {
-          setError(cause instanceof Error ? cause.message : "Google Places is unavailable");
+          setError(cause instanceof Error ? cause.message : text("googlePlacesUnavailable"));
         }
       }
     };
@@ -50,7 +57,7 @@ export function GooglePlacePicker({ label, bias, onSelect }: GooglePlacePickerPr
       disposed = true;
       element?.remove();
     };
-  }, [bias, label, onSelect]);
+  }, [bias, label, language, text]);
 
   return (
     <section className="place-picker" aria-label={label}>

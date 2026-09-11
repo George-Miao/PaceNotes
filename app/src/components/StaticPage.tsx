@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Brand } from "./Brand";
 
 export function StaticPage({
   title,
@@ -12,9 +13,7 @@ export function StaticPage({
   return (
     <main className="static-page">
       <header className="site-header">
-        <a className="brand" href="/">
-          PaceNotes
-        </a>
+        <Brand />
         <a href="/">Back to home</a>
       </header>
       <article>
@@ -27,7 +26,6 @@ export function StaticPage({
         <a href="/privacy">Privacy</a>
         <a href="/terms">Terms</a>
         <a href="/license">License</a>
-        <a href="/roadmap">Roadmap</a>
       </footer>
     </main>
   );

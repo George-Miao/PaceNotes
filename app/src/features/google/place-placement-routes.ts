@@ -1,4 +1,5 @@
-import type { TravelMode } from "../trip/model";
+import { languageTag } from "../trip/language";
+import type { TravelMode, TripLanguage } from "../trip/model";
 import type { PlacementTravelTime } from "../trip/place-placement";
 import { loadRoutesLibrary } from "./google";
 
@@ -17,11 +18,12 @@ export type PlacementRouteStop = {
 export async function readGooglePlacementTravelTimes(
   stops: readonly PlacementRouteStop[],
   candidate: PlacementRouteStop,
+  language: TripLanguage,
 ): Promise<PlacementTravelTime[]> {
   if (stops.length === 0) return [];
 
   try {
-    const { RouteMatrix } = await loadRoutesLibrary();
+    const { RouteMatrix } = await loadRoutesLibrary(language);
     const outboundByMode = new Map<TravelMode, PlacementRouteStop[]>();
     for (const stop of stops) {
       const group = outboundByMode.get(stop.travelMode) ?? [];
@@ -30,11 +32,11 @@ export async function readGooglePlacementTravelTimes(
     }
 
     const inboundPromises = chunks(stops, matrixLimit(candidate.travelMode)).map((origins) =>
-      readInbound(RouteMatrix, origins, candidate),
+      readInbound(RouteMatrix, origins, candidate, language),
     );
     const outboundPromises = [...outboundByMode.entries()].flatMap(([mode, destinations]) =>
       chunks(destinations, matrixLimit(mode)).map((batch) =>
-        readOutbound(RouteMatrix, candidate, batch, mode),
+        readOutbound(RouteMatrix, candidate, batch, mode, language),
       ),
     );
     const results = await Promise.all([...inboundPromises, ...outboundPromises]);
@@ -48,12 +50,14 @@ async function readInbound(
   RouteMatrix: typeof google.maps.routes.RouteMatrix,
   origins: readonly PlacementRouteStop[],
   candidate: PlacementRouteStop,
+  language: TripLanguage,
 ): Promise<PlacementTravelTime[]> {
   try {
     const { matrix } = await RouteMatrix.computeRouteMatrix({
       origins: origins.map(locationOf),
       destinations: [locationOf(candidate)],
       travelMode: candidate.travelMode,
+      language: languageTag(language),
       fields: ["durationMillis"],
     });
     return matrix.rows.flatMap((row, index) => {
@@ -73,12 +77,14 @@ async function readOutbound(
   candidate: PlacementRouteStop,
   destinations: readonly PlacementRouteStop[],
   mode: TravelMode,
+  language: TripLanguage,
 ): Promise<PlacementTravelTime[]> {
   try {
     const { matrix } = await RouteMatrix.computeRouteMatrix({
       origins: [locationOf(candidate)],
       destinations: destinations.map(locationOf),
       travelMode: mode,
+      language: languageTag(language),
       fields: ["durationMillis"],
     });
     const items = matrix.rows[0]?.items ?? [];

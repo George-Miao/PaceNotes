@@ -1,0 +1,92 @@
+.heading {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.skeleton {
+  display: block;
+  border-radius: var(--radius-s);
+  background: linear-gradient(
+    100deg,
+    var(--muted-surface) 20%,
+    var(--surface) 40%,
+    var(--muted-surface) 60%
+  );
+  background-size: 220% 100%;
+  animation: editor-skeleton 1.25s ease-in-out infinite;
+}
+
+.title {
+  width: min(12rem, 45%);
+  height: 1rem;
+}
+
+.titleAction {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.spacer {
+  min-width: var(--space-2);
+  flex: 1 1 auto;
+}
+
+.compactPlace {
+  width: min(12rem, 35%);
+  height: 2rem;
+}
+
+.headerAction {
+  width: 2rem;
+  height: 2rem;
+}
+
+.label {
+  width: min(6rem, 45%);
+  height: 0.625rem;
+}
+
+.control {
+  width: 100%;
+  height: 2.25rem;
+}
+
+.textarea {
+  width: 100%;
+  height: 8rem;
+}
+
+.stayFields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+@keyframes editor-skeleton {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -120% 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .compactPlace {
+    width: min(9rem, 35%);
+  }
+
+  .stayFields {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
