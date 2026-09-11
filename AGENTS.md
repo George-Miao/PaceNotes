@@ -9,7 +9,6 @@
 - `app/src/sync/` and `app/server/routes/sync.ts` own Hocuspocus collaboration on the web port.
 - `app/src/db/` and `app/drizzle/` own the PostgreSQL schema and migrations.
 - `app/src/features/google/` owns Google place search, transient place fields, map display, and route computation.
-- `prototype/` contains the approved Compact Precision design work. Do not use it as a second application.
 - `flake.nix` owns development dependencies, the reproducible application build, and the Linux image build.
 - `compose.yaml` runs the web, migration, and PostgreSQL processes on one host.
 
@@ -37,7 +36,7 @@
 ## Interface and design rules
 
 - Use deep modules. Keep Yjs details behind `features/collaboration/document.ts`.
-- Use the Compact Precision direction: small radii, crisp borders, dense neutral surfaces, quiet blue accents, and white text on primary blue controls.
+- Use small radii, crisp borders, dense neutral surfaces, quiet blue accents, and white text on primary blue controls.
 - Light and dark modes follow the system. Keep WCAG 2.2 AA contrast and visible keyboard focus.
 - Desktop uses a resizable itinerary and map split. Mobile uses a draggable bottom sheet. Keep Map, List, and Split modes.
 - Timed itinerary entries show time first, then a type icon, title, optional status, and details. Transport legs are grey and borderless between bordered entry cards.
