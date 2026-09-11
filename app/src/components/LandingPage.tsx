@@ -92,59 +92,82 @@ export function LandingPage() {
           <h1>
             Build the day.
             <br />
-            Keep the map moving.
+            <span>Keep the map moving.</span>
           </h1>
           <p>
             PaceNotes is an open source itinerary planner for people who edit together. Put places,
             reservations, stays, notes, and transport in one fast schedule.
           </p>
-          <a className="text-link" href="#create">
-            Create a trip <Icon icon={arrowIcon} />
+          <a className="text-link" href="https://github.com/George-Miao/PaceNotes" rel="noreferrer">
+            View on GitHub <Icon icon={arrowIcon} />
           </a>
         </div>
-        <form id="create" className="create-card" onSubmit={submit}>
-          <div className="section-heading">
-            <h2>Create a trip</h2>
-            <span>No account needed</span>
-          </div>
-          <div className="date-field-row">
-            <label className="field">
-              <span>Start date</span>
-              <input
-                required
-                type="date"
-                value={startDate}
-                onChange={(event) => {
-                  setStartDate(event.target.value);
-                  if (event.target.value > endDate) setEndDate(event.target.value);
-                }}
-              />
-            </label>
-            <label className="field">
-              <span>End date</span>
-              <input
-                required
-                type="date"
-                min={startDate}
-                value={endDate}
-                onChange={(event) => setEndDate(event.target.value)}
-              />
-            </label>
-          </div>
-          <DestinationPicker label="Where does the trip go?" onSelect={selectDestination} />
-          {error ? <p className="field-error">{error}</p> : null}
-          <button
-            type="submit"
-            className="primary-button large-button"
-            disabled={creating || !destination}
+        <div className="hero-create">
+          <div
+            className="route-preview"
+            role="img"
+            aria-label="Sample route with three planned stops"
           >
-            {creating ? "Creating trip" : "Create trip"}
-            <Icon icon={arrowIcon} />
-          </button>
-          <p className="form-note">
-            Anyone with the random trip URL can view, edit, share, or delete the trip.
-          </p>
-        </form>
+            <svg aria-hidden="true" viewBox="0 0 620 360" preserveAspectRatio="none">
+              <title>Trip route preview</title>
+              <path d="M55 280C145 252 168 93 282 119c104 24 107 154 202 125 53-16 66-84 91-156" />
+            </svg>
+            <span className="preview-stop preview-stop-1">1</span>
+            <span className="preview-stop preview-stop-2">2</span>
+            <span className="preview-stop preview-stop-3">3</span>
+            <div className="preview-leg preview-leg-1">
+              <Icon icon={routeIcon} />
+              <span>18 min</span>
+            </div>
+            <div className="preview-leg preview-leg-2">
+              <Icon icon={mapIcon} />
+              <span>Next stop</span>
+            </div>
+          </div>
+          <form id="create" className="create-card" onSubmit={submit}>
+            <div className="section-heading">
+              <h2>Create a trip</h2>
+              <span>No account needed</span>
+            </div>
+            <div className="date-field-row">
+              <label className="field">
+                <span>Start date</span>
+                <input
+                  required
+                  type="date"
+                  value={startDate}
+                  onChange={(event) => {
+                    setStartDate(event.target.value);
+                    if (event.target.value > endDate) setEndDate(event.target.value);
+                  }}
+                />
+              </label>
+              <label className="field">
+                <span>End date</span>
+                <input
+                  required
+                  type="date"
+                  min={startDate}
+                  value={endDate}
+                  onChange={(event) => setEndDate(event.target.value)}
+                />
+              </label>
+            </div>
+            <DestinationPicker label="Where does the trip go?" onSelect={selectDestination} />
+            {error ? <p className="field-error">{error}</p> : null}
+            <button
+              type="submit"
+              className="primary-button large-button"
+              disabled={creating || !destination}
+            >
+              {creating ? "Creating trip" : "Create trip"}
+              <Icon icon={arrowIcon} />
+            </button>
+            <p className="form-note">
+              Anyone with the random trip URL can view, edit, share, or delete the trip.
+            </p>
+          </form>
+        </div>
       </section>
 
       <section id="features" className="feature-grid" aria-label="Features">
@@ -182,9 +205,11 @@ export function LandingPage() {
             ))}
           </div>
         ) : (
-          <p className="empty-copy">
-            Trips you open appear here. You can also open any shared trip URL directly.
-          </p>
+          <div className="empty-state">
+            <Icon icon={mapIcon} aria-hidden="true" />
+            <strong>No recent trips.</strong>
+            <p>Trips you open appear here. You can also open any shared trip URL directly.</p>
+          </div>
         )}
       </section>
 
