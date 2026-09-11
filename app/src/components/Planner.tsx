@@ -16,7 +16,6 @@ import undoIcon from "@iconify-icons/lucide/undo-2";
 import { Temporal } from "@js-temporal/polyfill";
 import { useNavigate } from "@tanstack/react-router";
 import {
-  type CSSProperties,
   lazy,
   Suspense,
   startTransition,
@@ -28,6 +27,7 @@ import {
 } from "react";
 import {
   addTripItem,
+  applyCalendarItemChange,
   deleteTripDay,
   moveTripItem,
   readTripDocument,
@@ -65,10 +65,12 @@ import {
   type TripDay,
   type TripItem,
   type TripLanguage,
+  type TripSnapshot,
 } from "~/features/trip/model";
 import { findBestPlaceInsertion } from "~/features/trip/place-placement";
 import { deleteTrip } from "~/features/trip/trip.functions";
 import { Brand } from "./Brand";
+import { Calendar } from "./Calendar";
 import { DayAddControl, type DayAddItemType } from "./DayAddControl";
 import { ItemEditorSkeleton } from "./ItemEditorSkeleton";
 import { ItineraryDragArea, type ItineraryDrop, ItineraryList } from "./ItineraryList";
@@ -105,6 +107,7 @@ export function Planner({ tripId }: { tripId: string }) {
     setDisplayNamePrompt,
     saveDisplayName,
   } = useTripDocument(tripId);
+  const [plannerContent, setPlannerContent] = useState<"itinerary" | "calendar">("itinerary");
   const [activeDay, setActiveDay] = useState<string | null>(null);
   const [navigationDay, setNavigationDay] = useState<string | null>(null);
   const [view, setView] = useState<ViewMode>("split");
@@ -159,10 +162,23 @@ export function Planner({ tripId }: { tripId: string }) {
   );
 
   useEffect(() => {
+    const readView = () => {
+      const value = new URLSearchParams(window.location.search).get("view");
+      setPlannerContent(value === "calendar" ? "calendar" : "itinerary");
+    };
+    readView();
+    window.addEventListener("popstate", readView);
+    return () => window.removeEventListener("popstate", readView);
+  }, []);
+
+  useEffect(() => {
     const firstDay = snapshot.days[0]?.id;
     if (!activeDay && firstDay) {
-      mapDestinationDay.current = firstDay;
-      setActiveDay(firstDay);
+      const fragment =
+        typeof window === "undefined" ? "" : decodeURIComponent(window.location.hash.slice(1));
+      const initial = snapshot.days.some((day) => day.id === fragment) ? fragment : firstDay;
+      mapDestinationDay.current = initial;
+      setActiveDay(initial);
     }
   }, [activeDay, snapshot.days]);
 
@@ -349,6 +365,7 @@ export function Planner({ tripId }: { tripId: string }) {
   const stops = useStableArray(nextStops, sameMapStop);
   const routeData = useMemo(() => {
     const exportStops = new Map<string, MapStop[]>();
+    const predecessorDayIds = new Set<string>();
     const plans = dayPlans.map((plan, dayIndex) => {
       const ownedEntries = [
         ...plan.start.map((item) => ({ item, key: `${item.id}:start` })),
@@ -381,6 +398,8 @@ export function Planner({ tripId }: { tripId: string }) {
           }
         }
       }
+      if (ownedStops.length === 0) predecessor = null;
+      if (predecessor) predecessorDayIds.add(plan.day.id);
       return {
         id: plan.day.id,
         stops: predecessor
@@ -395,7 +414,7 @@ export function Planner({ tripId }: { tripId: string }) {
           : ownedStops,
       };
     });
-    return { plans, exportStops };
+    return { plans, exportStops, predecessorDayIds };
   }, [dayPlans, placeViews, snapshot.days, snapshot.language, snapshot.timeZone]);
   const routeLegs = useRouteLegs(routeData.plans, snapshot.language);
   const legs = routeLegs.get(activeRouteDay ?? "") ?? emptyLegs;
@@ -426,6 +445,20 @@ export function Planner({ tripId }: { tripId: string }) {
       to: item.transport?.to ? (placeViews.get(item.transport.to.placeId) ?? null) : null,
     }));
   }, [orderedItems, placeViews, snapshot.days]);
+  const changePlannerContent = (content: "itinerary" | "calendar") => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", content);
+    window.history.replaceState(window.history.state, "", url);
+    setPlannerContent(content);
+  };
+  const selectCalendarDay = (id: string) => {
+    setNavigationDay(null);
+    setActiveDay(id);
+    mapDestinationDay.current = id;
+    const url = new URL(window.location.href);
+    url.hash = id;
+    window.history.replaceState(window.history.state, "", url);
+  };
   const transports = useStableArray(nextTransports, sameMapTransport);
 
   if (!snapshot.id) {
@@ -712,6 +745,64 @@ export function Planner({ tripId }: { tripId: string }) {
       next,
     );
   };
+  const changeCalendarItem = (change: {
+    item: TripItem;
+    dayId: string;
+    startTime: string;
+    durationMinutes: number;
+    extendThrough?: string;
+  }) => {
+    const nextItem = {
+      ...change.item,
+      dayId: change.dayId,
+      startTime: change.startTime,
+      durationMinutes: change.durationMinutes,
+    };
+    const result = applyCalendarItemChange(document, {
+      id: change.item.id,
+      patch: {
+        dayId: change.dayId,
+        startTime: change.startTime,
+        durationMinutes: change.durationMinutes,
+      },
+      order: calendarOrder(snapshot, nextItem),
+      ...(change.extendThrough ? { extendThrough: change.extendThrough } : {}),
+    });
+    selectCalendarDay(change.dayId);
+    return { clamped: result.clamped };
+  };
+  const moveCalendarNote = (noteId: string, dayId: string, afterItemId: string | null) => {
+    const note = snapshot.items[noteId];
+    if (note?.type !== "note") return;
+    const next = snapshot.order.filter((id) => id !== noteId);
+    const firstDayIndex = next.findIndex((id) => snapshot.items[id]?.dayId === dayId);
+    const insertion = afterItemId
+      ? next.indexOf(afterItemId) + 1
+      : firstDayIndex >= 0
+        ? firstDayIndex
+        : next.length;
+    next.splice(insertion, 0, noteId);
+    applyCalendarItemChange(document, {
+      id: noteId,
+      patch: { dayId, startTime: null, durationMinutes: 0 },
+      order: next,
+    });
+    selectCalendarDay(dayId);
+  };
+  const changeCalendarLodging = (item: TripItem, startDate: string, endDate: string) => {
+    const result = applyCalendarItemChange(document, {
+      id: item.id,
+      patch: {
+        dayId: startDate,
+        startTime: null,
+        lodging: { startDate, endDate },
+      },
+      extendThrough: endDate,
+    });
+    selectCalendarDay(startDate);
+    return result;
+  };
+
   const moveVisible = (id: string, delta: -1 | 1, visible: TripItem[]) => {
     const source = visible.findIndex((item) => item.id === id);
     const destination = source + delta;
@@ -1072,6 +1163,25 @@ export function Planner({ tripId }: { tripId: string }) {
               <Icon icon={mapPinIcon} />
             </button>
           </nav>
+          <fieldset className="content-tabs">
+            <legend>Planner content</legend>
+            <button
+              type="button"
+              aria-pressed={plannerContent === "itinerary"}
+              onClick={() => changePlannerContent("itinerary")}
+            >
+              <Icon icon={listIcon} />
+              Itinerary
+            </button>
+            <button
+              type="button"
+              aria-pressed={plannerContent === "calendar"}
+              onClick={() => changePlannerContent("calendar")}
+            >
+              <Icon icon={calendarIcon} />
+              Calendar
+            </button>
+          </fieldset>
           <fieldset className="view-tabs">
             <legend>{text("plannerView")}</legend>
             <button
@@ -1124,293 +1234,321 @@ export function Planner({ tripId }: { tripId: string }) {
             <div className="mobile-sheet-handle" onPointerDown={resizeSheet}>
               <span />
             </div>
-            <ItineraryDragArea onDrop={applyDayDrop}>
-              <div className="planner-days">
-                {dayPlans.map((plan, dayIndex) => {
-                  const dateLabel = longDate(plan.day.date, snapshot.language);
-                  const editing = selected && selected.dayId !== null && editorDay === plan.day.id;
-                  const rendered =
-                    visibleDays.has(plan.day.id) || plan.day.id === currentDay || Boolean(editing);
-                  const count = plan.items.length + plan.start.length + plan.end.length;
-                  const itemCount =
-                    plan.items.length +
-                    new Set([...plan.start, ...plan.end].map((item) => item.id)).size;
-                  const dayOrder = rendered
-                    ? [
-                        ...plan.start.map((item) => `${item.id}:start`),
-                        ...plan.items.map((item) => item.id),
-                        ...plan.end.map((item) => `${item.id}:end`),
-                      ]
-                    : [];
-                  const layout = `${count}:${editing ? selected.id : ""}:${
-                    creation?.dayId === plan.day.id ? creation.type : ""
-                  }`;
-                  const measured = dayHeights.current.get(plan.day.id);
-                  const height =
-                    measured?.layout === layout
-                      ? `${measured.height}px`
-                      : `${4.5 + 4 * count + (count ? 0 : 2)}rem`;
-                  const dayLegs = routeLegs.get(plan.day.id) ?? emptyLegs;
-                  const ownedRouteIds = new Set([
-                    ...plan.start.map((item) => `${item.id}:start`),
-                    ...plan.items.map((item) => item.id),
-                    ...plan.end.map((item) => `${item.id}:end`),
-                  ]);
-                  const incomingConnected = dayLegs.some(
-                    (leg) => !ownedRouteIds.has(leg.fromId) && ownedRouteIds.has(leg.toId),
-                  );
-                  const dayRoute = buildDayRouteExport(
-                    routeData.exportStops.get(plan.day.id) ?? emptyStops,
-                    dayLegs,
-                  );
-                  const warnings =
-                    plan.day.id === activeRouteDay
-                      ? itemWarnings
-                      : rendered
-                        ? buildScheduleWarnings(
-                            plan.items,
-                            dayLegs,
-                            plan.day.date,
-                            snapshot.timeZone,
-                            snapshot.language,
-                          )
-                        : noWarnings;
-                  return (
-                    <section
-                      key={plan.day.id}
-                      id={`day-${plan.day.id}`}
-                      data-day-id={plan.day.id}
-                      data-rendered={rendered}
-                      data-layout={layout}
-                      className="day-section"
-                      style={
-                        {
+            {plannerContent === "calendar" ? (
+              <Calendar
+                days={snapshot.days}
+                orderedItems={orderedItems}
+                legsByDay={routeLegs}
+                places={placeViews}
+                language={snapshot.language}
+                selectedId={selectedId}
+                onSelect={(item) => selectItem(item.id, item.dayId ?? undefined)}
+                onSelectDay={selectCalendarDay}
+                onChangeItem={changeCalendarItem}
+                onMoveNote={moveCalendarNote}
+                onChangeLodging={changeCalendarLodging}
+              />
+            ) : null}
+            <div className={plannerContent === "calendar" ? "calendar-mobile-itinerary" : ""}>
+              <ItineraryDragArea onDrop={applyDayDrop}>
+                <div className="planner-days">
+                  {dayPlans.map((plan, dayIndex) => {
+                    const dateLabel = longDate(plan.day.date, snapshot.language);
+                    const editing =
+                      selected && selected.dayId !== null && editorDay === plan.day.id;
+                    const rendered =
+                      visibleDays.has(plan.day.id) ||
+                      plan.day.id === currentDay ||
+                      Boolean(editing);
+                    const count = plan.items.length + plan.start.length + plan.end.length;
+                    const itemCount =
+                      plan.items.length +
+                      new Set([...plan.start, ...plan.end].map((item) => item.id)).size;
+                    const dayOrder = rendered
+                      ? [
+                          ...plan.start.map((item) => `${item.id}:start`),
+                          ...plan.items.map((item) => item.id),
+                          ...plan.end.map((item) => `${item.id}:end`),
+                        ]
+                      : [];
+                    const layout = `${count}:${editing ? selected.id : ""}:${
+                      creation?.dayId === plan.day.id ? creation.type : ""
+                    }`;
+                    const measured = dayHeights.current.get(plan.day.id);
+                    const height =
+                      measured?.layout === layout
+                        ? `${measured.height}px`
+                        : `${4.5 + 4 * count + (count ? 0 : 2)}rem`;
+                    const dayLegs = routeLegs.get(plan.day.id) ?? emptyLegs;
+                    const ownedRouteIds = new Set([
+                      ...plan.start.map((item) => `${item.id}:start`),
+                      ...plan.items.map((item) => item.id),
+                      ...plan.end.map((item) => `${item.id}:end`),
+                    ]);
+                    const firstItem = plan.items[0];
+                    const firstEnd = plan.end[0];
+                    const firstVisibleRouteId =
+                      firstItem?.id ?? (firstEnd ? `${firstEnd.id}:end` : null);
+                    const hasLeadingTransportLeg =
+                      firstVisibleRouteId !== null &&
+                      dayLegs.some(
+                        (leg) => leg.toId === firstVisibleRouteId && !ownedRouteIds.has(leg.fromId),
+                      );
+                    const dayRoute = buildDayRouteExport(
+                      routeData.exportStops.get(plan.day.id) ?? emptyStops,
+                      dayLegs,
+                    );
+                    const warnings =
+                      plan.day.id === activeRouteDay
+                        ? itemWarnings
+                        : rendered
+                          ? buildScheduleWarnings(
+                              plan.items,
+                              dayLegs,
+                              plan.day.date,
+                              snapshot.timeZone,
+                              snapshot.language,
+                            )
+                          : noWarnings;
+                    return (
+                      <section
+                        key={plan.day.id}
+                        id={`day-${plan.day.id}`}
+                        data-day-id={plan.day.id}
+                        data-rendered={rendered}
+                        data-layout={layout}
+                        className="day-section"
+                        style={{
                           minHeight: rendered ? undefined : height,
-                          "--day-color": dayColor(dayIndex).background,
-                        } as CSSProperties
-                      }
-                      aria-label={dateLabel}
-                    >
-                      <header className="day-heading">
-                        <h2>
-                          <i className="day-color-dot" aria-hidden="true" />
-                          <span>{dateLabel}</span>
-                          {dayIndex < dayPlans.length - 1 && plan.end.length === 0 ? (
-                            <small className="missing-lodging">
-                              <Icon
-                                className="missing-lodging-icon"
-                                icon={triangleAlertIcon}
-                                aria-hidden="true"
-                              />
-                              {text("noLodging")}
-                            </small>
-                          ) : null}
-                        </h2>
-                        <div className="day-actions">
-                          <b>{itemCount}</b>
-                          {dayRoute.url ? (
-                            <a
-                              className="icon-button day-route-export"
-                              href={dayRoute.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              aria-label={text("openDayGoogleMaps")}
-                            >
-                              <Icon icon={routeIcon} />
-                            </a>
-                          ) : (
+                        }}
+                        aria-label={dateLabel}
+                      >
+                        <header className="day-heading">
+                          <h2>
+                            <span>{dateLabel}</span>
+                            {dayIndex < dayPlans.length - 1 && plan.end.length === 0 ? (
+                              <small className="missing-lodging">
+                                <Icon
+                                  className="missing-lodging-icon"
+                                  icon={triangleAlertIcon}
+                                  aria-hidden="true"
+                                />
+                                {text("noLodging")}
+                              </small>
+                            ) : null}
+                          </h2>
+                          <div className="day-actions">
+                            <b>{itemCount}</b>
+                            {dayRoute.url ? (
+                              <a
+                                className="icon-button day-route-export"
+                                href={dayRoute.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                aria-label={text("openDayGoogleMaps")}
+                              >
+                                <Icon icon={routeIcon} />
+                              </a>
+                            ) : (
+                              <button
+                                type="button"
+                                className="icon-button day-route-export"
+                                aria-disabled="true"
+                                aria-label={dayRouteDisabledText(
+                                  snapshot.language,
+                                  dayRoute.reason ?? "routes-unavailable",
+                                )}
+                              >
+                                <Icon icon={routeIcon} />
+                              </button>
+                            )}
                             <button
                               type="button"
-                              className="icon-button day-route-export"
-                              aria-disabled="true"
-                              aria-label={dayRouteDisabledText(
-                                snapshot.language,
-                                dayRoute.reason ?? "routes-unavailable",
-                              )}
+                              className="icon-button danger-icon"
+                              aria-label={text("deleteDay", { date: dateLabel })}
+                              disabled={snapshot.days.length <= 1}
+                              onClick={() => removeDay(plan.day.id, itemCount)}
                             >
-                              <Icon icon={routeIcon} />
+                              <Icon icon={calendarDeleteIcon} />
                             </button>
-                          )}
-                          <button
-                            type="button"
-                            className="icon-button danger-icon"
-                            aria-label={text("deleteDay", { date: dateLabel })}
-                            disabled={snapshot.days.length <= 1}
-                            onClick={() => removeDay(plan.day.id, itemCount)}
-                          >
-                            <Icon icon={calendarDeleteIcon} />
-                          </button>
-                          <DayAddControl
-                            dayId={plan.day.id}
-                            dayLabel={dateLabel}
-                            menuOpen={addMenuDay === plan.day.id}
-                            onMenuOpenChange={(open) => {
-                              setAddMenuDay(open ? plan.day.id : null);
-                              if (open) cancelCreation();
-                            }}
-                            onPlace={() => beginPlace("place", plan.day.id)}
-                            onAdd={(type) => addDayItem(type, plan.day.id)}
-                          />
-                        </div>
-                      </header>
-                      {creation?.dayId === plan.day.id ? (
-                        <PlaceSearch
-                          title={
-                            creation.type === "place"
-                              ? text("addPlace")
-                              : creation.type === "reservation"
-                                ? text("addReservation")
-                                : text("addLodging")
-                          }
-                          bias={placeViews.get(snapshot.destination.placeId)}
-                          onAdd={addPlace}
-                          {...(creation.type === "reservation"
-                            ? {
-                                schedule: {
-                                  type: "reservation" as const,
-                                  date: plan.day.date,
-                                  startTime: creation.startTime,
-                                  onStartTimeChange: (startTime: string) =>
-                                    setCreation((current) =>
-                                      current?.token === creation.token
-                                        ? { ...current, startTime }
-                                        : current,
-                                    ),
-                                },
-                              }
-                            : creation.type === "lodging"
+                            <DayAddControl
+                              dayId={plan.day.id}
+                              dayLabel={dateLabel}
+                              menuOpen={addMenuDay === plan.day.id}
+                              onMenuOpenChange={(open) => {
+                                setAddMenuDay(open ? plan.day.id : null);
+                                if (open) cancelCreation();
+                              }}
+                              onPlace={() => beginPlace("place", plan.day.id)}
+                              onAdd={(type) => addDayItem(type, plan.day.id)}
+                            />
+                          </div>
+                        </header>
+                        {creation?.dayId === plan.day.id ? (
+                          <PlaceSearch
+                            title={
+                              creation.type === "place"
+                                ? text("addPlace")
+                                : creation.type === "reservation"
+                                  ? text("addReservation")
+                                  : text("addLodging")
+                            }
+                            bias={placeViews.get(snapshot.destination.placeId)}
+                            onAdd={addPlace}
+                            {...(creation.type === "reservation"
                               ? {
                                   schedule: {
-                                    type: "lodging" as const,
-                                    checkInDate: creation.checkInDate,
-                                    checkOutDate: creation.checkOutDate,
-                                    onCheckInDateChange: (checkInDate: string) =>
-                                      setCreation((current) => {
-                                        if (current?.token !== creation.token) return current;
-                                        const checkOutDate =
-                                          checkInDate && current.checkOutDate <= checkInDate
-                                            ? Temporal.PlainDate.from(checkInDate)
-                                                .add({ days: 1 })
-                                                .toString()
-                                            : current.checkOutDate;
-                                        return { ...current, checkInDate, checkOutDate };
-                                      }),
-                                    onCheckOutDateChange: (checkOutDate: string) =>
+                                    type: "reservation" as const,
+                                    date: plan.day.date,
+                                    startTime: creation.startTime,
+                                    onStartTimeChange: (startTime: string) =>
                                       setCreation((current) =>
                                         current?.token === creation.token
-                                          ? { ...current, checkOutDate }
+                                          ? { ...current, startTime }
                                           : current,
                                       ),
                                   },
                                 }
-                              : {})}
-                        />
-                      ) : null}
-                      {rendered ? (
-                        <>
-                          <ItineraryList
-                            droppableId={`day:${plan.day.id}:start`}
-                            boundary="start"
-                            connectedEndpoint={
-                              dayIndex > 0 && incomingConnected && plan.start.length === 0
-                            }
-                            items={plan.start}
-                            order={dayOrder}
-                            places={placeViews}
-                            legs={dayLegs}
-                            distanceUnit={snapshot.distanceUnit}
-                            warnings={noWarnings}
-                            selectedId={selectedId}
-                            onSelect={(id) => selectItem(id, plan.day.id, "start")}
-                            renderAfter={(item) => renderEditorAfter(item, plan.day.id, "start")}
-                            onDelete={removeItem}
-                            onTravelMode={(id, travelMode) =>
-                              updateTripItem(document, id, { travelMode })
-                            }
+                              : creation.type === "lodging"
+                                ? {
+                                    schedule: {
+                                      type: "lodging" as const,
+                                      checkInDate: creation.checkInDate,
+                                      checkOutDate: creation.checkOutDate,
+                                      onCheckInDateChange: (checkInDate: string) =>
+                                        setCreation((current) => {
+                                          if (current?.token !== creation.token) return current;
+                                          const checkOutDate =
+                                            checkInDate && current.checkOutDate <= checkInDate
+                                              ? Temporal.PlainDate.from(checkInDate)
+                                                  .add({ days: 1 })
+                                                  .toString()
+                                              : current.checkOutDate;
+                                          return { ...current, checkInDate, checkOutDate };
+                                        }),
+                                      onCheckOutDateChange: (checkOutDate: string) =>
+                                        setCreation((current) =>
+                                          current?.token === creation.token
+                                            ? { ...current, checkOutDate }
+                                            : current,
+                                        ),
+                                    },
+                                  }
+                                : {})}
                           />
-                          <ItineraryList
-                            droppableId={`day:${plan.day.id}`}
-                            items={plan.items}
-                            order={dayOrder}
-                            places={placeViews}
-                            legs={dayLegs}
-                            warnings={warnings}
-                            distanceUnit={snapshot.distanceUnit}
-                            selectedId={selectedId}
-                            onSelect={(id) => selectItem(id, plan.day.id)}
-                            renderAfter={(item) => renderEditorAfter(item, plan.day.id)}
-                            onDelete={removeItem}
-                            onMove={(id, delta) => moveVisible(id, delta, plan.items)}
-                            empty={
-                              count === 0 ? (
-                                <div
-                                  className="day-empty"
-                                  role="img"
-                                  aria-label={text("noItems")}
-                                  title={text("noItems")}
-                                >
-                                  <Icon icon={calendarIcon} aria-hidden="true" />
-                                </div>
-                              ) : (
-                                <div className="day-drop-target" />
-                              )
-                            }
-                            onTravelMode={(id, travelMode) =>
-                              updateTripItem(document, id, { travelMode })
-                            }
-                          />
-                          <ItineraryList
-                            droppableId={`day:${plan.day.id}:end`}
-                            boundary="end"
-                            items={plan.end}
-                            places={placeViews}
-                            order={dayOrder}
-                            legs={dayLegs}
-                            distanceUnit={snapshot.distanceUnit}
-                            warnings={noWarnings}
-                            selectedId={selectedId}
-                            onSelect={(id) => selectItem(id, plan.day.id, "end")}
-                            renderAfter={(item) => renderEditorAfter(item, plan.day.id, "end")}
-                            onDelete={removeItem}
-                            onTravelMode={(id, travelMode) =>
-                              updateTripItem(document, id, { travelMode })
-                            }
-                          />
-                        </>
-                      ) : null}
-                    </section>
-                  );
-                })}
-              </div>
-              <section id="places-to-visit" ref={inboxRef} className="inbox-section">
-                <button
-                  type="button"
-                  className="inbox-heading"
-                  onClick={() => setInboxOpen((value) => !value)}
-                  aria-expanded={inboxOpen}
-                >
-                  <span>{text("placesToVisit")}</span>
-                  <b>{inboxItems.length}</b>
-                </button>
-                {inboxOpen ? (
-                  <ItineraryList
-                    droppableId="inbox"
-                    items={inboxItems}
-                    places={placeViews}
-                    legs={[]}
-                    distanceUnit={snapshot.distanceUnit}
-                    warnings={noWarnings}
-                    selectedId={selectedId}
-                    onSelect={selectItem}
-                    renderAfter={(item) => renderEditorAfter(item, null)}
-                    onDelete={removeItem}
-                    empty={<div className="day-drop-target" />}
-                    onMove={(id, delta) => moveVisible(id, delta, inboxItems)}
-                    onTravelMode={(id, travelMode) => updateTripItem(document, id, { travelMode })}
-                  />
-                ) : null}
-              </section>
-            </ItineraryDragArea>
+                        ) : null}
+                        {rendered ? (
+                          <>
+                            <ItineraryList
+                              droppableId={`day:${plan.day.id}:start`}
+                              boundary="start"
+                              endpointMode={
+                                routeData.predecessorDayIds.has(plan.day.id)
+                                  ? hasLeadingTransportLeg
+                                    ? "transport"
+                                    : "loose"
+                                  : null
+                              }
+                              items={plan.start}
+                              order={dayOrder}
+                              places={placeViews}
+                              legs={dayLegs}
+                              distanceUnit={snapshot.distanceUnit}
+                              warnings={noWarnings}
+                              selectedId={selectedId}
+                              onSelect={(id) => selectItem(id, plan.day.id, "start")}
+                              renderAfter={(item) => renderEditorAfter(item, plan.day.id, "start")}
+                              onDelete={removeItem}
+                              onTravelMode={(id, travelMode) =>
+                                updateTripItem(document, id, { travelMode })
+                              }
+                            />
+                            <ItineraryList
+                              droppableId={`day:${plan.day.id}`}
+                              items={plan.items}
+                              order={dayOrder}
+                              places={placeViews}
+                              legs={dayLegs}
+                              warnings={warnings}
+                              distanceUnit={snapshot.distanceUnit}
+                              selectedId={selectedId}
+                              onSelect={(id) => selectItem(id, plan.day.id)}
+                              renderAfter={(item) => renderEditorAfter(item, plan.day.id)}
+                              onDelete={removeItem}
+                              onMove={(id, delta) => moveVisible(id, delta, plan.items)}
+                              empty={
+                                count === 0 ? (
+                                  <div
+                                    className="day-empty"
+                                    role="img"
+                                    aria-label={text("noItems")}
+                                    title={text("noItems")}
+                                  >
+                                    <Icon icon={calendarIcon} aria-hidden="true" />
+                                  </div>
+                                ) : (
+                                  <div className="day-drop-target" />
+                                )
+                              }
+                              onTravelMode={(id, travelMode) =>
+                                updateTripItem(document, id, { travelMode })
+                              }
+                            />
+                            <ItineraryList
+                              droppableId={`day:${plan.day.id}:end`}
+                              boundary="end"
+                              items={plan.end}
+                              places={placeViews}
+                              order={dayOrder}
+                              legs={dayLegs}
+                              distanceUnit={snapshot.distanceUnit}
+                              warnings={noWarnings}
+                              selectedId={selectedId}
+                              onSelect={(id) => selectItem(id, plan.day.id, "end")}
+                              renderAfter={(item) => renderEditorAfter(item, plan.day.id, "end")}
+                              onDelete={removeItem}
+                              onTravelMode={(id, travelMode) =>
+                                updateTripItem(document, id, { travelMode })
+                              }
+                            />
+                          </>
+                        ) : null}
+                      </section>
+                    );
+                  })}
+                </div>
+                <section id="places-to-visit" ref={inboxRef} className="inbox-section">
+                  <button
+                    type="button"
+                    className="inbox-heading"
+                    onClick={() => setInboxOpen((value) => !value)}
+                    aria-expanded={inboxOpen}
+                  >
+                    <span>{text("placesToVisit")}</span>
+                    <b>{inboxItems.length}</b>
+                  </button>
+                  {inboxOpen ? (
+                    <ItineraryList
+                      droppableId="inbox"
+                      items={inboxItems}
+                      places={placeViews}
+                      legs={[]}
+                      distanceUnit={snapshot.distanceUnit}
+                      warnings={noWarnings}
+                      selectedId={selectedId}
+                      onSelect={selectItem}
+                      renderAfter={(item) => renderEditorAfter(item, null)}
+                      onDelete={removeItem}
+                      empty={<div className="day-drop-target" />}
+                      onMove={(id, delta) => moveVisible(id, delta, inboxItems)}
+                      onTravelMode={(id, travelMode) =>
+                        updateTripItem(document, id, { travelMode })
+                      }
+                    />
+                  ) : null}
+                </section>
+              </ItineraryDragArea>
+            </div>
           </section>
           <PanelResizer
             plannerRef={plannerRef}
@@ -1984,6 +2122,7 @@ function buildScheduleWarnings(
 function timeForPosition(items: TripItem[], position: number): string {
   const moved = items[position];
   if (!moved?.startTime) return "12:00";
+
   const previous = items
     .slice(0, position)
     .toReversed()
@@ -2001,6 +2140,31 @@ function timeForPosition(items: TripItem[], position: number): string {
     return formatTime(nextMinute - Math.max(1, moved.durationMinutes ?? 1));
   }
   return moved.startTime;
+}
+function calendarOrder(snapshot: TripSnapshot, changed: TripItem): string[] {
+  const next = snapshot.order.filter((id) => id !== changed.id);
+  const sameDay = next.filter((id) => snapshot.items[id]?.dayId === changed.dayId);
+  const changedMinute = changed.startTime
+    ? Number(changed.startTime.slice(0, 2)) * 60 + Number(changed.startTime.slice(3))
+    : Number.POSITIVE_INFINITY;
+  const before = sameDay.find((id) => {
+    const item = snapshot.items[id];
+    if (!item?.startTime) return false;
+    const minute = Number(item.startTime.slice(0, 2)) * 60 + Number(item.startTime.slice(3));
+    return minute > changedMinute;
+  });
+  const last = sameDay.at(-1);
+  const insertion = before
+    ? next.indexOf(before)
+    : last
+      ? next.indexOf(last) + 1
+      : next.findIndex((id) => {
+          const item = snapshot.items[id];
+          if (!item?.dayId || !changed.dayId) return false;
+          return item.dayId > changed.dayId;
+        });
+  next.splice(insertion < 0 ? next.length : insertion, 0, changed.id);
+  return next;
 }
 
 function parseTime(time: string): number {

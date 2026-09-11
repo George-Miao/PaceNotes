@@ -105,11 +105,7 @@ describe("smart place placement", () => {
   });
 
   it("counts existing open-item durations when checking a schedule gap", () => {
-    const items = [
-      place("a", "09:00"),
-      itemForCreate("note", day, { id: "museum-notes", durationMinutes: 60 }),
-      place("b", "11:00"),
-    ];
+    const items = [place("a", "09:00"), place("museum-stop", null, 60), place("b", "11:00")];
     const candidate = place("new");
     const travelTimes = [
       leg("new", "a", 100),
@@ -124,11 +120,7 @@ describe("smart place placement", () => {
 
   it("uses elapsed time across a daylight-saving clock change", () => {
     const transitionDay = "2027-03-14";
-    const items = [
-      place("a", "01:00"),
-      itemForCreate("note", transitionDay, { id: "open-stop", durationMinutes: 60 }),
-      place("b", "04:00"),
-    ];
+    const items = [place("a", "01:00"), place("open-stop", null, 60), place("b", "04:00")];
     const candidate = itemForCreate("place", transitionDay, {
       ...place("new"),
       dayId: transitionDay,

@@ -97,7 +97,7 @@ export function ItineraryList({
   items,
   droppableId,
   boundary,
-  connectedEndpoint = false,
+  endpointMode = null,
   order,
   places,
   legs,
@@ -115,7 +115,7 @@ export function ItineraryList({
   droppableId: string;
   order?: readonly string[];
   boundary?: "start" | "end";
-  connectedEndpoint?: boolean;
+  endpointMode?: "transport" | "loose" | null;
   places: ReadonlyMap<string, GooglePlaceView>;
   legs: RouteLeg[];
   distanceUnit: DistanceUnit;
@@ -131,9 +131,9 @@ export function ItineraryList({
   const language = useTripLanguage();
   const text = useTripText();
   const endpoint =
-    boundary && connectedEndpoint ? (
+    boundary && endpointMode ? (
       <div
-        className={`route-endpoint route-endpoint-${boundary} route-endpoint-connected`}
+        className={`route-endpoint route-endpoint-${boundary} route-endpoint-${endpointMode}`}
         aria-hidden="true"
       >
         <i className="route-endpoint-rail" />

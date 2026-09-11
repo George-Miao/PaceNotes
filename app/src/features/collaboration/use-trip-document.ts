@@ -1,7 +1,7 @@
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import * as Y from "yjs";
-import { readTripDocument } from "./document";
+import { normalizeTripDocument, readTripDocument } from "./document";
 
 export type SyncState = "connecting" | "synced" | "unsynced" | "offline";
 export type Collaborator = { clientId: number; name: string; color: string };
@@ -13,6 +13,7 @@ const trackedOrigins = new Set([
   "delete-item",
   "reorder-item",
   "delete-day",
+  "calendar-item",
 ]);
 
 export function useTripDocument(tripId: string) {
@@ -60,7 +61,10 @@ export function useTripDocument(tripId: string) {
         status === "connected" ? "unsynced" : status === "connecting" ? "connecting" : "offline",
       );
     });
-    provider.on("synced", () => setSyncState("synced"));
+    provider.on("synced", () => {
+      normalizeTripDocument(document);
+      setSyncState("synced");
+    });
     document.on("update", (_update, origin) => {
       if (origin !== provider) setSyncState("unsynced");
     });

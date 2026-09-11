@@ -165,7 +165,10 @@ export const tripItemSchema = z
   .refine((item) => item.transport?.mode !== "custom" || item.transport.customMode.length > 0, {
     path: ["transport", "customMode"],
     message: "Enter a travel method",
-  });
+  })
+  .transform((item) =>
+    item.type === "note" ? { ...item, startTime: null, durationMinutes: 0 } : item,
+  );
 
 export function tripDates(startDate: string, endDate: string): string[] {
   let current: Temporal.PlainDate;
@@ -223,7 +226,7 @@ export function itemForCreate(
     details: partial.details ?? "",
     dayId,
     startTime: partial.startTime ?? null,
-    durationMinutes: partial.durationMinutes ?? 60,
+    durationMinutes: partial.durationMinutes ?? (type === "note" ? 0 : 60),
     place: partial.place ?? null,
     reservation: partial.reservation ?? null,
     lodging: partial.lodging ?? null,

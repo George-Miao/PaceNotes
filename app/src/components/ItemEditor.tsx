@@ -404,7 +404,7 @@ export function ItemEditor({
               />
             </label>
           </>
-        ) : draft.type !== "lodging" ? (
+        ) : draft.type !== "lodging" && draft.type !== "note" ? (
           <>
             <label className="field">
               <span>{text("startTime")}</span>

@@ -17,11 +17,11 @@ const destination = {
   placeId: "tokyo-e2e",
 };
 
-async function createEmptyTrip(items: TripItem[] = []): Promise<string> {
+async function createEmptyTrip(items: TripItem[] = [], endDate = "2027-04-12"): Promise<string> {
   const id = crypto.randomUUID().replaceAll("-", "");
   const snapshot = createInitialSnapshot(id, {
     startDate: "2027-04-10",
-    endDate: "2027-04-12",
+    endDate,
     destination,
     timeZone: "Asia/Tokyo",
   });
@@ -729,6 +729,78 @@ test("map and list toggles keep at least one panel visible", async ({ page }) =>
     await expect(list).toBeEnabled();
   } finally {
     await page.goto("/");
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("calendar view schedules items and stays on the itinerary on mobile", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "Calendar interaction coverage runs once");
+  const dayId = "2027-04-10";
+  const timed = itemForCreate("place", dayId, {
+    id: "calendar-museum",
+    title: "Morning museum",
+    startTime: "09:00",
+    durationMinutes: 60,
+  });
+  const note = itemForCreate("note", dayId, {
+    id: "calendar-note",
+    title: "Bring tickets",
+  });
+  const lodging = itemForCreate("lodging", dayId, {
+    id: "calendar-hotel",
+    title: "City hotel",
+    place: { placeId: "calendar-hotel-place" },
+    lodging: { startDate: dayId, endDate: "2027-04-11" },
+  });
+  const id = await createEmptyTrip([timed, note, lodging]);
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.addInitScript(() =>
+      localStorage.setItem("pacenotes-display-name", "Calendar editor"),
+    );
+    await page.goto(`/trips/${id}?view=calendar#${dayId}`);
+    const controls = page.getByRole("group", { name: "Planner content" });
+    const calendarButton = controls.getByRole("button", { name: "Calendar", exact: true });
+    const itineraryButton = controls.getByRole("button", { name: "Itinerary", exact: true });
+    const calendar = page.getByRole("region", { name: "Trip calendar" });
+    await expect(calendarButton).toHaveAttribute("aria-pressed", "true");
+    await expect(calendar).toBeVisible();
+    await expect(calendar.getByRole("button", { name: "Bring tickets" })).toBeVisible();
+    await expect(
+      calendar.getByRole("button", { name: "City hotel", exact: true }).first(),
+    ).toBeVisible();
+
+    const block = calendar.locator('[data-calendar-item-id="calendar-museum"]').first();
+    await expect(block).toContainText("09:00 - 10:00");
+    const blockButton = block.getByRole("button", { name: "Morning museum", exact: true });
+    await blockButton.focus();
+    await blockButton.press("ArrowDown");
+    await expect(block).toContainText("09:15 - 10:15");
+
+    await block.getByRole("button", { name: /Calendar actions/ }).click();
+    await expect(page.getByRole("button", { name: "Next day", exact: true })).toBeVisible();
+    await calendar
+      .locator("[data-calendar-day='2027-04-11']")
+      .first()
+      .getByRole("button")
+      .first()
+      .click();
+    await expect(page.getByRole("button", { name: "Next day", exact: true })).toBeHidden();
+    await expect(page).toHaveURL(/#2027-04-11$/);
+
+    await itineraryButton.click();
+    await expect(calendar).toBeHidden();
+    await expect(page).toHaveURL(/[?&]view=itinerary/);
+
+    await page.setViewportSize({ width: 390, height: 800 });
+    await calendarButton.click();
+    await expect(page).toHaveURL(/[?&]view=calendar/);
+    await expect(calendar).toBeHidden();
+    await expect(page.locator(".calendar-mobile-itinerary .day-section").first()).toBeVisible();
+  } finally {
+    if (!page.isClosed()) await page.goto("/");
     await db.delete(trips).where(eq(trips.id, id));
   }
 });
@@ -2012,12 +2084,12 @@ test("places across days have transport unless lodging separates them", async ({
     await expect(dates.nth(2)).toHaveAttribute("aria-current", "date");
     const leg = days.nth(2).locator(".transport-leg");
     await expect(leg).toBeVisible();
-    const connectedStart = days.nth(2).locator(".route-endpoint-start");
-    await expect(connectedStart).toHaveClass(/route-endpoint-connected/);
-    const connectedStartCap = connectedStart.locator(".route-endpoint-cap");
-    await expect(connectedStartCap).toHaveCount(1);
-    await expect(connectedStart.locator(".route-endpoint-rail")).toHaveCSS("display", "none");
-    expect((await connectedStart.boundingBox())?.height).toBe(0);
+    await expect(leg.locator(".leg-cap")).toHaveCount(0);
+    const transportStart = days.nth(2).locator(".route-endpoint-start");
+    await expect(transportStart).toHaveClass(/route-endpoint-transport/);
+    await expect(transportStart.locator(".route-endpoint-cap")).toHaveCount(1);
+    await expect(transportStart.locator(".route-endpoint-rail")).toHaveCSS("display", "none");
+    expect((await transportStart.boundingBox())?.height).toBe(0);
     await expect(days.nth(2).locator(".route-endpoint-end")).toHaveCount(0);
     await expect(leg).toHaveCSS("--leg-color", "#23df16");
     expect((await leg.locator(".leg-rail").boundingBox())?.height).toBe(32);
@@ -2127,6 +2199,26 @@ test("places across days have transport unless lodging separates them", async ({
     await expect(
       page.locator(".item-editor").getByRole("group", { name: "Reservation" }),
     ).toBeVisible();
+  } finally {
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("a note-only day has no loose route endpoint", async ({ page }) => {
+  const place = itemForCreate("place", "2027-04-10", {
+    title: "Previous day place",
+    place: { placeId: "museum" },
+  });
+  const note = itemForCreate("note", "2027-04-11", {
+    title: "Only a note",
+  });
+  const id = await createEmptyTrip([place, note], "2027-04-11");
+  try {
+    await page.goto(`/trips/${id}`);
+    const days = page.locator(".day-section");
+    await expect(days).toHaveCount(2);
+    await expect(days.nth(1).getByText("Only a note", { exact: true })).toBeVisible();
+    await expect(days.nth(1).locator(".route-endpoint")).toHaveCount(0);
   } finally {
     await db.delete(trips).where(eq(trips.id, id));
   }

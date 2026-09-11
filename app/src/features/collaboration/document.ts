@@ -6,6 +6,7 @@ import {
   type TripSettings,
   type TripSnapshot,
   travelModeSchema,
+  tripDates,
   tripItemSchema,
   tripLanguageSchema,
   tripSettingsSchema,
@@ -195,6 +196,99 @@ export function scheduleTripItem(
   }, "reorder-item");
 }
 
+export type CalendarItemChange = {
+  id: string;
+  patch: Partial<Pick<TripItem, "dayId" | "startTime" | "durationMinutes" | "lodging">>;
+  order?: string[];
+  extendThrough?: string;
+};
+
+export function applyCalendarItemChange(
+  document: Y.Doc,
+  change: CalendarItemChange,
+): { endDate: string; clamped: boolean } {
+  const item = document.getMap<Y.Map<unknown>>(itemsKey).get(change.id);
+  if (!item) {
+    return {
+      endDate: String(document.getMap(metadataKey).get("endDate") ?? ""),
+      clamped: false,
+    };
+  }
+  const parsed = requireReservationSchedule(
+    tripItemSchema.parse({ ...item.toJSON(), ...change.patch, id: change.id }),
+  );
+  const metadata = document.getMap<unknown>(metadataKey);
+  const currentEnd = String(metadata.get("endDate") ?? "");
+  const startDate = String(metadata.get("startDate") ?? "");
+  const requestedEnd =
+    change.extendThrough && change.extendThrough > currentEnd ? change.extendThrough : currentEnd;
+  const requestedDays = tripDates(startDate, requestedEnd);
+  const nextDays = requestedDays.slice(0, 30).map((date) => ({ id: date, date }));
+  const endDate = nextDays.at(-1)?.date ?? currentEnd;
+  const next = clampCalendarItem(parsed, endDate);
+  const clamped =
+    requestedEnd > endDate ||
+    next.dayId !== parsed.dayId ||
+    next.startTime !== parsed.startTime ||
+    next.durationMinutes !== parsed.durationMinutes ||
+    next.lodging?.startDate !== parsed.lodging?.startDate ||
+    next.lodging?.endDate !== parsed.lodging?.endDate;
+
+  document.transact(() => {
+    for (const [key, value] of Object.entries(next)) item.set(key, value);
+    if (endDate !== currentEnd) {
+      metadata.set("endDate", endDate);
+      const days = document.getArray<{ id: string; date: string }>(daysKey);
+      if (days.length > 0) days.delete(0, days.length);
+      days.insert(0, nextDays);
+    }
+    if (change.order) {
+      const order = document.getArray<string>(orderKey);
+      if (order.length > 0) order.delete(0, order.length);
+      if (change.order.length > 0) order.insert(0, change.order);
+    }
+  }, "calendar-item");
+  return { endDate, clamped };
+}
+
+export function normalizeTripDocument(document: Y.Doc): void {
+  const notes = Array.from(document.getMap<Y.Map<unknown>>(itemsKey).values()).filter(
+    (item) =>
+      item.get("type") === "note" &&
+      (item.get("startTime") !== null || item.get("durationMinutes") !== 0),
+  );
+  if (notes.length === 0) return;
+  document.transact(() => {
+    for (const note of notes) {
+      note.set("startTime", null);
+      note.set("durationMinutes", 0);
+    }
+  }, "normalize-document");
+}
+
+function clampCalendarItem(item: TripItem, endDate: string): TripItem {
+  if (item.type === "lodging" && item.lodging) {
+    const lodgingEnd = item.lodging.endDate > endDate ? endDate : item.lodging.endDate;
+    const lodgingStart =
+      item.lodging.startDate >= lodgingEnd ? shiftDate(lodgingEnd, -1) : item.lodging.startDate;
+    return {
+      ...item,
+      dayId: lodgingStart,
+      lodging: { startDate: lodgingStart, endDate: lodgingEnd },
+    };
+  }
+  if (!item.dayId || !item.startTime) return item;
+  if (item.dayId > endDate) {
+    return { ...item, dayId: endDate, startTime: "23:45", durationMinutes: 15 };
+  }
+  const [hour = "0", minute = "0"] = item.startTime.split(":");
+  const startMinute = Number(hour) * 60 + Number(minute);
+  const available = tripDates(item.dayId, endDate).length * 1440 - startMinute;
+  if (available < 15) {
+    return { ...item, startTime: "23:45", durationMinutes: 15 };
+  }
+  return { ...item, durationMinutes: Math.max(15, Math.min(item.durationMinutes, available)) };
+}
 export function deleteTripDay(document: Y.Doc, dayId: string): void {
   document.transact(() => {
     const days = document.getArray<{ id: string; date: string }>(daysKey);

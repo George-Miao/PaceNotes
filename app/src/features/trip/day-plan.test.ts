@@ -43,10 +43,10 @@ describe("continuous day plans", () => {
   it("keeps untimed positions and invalid clock-gap entries while ordering timed items", () => {
     const date = "2027-03-14";
     const items = [
-      itemForCreate("note", date, { id: "late", startTime: "03:30" }),
-      itemForCreate("note", date, { id: "open" }),
-      itemForCreate("note", date, { id: "early", startTime: "01:30" }),
-      itemForCreate("note", date, { id: "gap", startTime: "02:30" }),
+      itemForCreate("place", date, { id: "late", title: "late", startTime: "03:30" }),
+      itemForCreate("place", date, { id: "open", title: "open" }),
+      itemForCreate("place", date, { id: "early", title: "early", startTime: "01:30" }),
+      itemForCreate("place", date, { id: "gap", title: "gap", startTime: "02:30" }),
     ];
     const plan = buildDayPlans(items, [{ id: date, date }])[0];
     expect(plan?.items.map((item) => item.id)).toEqual(["early", "open", "gap", "late"]);

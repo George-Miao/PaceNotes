@@ -1,0 +1,458 @@
+.root {
+  min-width: 0;
+  height: 100%;
+  background: var(--surface);
+}
+
+.scroller {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.calendar {
+  --calendar-column-width: 18em;
+  display: grid;
+  width: max(100%, calc(4.5em + var(--calendar-day-count) * var(--calendar-column-width)));
+  min-width: 100%;
+  grid-template-columns: 4.5em repeat(
+      var(--calendar-day-count),
+      minmax(var(--calendar-column-width), 1fr)
+    );
+  grid-template-rows: auto auto auto;
+}
+
+.corner,
+.dayHeader,
+.allDayLabel,
+.allDayCell {
+  position: sticky;
+  z-index: 8;
+  background: var(--raised);
+}
+
+.corner {
+  top: 0;
+  left: 0;
+  grid-column: 1;
+  grid-row: 1;
+  border-right: var(--line) solid var(--border);
+  border-bottom: var(--line) solid var(--border);
+}
+
+.dayHeader {
+  top: 0;
+  display: flex;
+  min-width: 0;
+  min-height: 3.25em;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5em;
+  grid-row: 1;
+  padding: 0.75em;
+  border-right: var(--line) solid var(--border);
+  border-bottom: var(--line) solid var(--border);
+  cursor: pointer;
+}
+
+.daySelect {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.dayHeader time {
+  font-size: 0.75em;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.allDayLabel {
+  top: 3.25em;
+  left: 0;
+  z-index: 9;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  grid-column: 1;
+  grid-row: 2;
+  padding: 0.75em 0.625em;
+  border-right: var(--line) solid var(--border);
+  border-bottom: var(--line) solid var(--border);
+  color: var(--muted);
+  font-size: 0.625em;
+}
+
+.allDayCell {
+  top: 3.25em;
+  display: grid;
+  min-height: 3em;
+  align-content: start;
+  gap: 0.25em;
+  grid-row: 2;
+  padding: 0.375em;
+  border-right: var(--line) solid var(--border);
+  border-bottom: var(--line) solid var(--border);
+}
+
+.lodging {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: stretch;
+  border: var(--line) solid var(--border-strong);
+  border-radius: var(--radius-s);
+  background: var(--muted-surface);
+}
+
+.lodging > button:not(.dateHandle) {
+  min-width: 0;
+  overflow: hidden;
+  padding: 0.375em 0.5em;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.6875em;
+  font-weight: 700;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: grab;
+}
+
+.lodging svg {
+  width: 1em;
+  height: 1em;
+  color: var(--accent);
+  vertical-align: -0.15em;
+}
+
+.checkIn {
+  border-left: 0.2em solid var(--accent);
+}
+
+.checkOut {
+  border-right: 0.2em solid var(--accent);
+}
+
+.dateHandle {
+  width: 0.45em;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: ew-resize;
+}
+
+.timeGutter {
+  position: relative;
+  left: 0;
+  z-index: 5;
+  height: 96em;
+  grid-column: 1;
+  grid-row: 3;
+  border-right: var(--line) solid var(--border);
+  background: var(--surface);
+}
+
+.timeGutter time {
+  position: absolute;
+  right: 0.625em;
+  color: var(--muted);
+  font-size: 0.625em;
+  line-height: 1;
+  transform: translateY(-50%);
+}
+
+.dayTrack {
+  position: relative;
+  height: 96em;
+  grid-row: 3;
+  border-right: var(--line) solid var(--border);
+  background: var(--surface);
+}
+
+.hourLines {
+  position: absolute;
+  inset: 0;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    var(--border) 0 var(--line),
+    transparent var(--line) 1em,
+    color-mix(in srgb, var(--border) 55%, transparent) 1em calc(1em + var(--line)),
+    transparent calc(1em + var(--line)) 2em,
+    color-mix(in srgb, var(--border) 55%, transparent) 2em calc(2em + var(--line)),
+    transparent calc(2em + var(--line)) 3em,
+    color-mix(in srgb, var(--border) 55%, transparent) 3em calc(3em + var(--line)),
+    transparent calc(3em + var(--line)) 4em
+  );
+  pointer-events: none;
+}
+
+.block {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  min-height: 1em;
+  align-content: start;
+  gap: 0.15em;
+  overflow: visible;
+  padding: 0;
+  border: var(--line) solid var(--border-strong);
+  border-left: 0.2em solid var(--accent);
+  border-radius: var(--radius-s);
+  background: var(--raised);
+  box-shadow: var(--shadow);
+}
+
+.blockSelect {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  align-content: start;
+  gap: 0.15em;
+  overflow: hidden;
+  padding: 0.4em 0.5em;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: grab;
+  touch-action: none;
+}
+
+.blockSelect:focus-visible,
+.selected {
+  outline: 0.15em solid var(--focus);
+  outline-offset: 0.1em;
+}
+
+.block strong,
+.block time {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.block strong {
+  font-size: 0.6875em;
+}
+
+.block time {
+  color: var(--muted);
+  font-size: 0.6em;
+}
+
+.provisional {
+  border-style: dashed;
+  background: var(--muted-surface);
+  box-shadow: none;
+  color: var(--muted);
+}
+
+.resizeStart,
+.resizeEnd {
+  position: absolute;
+  z-index: 3;
+  width: 100%;
+  height: 0.5em;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: ns-resize;
+  inset-inline: 0;
+}
+
+.resizeStart {
+  top: -0.2em;
+}
+.resizeEnd {
+  bottom: -0.2em;
+}
+
+.noteStack {
+  position: absolute;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  top: 0.25em;
+  right: 0.25em;
+}
+
+.dayHeader .noteStack {
+  position: relative;
+  top: auto;
+  right: auto;
+}
+
+.noteStack button {
+  display: grid;
+  width: 1.5em;
+  height: 1.5em;
+  place-items: center;
+  margin-left: -0.65em;
+  padding: 0;
+  border: var(--line) solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--raised);
+  color: var(--accent);
+  cursor: grab;
+}
+
+.noteStack button:first-child {
+  margin-left: 0;
+}
+.noteStack svg {
+  width: 0.8em;
+  height: 0.8em;
+}
+
+.actions {
+  position: absolute;
+  z-index: 6;
+  right: 0.2em;
+  bottom: 0.2em;
+}
+
+.actions > button {
+  display: grid;
+  width: 1.4em;
+  height: 1.4em;
+  place-items: center;
+  border: var(--line) solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--raised);
+  color: var(--muted);
+  cursor: pointer;
+  list-style: none;
+}
+
+.actions > button svg {
+  width: 0.85em;
+  height: 0.85em;
+}
+
+.actions > div {
+  position: absolute;
+  z-index: 12;
+  right: 0;
+  display: grid;
+  width: 11.5em;
+  padding: 0.25em;
+  border: var(--line) solid var(--border-strong);
+  border-radius: var(--radius-s);
+  background: var(--raised);
+  box-shadow: var(--shadow-panel);
+}
+
+.actions > div button {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.45em 0.55em;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.65em;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.actions > div button:hover,
+.actions > div button:focus-visible {
+  background: var(--hover-surface);
+}
+
+.actions > div button svg {
+  width: 1em;
+  height: 1em;
+}
+
+.routeGap {
+  position: absolute;
+  z-index: 1;
+  left: 0.75em;
+  display: grid;
+  min-height: 1em;
+  grid-template-columns: 1em minmax(0, 1fr);
+  align-items: center;
+  gap: 0.35em;
+  pointer-events: none;
+}
+
+.routeGap i {
+  width: var(--line);
+  height: 100%;
+  justify-self: center;
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--border-strong) 0 0.25em,
+    transparent 0.25em 0.5em
+  );
+}
+
+.routeGap span {
+  padding: 0.15em 0.35em;
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.6em;
+  white-space: nowrap;
+}
+
+.routeConflict span {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.overflow {
+  position: absolute;
+  top: 96em;
+  display: grid;
+  width: 100%;
+  gap: 0.25em;
+  padding: 0.5em;
+}
+
+.overflow button {
+  overflow: hidden;
+  padding: 0.5em;
+  border: var(--line) dashed var(--border-strong);
+  border-radius: var(--radius-s);
+  background: var(--muted-surface);
+  color: var(--muted);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message {
+  position: sticky;
+  z-index: 10;
+  bottom: 0.5em;
+  width: fit-content;
+  max-width: calc(100% - 1em);
+  margin: 0 auto;
+  padding: 0.5em 0.75em;
+  border: var(--line) solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--raised);
+  box-shadow: var(--shadow-panel);
+  color: var(--danger);
+  font-size: 0.6875em;
+}
+
+@media (max-width: 48rem) {
+  .root {
+    display: none;
+  }
+}

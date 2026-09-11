@@ -63,6 +63,16 @@ describe("trip model", () => {
     expect(() => itemForCreate("note", null, { title: "   " })).toThrow();
   });
 
+  it("keeps notes untimed even when older data contains timing fields", () => {
+    expect(
+      itemForCreate("note", "2027-01-01", {
+        title: "Untimed note",
+        startTime: "09:30",
+        durationMinutes: 90,
+      }),
+    ).toMatchObject({ startTime: null, durationMinutes: 0 });
+  });
+
   it("requires a selected place for new reservations and lodging", () => {
     expect(() => itemForCreate("reservation", "2027-01-01")).toThrow();
     expect(

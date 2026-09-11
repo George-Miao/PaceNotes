@@ -3,9 +3,11 @@ import * as Y from "yjs";
 import { createInitialSnapshot, itemForCreate } from "../trip/model";
 import {
   addTripItem,
+  applyCalendarItemChange,
   deleteTripDay,
   initializeTripDocument,
   moveTripItem,
+  normalizeTripDocument,
   readTripDocument,
   setTripSettings,
   updateTripItem,
@@ -194,5 +196,139 @@ describe("collaboration document", () => {
       startDate: "2027-01-01",
       endDate: "2027-01-05",
     });
+  });
+
+  it("applies calendar scheduling and trip extension in one transaction", () => {
+    const document = seedDocument();
+    addTripItem(
+      document,
+      itemForCreate("place", "2027-01-01", {
+        id: "calendar-item",
+        title: "Calendar item",
+        startTime: "10:00",
+      }),
+    );
+    let transactions = 0;
+    document.on("afterTransaction", (transaction) => {
+      if (transaction.origin === "calendar-item") transactions += 1;
+    });
+
+    const extended = applyCalendarItemChange(document, {
+      id: "calendar-item",
+      patch: { dayId: "2027-01-07", startTime: "22:30", durationMinutes: 180 },
+      extendThrough: "2027-01-08",
+      order: ["calendar-item"],
+    });
+
+    expect(transactions).toBe(1);
+    expect(extended).toEqual({ endDate: "2027-01-08", clamped: false });
+    expect(readTripDocument(document)).toMatchObject({
+      endDate: "2027-01-08",
+      order: ["calendar-item"],
+      items: {
+        "calendar-item": {
+          dayId: "2027-01-07",
+          startTime: "22:30",
+          durationMinutes: 180,
+        },
+      },
+    });
+
+    const clamped = applyCalendarItemChange(document, {
+      id: "calendar-item",
+      patch: { dayId: "2027-02-15", startTime: "12:00", durationMinutes: 60 },
+      extendThrough: "2027-02-15",
+    });
+
+    expect(clamped).toEqual({ endDate: "2027-01-30", clamped: true });
+    expect(readTripDocument(document).items["calendar-item"]).toMatchObject({
+      dayId: "2027-01-30",
+      startTime: "23:45",
+      durationMinutes: 15,
+    });
+
+    const lateStart = applyCalendarItemChange(document, {
+      id: "calendar-item",
+      patch: { dayId: "2027-01-30", startTime: "23:59", durationMinutes: 60 },
+      extendThrough: "2027-01-30",
+    });
+
+    expect(lateStart).toEqual({ endDate: "2027-01-30", clamped: true });
+    expect(readTripDocument(document).items["calendar-item"]).toMatchObject({
+      dayId: "2027-01-30",
+      startTime: "23:45",
+      durationMinutes: 15,
+    });
+    document.destroy();
+  });
+
+  it("normalizes legacy note schedule fields in the shared document", () => {
+    const document = seedDocument();
+    addTripItem(
+      document,
+      itemForCreate("note", "2027-01-02", {
+        id: "legacy-note",
+        title: "Legacy note",
+      }),
+    );
+    const note = document.getMap<Y.Map<unknown>>("items").get("legacy-note");
+    expect(note).toBeDefined();
+    note?.set("startTime", "09:30");
+    note?.set("durationMinutes", 45);
+    let transactions = 0;
+    document.on("afterTransaction", (transaction) => {
+      if (transaction.origin === "normalize-document") transactions += 1;
+    });
+
+    normalizeTripDocument(document);
+
+    expect(transactions).toBe(1);
+    expect(note?.get("startTime")).toBeNull();
+    expect(note?.get("durationMinutes")).toBe(0);
+    document.destroy();
+  });
+
+  it("clamps a lodging change to the 30-day trip limit", () => {
+    const document = seedDocument();
+    addTripItem(
+      document,
+      itemForCreate("lodging", "2027-01-02", {
+        id: "calendar-stay",
+        title: "Calendar stay",
+        place: { placeId: "calendar-hotel" },
+        lodging: {
+          startDate: "2027-01-02",
+          endDate: "2027-01-05",
+        },
+      }),
+    );
+
+    const clamped = applyCalendarItemChange(document, {
+      id: "calendar-stay",
+      patch: {
+        dayId: "2027-02-15",
+        startTime: null,
+        lodging: {
+          startDate: "2027-02-15",
+          endDate: "2027-02-18",
+        },
+      },
+      extendThrough: "2027-02-18",
+    });
+
+    expect(clamped).toEqual({ endDate: "2027-01-30", clamped: true });
+    expect(readTripDocument(document)).toMatchObject({
+      endDate: "2027-01-30",
+      items: {
+        "calendar-stay": {
+          dayId: "2027-01-29",
+          lodging: {
+            startDate: "2027-01-29",
+            endDate: "2027-01-30",
+          },
+        },
+      },
+    });
+    document.destroy();
   });
 });

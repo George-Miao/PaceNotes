@@ -840,13 +840,14 @@
 
   .planner-tabs {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     gap: var(--space-2);
     padding: var(--space-2) var(--space-3);
     border-bottom: var(--line) solid var(--border);
     background: var(--surface);
   }
   .date-tabs,
+  .content-tabs,
   .view-tabs {
     display: flex;
     min-width: 0;
@@ -857,6 +858,7 @@
     background: var(--muted-surface);
     margin: 0;
   }
+  .content-tabs legend,
   .view-tabs legend {
     position: absolute;
     width: 1px;
@@ -869,6 +871,7 @@
     overflow-x: auto;
   }
   .date-tabs button,
+  .content-tabs button,
   .view-tabs button {
     flex: 1 0 4.5rem;
     min-height: 2.25rem;
@@ -900,17 +903,31 @@
     font-variant-numeric: tabular-nums;
   }
   .date-tabs button:hover:not(.active),
+  .content-tabs button:hover:not([aria-pressed="true"]),
   .view-tabs button:hover:not([aria-pressed="true"]) {
     color: var(--ink);
     background: var(--hover-surface);
   }
   .date-tabs button.active,
+  .content-tabs button[aria-pressed="true"],
   .view-tabs button[aria-pressed="true"] {
     position: relative;
     z-index: 1;
     color: var(--ink);
     background: var(--raised);
     box-shadow: var(--shadow);
+  }
+  .content-tabs button {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: 0.6875rem;
+    font-weight: 700;
+  }
+  .content-tabs button svg {
+    width: 1rem;
+    height: 1rem;
   }
   .view-tabs button {
     display: grid;
@@ -924,6 +941,9 @@
     height: 1.125rem;
   }
 
+  .calendar-mobile-itinerary {
+    display: none;
+  }
   .planner-body {
     position: relative;
     display: grid;
@@ -1016,14 +1036,6 @@
     gap: var(--space-2);
     margin: 0;
     font-size: 0.875rem;
-  }
-  .day-color-dot {
-    width: 0.625rem;
-    height: 0.625rem;
-    flex: 0 0 auto;
-    border: 1px solid color-mix(in srgb, var(--day-color) 72%, #000);
-    border-radius: 50%;
-    background: var(--day-color);
   }
   .missing-lodging {
     display: inline-flex;
@@ -1288,9 +1300,6 @@
     gap: var(--space-2);
     padding: 0 var(--space-2);
   }
-  .route-endpoint-start.route-endpoint-connected {
-    height: 0;
-  }
   .route-endpoint-rail {
     width: 0.0625rem;
     height: 100%;
@@ -1312,9 +1321,6 @@
       transparent 0.25rem 0.5rem
     );
   }
-  .route-endpoint-start.route-endpoint-connected .route-endpoint-rail {
-    display: none;
-  }
   .route-endpoint-cap {
     z-index: 1;
     width: 0.375rem;
@@ -1328,6 +1334,15 @@
   }
   .route-endpoint-start .route-endpoint-cap {
     align-self: start;
+  }
+  .route-endpoint-start.route-endpoint-loose {
+    height: calc(var(--transport-leg-height) * 0.6);
+  }
+  .route-endpoint-start.route-endpoint-transport {
+    height: 0;
+  }
+  .route-endpoint-start.route-endpoint-transport .route-endpoint-rail {
+    display: none;
   }
   .route-endpoint-end .route-endpoint-cap {
     align-self: end;
@@ -1770,6 +1785,14 @@
     }
     .planner-tabs {
       padding: var(--space-2);
+    }
+    .content-tabs button {
+      width: 2.5rem;
+      justify-content: center;
+      font-size: 0;
+    }
+    .calendar-mobile-itinerary {
+      display: block;
     }
     .planner-body,
     .view-map,
