@@ -4,6 +4,7 @@
 !.env.example
 .direnv/
 result
+.infisical.json
 
 app/node_modules/
 app/.output/

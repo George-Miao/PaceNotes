@@ -107,6 +107,7 @@
         {
           devShells.default = pkgs.mkShell {
             packages = [
+              pkgs.infisical
               pkgs.nodejs_24
               pnpm
               pkgs.postgresql_18
