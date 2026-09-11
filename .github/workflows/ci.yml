@@ -54,7 +54,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Install browser
         working-directory: app
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install --with-deps chromium firefox
       - name: Build and migrate
         working-directory: app
         run: pnpm build && pnpm db:migrate

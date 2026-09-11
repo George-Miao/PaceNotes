@@ -52,7 +52,7 @@
               inherit (finalAttrs) pname version src;
               inherit pnpm;
               fetcherVersion = 4;
-              hash = "sha256-lrVmcUVOa9QPwO3f2q1/raP4HiS9a53KdfiS1rihV+E=";
+              hash = "sha256-l8DcZVPIu/S7NHeP6Lp9TswPA6OMeLyLMxoA+QPZfzg=";
             };
             buildPhase = ''
               runHook preBuild
@@ -112,6 +112,8 @@
               pkgs.postgresql_18
               pkgs.docker-compose
             ];
+            PLAYWRIGHT_BROWSERS_PATH = "${pkgs.playwright-driver.browsers}";
+            PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
             shellHook = ''
               export PATH="$PWD/app/node_modules/.bin:$PATH"
             '';

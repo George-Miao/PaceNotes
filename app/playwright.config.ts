@@ -12,5 +12,10 @@ export default defineConfig({
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
     { name: "mobile", use: { ...devices["Pixel 7"] } },
+    {
+      name: "firefox",
+      use: { ...devices["Desktop Firefox"] },
+      grep: /map and list toggles keep at least one panel visible|selected places are added directly|continuous days support transport|per-day add controls|resizing a 500-place split avoids itinerary recommits/,
+    },
   ],
 });
