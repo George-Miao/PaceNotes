@@ -75,7 +75,7 @@
           });
           dockerImage = pkgs.dockerTools.buildLayeredImage {
             name = "pacenotes";
-            tag = "0.1.0";
+            tag = "nix";
             contents = pkgs.buildEnv {
               name = "pacenotes-root";
               paths = [
