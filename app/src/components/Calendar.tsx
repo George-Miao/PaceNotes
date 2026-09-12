@@ -8,6 +8,7 @@ import minusIcon from "@iconify-icons/lucide/minus";
 import plusIcon from "@iconify-icons/lucide/plus";
 import stickyNoteIcon from "@iconify-icons/lucide/sticky-note";
 import {
+  Fragment,
   type PointerEvent as ReactPointerEvent,
   useEffect,
   useMemo,
@@ -118,8 +119,8 @@ export function Calendar({
   language,
   selectedId,
   calendarHours,
+  focusRequest,
   onSelect,
-  onSelectDay,
   onChangeItem,
   onMoveNote,
   onChangeLodging,
@@ -131,9 +132,9 @@ export function Calendar({
   places: ReadonlyMap<string, GooglePlaceView>;
   language: TripLanguage;
   calendarHours: CalendarHours;
+  focusRequest: { dayId: string; serial: number } | null;
   selectedId: string | null;
   onSelect: (item: TripItem) => void;
-  onSelectDay: (dayId: string) => void;
   onChangeItem: (change: ItemChange) => { clamped: boolean };
   onMoveNote: (noteId: string, dayId: string, afterItemId: string | null) => void;
   onChangeLodging: (item: TripItem, startDate: string, endDate: string) => { clamped: boolean };
@@ -231,6 +232,24 @@ export function Calendar({
       setLodgingPointer(null);
     }
   }, [gesture, itemVersions]);
+
+  useEffect(() => {
+    if (!focusRequest) return;
+    const frame = window.requestAnimationFrame(() => {
+      const container = scroller.current;
+      const header = Array.from(
+        container?.querySelectorAll<HTMLElement>("[data-calendar-day-header]") ?? [],
+      ).find((element) => element.dataset.calendarDayHeader === focusRequest.dayId);
+      if (!container || !header) return;
+      const left = clamp(
+        header.offsetLeft - (container.clientWidth - header.offsetWidth) / 2,
+        0,
+        container.scrollWidth - container.clientWidth,
+      );
+      container.scrollTo({ left, behavior: "smooth" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusRequest]);
 
   useEffect(() => {
     const move = (event: PointerEvent) => {
@@ -556,22 +575,19 @@ export function Calendar({
                 .find((column) => column.day.id === day.id)
                 ?.noteGroups.find((group) => group.anchorItemId === null)?.notes ?? [];
             return (
-              <header
-                className={styles.dayHeader}
-                key={`header:${day.id}`}
-                data-calendar-day={day.id}
-              >
-                <button
-                  className={styles.daySelect}
-                  type="button"
-                  onClick={() => onSelectDay(day.id)}
+              <Fragment key={`header:${day.id}`}>
+                {/* biome-ignore lint/a11y/noStaticElementInteractions: This header accepts note drops but has no click action. */}
+                <header
+                  className={styles.dayHeader}
+                  data-calendar-day={day.id}
+                  data-calendar-day-header={day.id}
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={(event) => dropNote(event, day.id, null, onMoveNote)}
                 >
                   <time dateTime={day.date}>{formatDay(day.date, language)}</time>
-                </button>
-                <NoteStack notes={leading} onSelect={onSelect} />
-              </header>
+                  <NoteStack notes={leading} onSelect={onSelect} />
+                </header>
+              </Fragment>
             );
           })}
           <div className={styles.allDayLabel}>All day</div>
@@ -753,7 +769,6 @@ export function Calendar({
                       aria-label={itemTitle(segment.item, places)}
                       onClick={() => {
                         if (actionMenu?.segment.item.id === segment.item.id) return;
-                        onSelectDay(column.day.id);
                         onSelect(segment.item);
                       }}
                       onDragOver={(event) => event.preventDefault()}

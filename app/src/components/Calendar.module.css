@@ -54,17 +54,7 @@
   padding: 0.75em;
   border-right: var(--line) solid var(--border);
   border-bottom: var(--line) solid var(--border);
-  cursor: pointer;
-}
-
-.daySelect {
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  text-align: left;
-  cursor: pointer;
+  cursor: default;
 }
 
 .dayHeader time {

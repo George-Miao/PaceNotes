@@ -999,6 +999,25 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
       element.scrollTop = 0;
       element.scrollLeft = 0;
     });
+    const centeredDayHeader = calendar.locator('[data-calendar-day-header="2027-04-12"]');
+    await expect(centeredDayHeader.getByRole("button")).toHaveCount(0);
+    await expect(centeredDayHeader).toHaveCSS("cursor", "default");
+    await page.getByRole("button", { name: /Mon\s+12/i }).click();
+    await expect
+      .poll(async () =>
+        calendarScroller.evaluate((element) => {
+          const header = element.querySelector<HTMLElement>(
+            '[data-calendar-day-header="2027-04-12"]',
+          );
+          if (!header) return Number.POSITIVE_INFINITY;
+          const expected = Math.min(
+            element.scrollWidth - element.clientWidth,
+            Math.max(0, header.offsetLeft - (element.clientWidth - header.offsetWidth) / 2),
+          );
+          return Math.abs(element.scrollLeft - expected);
+        }),
+      )
+      .toBeLessThan(1);
 
     const block = calendar.locator('[data-calendar-item-id="calendar-museum"]').first();
     await expect(block).toContainText("09:00 - 10:00");
@@ -1097,12 +1116,7 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     await block.dispatchEvent("pointerdown", longTap);
     await expect(actionMenu).toBeVisible({ timeout: 1_000 });
     await block.dispatchEvent("pointerup", { ...longTap, buttons: 0 });
-    await calendar
-      .locator("[data-calendar-day='2027-04-11']")
-      .first()
-      .getByRole("button")
-      .first()
-      .click();
+    await page.getByRole("button", { name: /Sun\s+11/i }).click();
     await expect(actionMenu).toBeHidden();
     await expect(page).toHaveURL(/#2027-04-11$/);
     await block.click({ button: "right" });

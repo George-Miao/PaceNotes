@@ -110,6 +110,10 @@ export function Planner({ tripId }: { tripId: string }) {
   const [plannerContent, setPlannerContent] = useState<"itinerary" | "calendar">("itinerary");
   const [activeDay, setActiveDay] = useState<string | null>(null);
   const [navigationDay, setNavigationDay] = useState<string | null>(null);
+  const [calendarFocusRequest, setCalendarFocusRequest] = useState<{
+    dayId: string;
+    serial: number;
+  } | null>(null);
   const [view, setView] = useState<ViewMode>("split");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editorDay, setEditorDay] = useState<string | null>(null);
@@ -449,6 +453,12 @@ export function Planner({ tripId }: { tripId: string }) {
     const url = new URL(window.location.href);
     url.searchParams.set("view", content);
     window.history.replaceState(window.history.state, "", url);
+    if (content === "calendar" && currentDay) {
+      setCalendarFocusRequest((request) => ({
+        dayId: currentDay,
+        serial: (request?.serial ?? 0) + 1,
+      }));
+    }
     setPlannerContent(content);
   };
   const selectCalendarDay = (id: string) => {
@@ -590,6 +600,14 @@ export function Planner({ tripId }: { tripId: string }) {
     pendingInboxJump.current = false;
     mapDestinationDay.current = id;
     cancelCreation();
+    if (plannerContent === "calendar") {
+      selectCalendarDay(id);
+      setCalendarFocusRequest((request) => ({
+        dayId: id,
+        serial: (request?.serial ?? 0) + 1,
+      }));
+      return;
+    }
     if (view === "map") setView("split");
     startTransition(() => setNavigationDay(id));
     clearJumpAnimation();
@@ -1255,9 +1273,9 @@ export function Planner({ tripId }: { tripId: string }) {
                 places={placeViews}
                 language={snapshot.language}
                 calendarHours={snapshot.calendarHours}
+                focusRequest={calendarFocusRequest}
                 selectedId={selectedId}
                 onSelect={(item) => selectItem(item.id, item.dayId ?? undefined)}
-                onSelectDay={selectCalendarDay}
                 onChangeItem={changeCalendarItem}
                 onMoveNote={moveCalendarNote}
                 onCloneItem={cloneCalendarItem}
