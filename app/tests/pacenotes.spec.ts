@@ -886,6 +886,15 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     await checkInHandle.scrollIntoViewIfNeeded();
     const checkInBox = await checkInHandle.boundingBox();
     if (!checkInBox) throw new Error("Missing lodging check-in handle geometry");
+    const checkInBlockBox = await checkInHandle.locator("..").boundingBox();
+    if (!checkInBlockBox) throw new Error("Missing lodging check-in block geometry");
+    expect(checkInBox.x - checkInBlockBox.x).toBeLessThanOrEqual(3);
+    expect(Math.abs(checkInBox.y - checkInBlockBox.y)).toBeLessThanOrEqual(3);
+    expect(
+      Math.abs(
+        checkInBox.y + checkInBox.height - (checkInBlockBox.y + checkInBlockBox.height),
+      ),
+    ).toBeLessThanOrEqual(3);
     await page.mouse.move(
       checkInBox.x + checkInBox.width / 2,
       checkInBox.y + checkInBox.height / 2,
@@ -917,11 +926,39 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     await checkOutHandle.scrollIntoViewIfNeeded();
     const checkOutBox = await checkOutHandle.boundingBox();
     if (!checkOutBox) throw new Error("Missing lodging check-out handle geometry");
+    const checkOutBlockBox = await checkOutHandle.locator("..").boundingBox();
+    if (!checkOutBlockBox) throw new Error("Missing lodging check-out block geometry");
+    expect(
+      Math.abs(
+        checkOutBox.x +
+          checkOutBox.width -
+          (checkOutBlockBox.x + checkOutBlockBox.width),
+      ),
+    ).toBeLessThanOrEqual(3);
+    expect(Math.abs(checkOutBox.y - checkOutBlockBox.y)).toBeLessThanOrEqual(3);
+    expect(
+      Math.abs(
+        checkOutBox.y + checkOutBox.height - (checkOutBlockBox.y + checkOutBlockBox.height),
+      ),
+    ).toBeLessThanOrEqual(3);
     await page.mouse.move(
       checkOutBox.x + checkOutBox.width / 2,
       checkOutBox.y + checkOutBox.height / 2,
     );
     await page.mouse.down();
+    const calendarBox = await calendar.boundingBox();
+    if (!calendarBox) throw new Error("Missing calendar geometry");
+    await page.mouse.move(
+      calendarBox.x + calendarBox.width + 200,
+      checkOutBox.y + checkOutBox.height / 2,
+      { steps: 4 },
+    );
+    await expect(resizeGuide).toBeVisible();
+    const clippedGuideBox = await resizeGuide.boundingBox();
+    if (!clippedGuideBox) throw new Error("Missing clipped lodging resize guide geometry");
+    expect(clippedGuideBox.x + clippedGuideBox.width).toBeLessThanOrEqual(
+      calendarBox.x + calendarBox.width + 1,
+    );
     await page.mouse.move(
       checkOutBox.x + checkOutBox.width / 2 - lodgingDayBox.width,
       checkOutBox.y + checkOutBox.height / 2,

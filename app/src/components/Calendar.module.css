@@ -107,10 +107,9 @@
 }
 
 .lodging {
-  display: grid;
+  position: relative;
+  display: block;
   min-width: 0;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: stretch;
   touch-action: none;
   border: var(--line) solid var(--border-strong);
   border-radius: var(--radius-s);
@@ -209,6 +208,7 @@
   align-items: center;
   gap: 0.35em;
   min-width: 0;
+  width: 100%;
   overflow: hidden;
   padding: 0.375em 0.5em;
   border: 0;
@@ -244,11 +244,23 @@
 }
 
 .dateHandle {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
   width: 1em;
   padding: 0;
   border: 0;
   background: transparent;
   cursor: ew-resize;
+}
+
+.dateHandleStart {
+  left: 0;
+}
+
+.dateHandleEnd {
+  right: 0;
 }
 
 .timeGutter {

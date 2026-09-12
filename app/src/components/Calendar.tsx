@@ -104,6 +104,8 @@ type LodgingPointer = {
   height: number;
   anchorX: number;
   guideY: number;
+  clipLeft: number;
+  clipRight: number;
 };
 type SelectionBox = { left: number; top: number; width: number; height: number };
 
@@ -333,7 +335,10 @@ export function Calendar({
           current
             ? {
                 ...current,
-                x: event.clientX,
+                x:
+                  gesture.edge === "move"
+                    ? event.clientX
+                    : clamp(event.clientX, current.clipLeft, current.clipRight),
                 y: gesture.edge === "move" ? event.clientY : current.y,
               }
             : current,
@@ -626,6 +631,7 @@ export function Calendar({
       ?.getBoundingClientRect();
     if (!block) return;
     const root = event.currentTarget.closest<HTMLElement>("[aria-label='Trip calendar']");
+    const calendarBounds = root?.getBoundingClientRect();
     const segments = Array.from(
       root?.querySelectorAll<HTMLElement>("[data-calendar-lodging-id]") ?? [],
     ).filter((segment) => segment.dataset.calendarLodgingId === item.id);
@@ -651,6 +657,8 @@ export function Calendar({
       height: block.height,
       anchorX,
       guideY: block.top + block.height / 2,
+      clipLeft: calendarBounds?.left ?? 0,
+      clipRight: calendarBounds?.right ?? window.innerWidth,
     });
     setGesture({
       type: "lodging",
@@ -782,7 +790,7 @@ export function Calendar({
                       {starts ? (
                         <button
                           type="button"
-                          className={styles.dateHandle}
+                          className={`${styles.dateHandle} ${styles.dateHandleStart}`}
                           aria-label={`Change check-in for ${itemTitle(item, places)}`}
                           onPointerDown={(event) => startLodging(event, item, "start")}
                         />
@@ -798,7 +806,7 @@ export function Calendar({
                       {ends ? (
                         <button
                           type="button"
-                          className={styles.dateHandle}
+                          className={`${styles.dateHandle} ${styles.dateHandleEnd}`}
                           aria-label={`Change check-out for ${itemTitle(item, places)}`}
                           onPointerDown={(event) => startLodging(event, item, "end")}
                         />
