@@ -637,12 +637,11 @@
 
   .feature-grid {
     display: grid;
-    width: 100%;
+    width: calc(100% - 2 * var(--space-5));
     max-width: 76rem;
     grid-template-columns: repeat(4, 1fr);
     gap: var(--space-3);
     margin: 0 auto;
-    padding: 0 var(--space-5);
   }
   .feature-grid article {
     min-width: 0;
