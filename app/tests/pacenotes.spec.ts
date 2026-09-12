@@ -780,6 +780,24 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
       calendar.getByRole("button", { name: "City hotel", exact: true }).first(),
     ).toBeVisible();
 
+    const calendarScroller = calendar.locator(":scope > div").first();
+    const firstDayHeader = calendar.locator("header").first();
+    const allDayLabel = calendar.getByText("All day", { exact: true });
+    await calendarScroller.evaluate((element) => {
+      element.scrollTop = 300;
+    });
+    const scrollerBox = await calendarScroller.boundingBox();
+    const headerBox = await firstDayHeader.boundingBox();
+    const allDayLabelBox = await allDayLabel.boundingBox();
+    if (!scrollerBox || !headerBox || !allDayLabelBox) {
+      throw new Error("Missing sticky calendar header geometry");
+    }
+    expect(headerBox.y).toBeCloseTo(scrollerBox.y, 0);
+    expect(allDayLabelBox.y).toBeCloseTo(headerBox.y + headerBox.height, 0);
+    await calendarScroller.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+
     const block = calendar.locator('[data-calendar-item-id="calendar-museum"]').first();
     await expect(block).toContainText("09:00 - 10:00");
     const blockButton = block.getByRole("button", { name: "Morning museum", exact: true });

@@ -13,6 +13,7 @@
 
 .calendar {
   --calendar-column-width: 18em;
+  --calendar-header-height: 3rem;
   display: grid;
   width: max(100%, calc(4.5em + var(--calendar-day-count) * var(--calendar-column-width)));
   min-width: 100%;
@@ -45,7 +46,7 @@
   top: 0;
   display: flex;
   min-width: 0;
-  min-height: 3.25em;
+  min-height: var(--calendar-header-height);
   align-items: center;
   justify-content: space-between;
   gap: 0.5em;
@@ -73,7 +74,7 @@
 }
 
 .allDayLabel {
-  top: 3.25em;
+  top: var(--calendar-header-height);
   left: 0;
   z-index: 9;
   display: flex;
@@ -89,7 +90,7 @@
 }
 
 .allDayCell {
-  top: 3.25em;
+  top: var(--calendar-header-height);
   display: grid;
   min-height: 3em;
   align-content: start;
