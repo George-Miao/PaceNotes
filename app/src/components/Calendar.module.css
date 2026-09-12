@@ -112,7 +112,7 @@
 }
 
 .lodgingOrigin {
-  opacity: 0.2;
+  visibility: hidden;
 }
 
 .lodgingTarget,
@@ -238,7 +238,7 @@
 }
 
 .dateHandle {
-  width: 0.45em;
+  width: 1em;
   padding: 0;
   border: 0;
   background: transparent;

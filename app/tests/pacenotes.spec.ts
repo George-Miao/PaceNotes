@@ -755,7 +755,7 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     place: { placeId: "calendar-hotel-place" },
     lodging: { startDate: dayId, endDate: "2027-04-11" },
   });
-  const id = await createEmptyTrip([note, timed, lodging]);
+  const id = await createEmptyTrip([note, timed, lodging], "2027-04-14");
   try {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.addInitScript(() =>
@@ -813,22 +813,55 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     const lodgingStartY = originalLodgingBox.y + originalLodgingBox.height / 2;
     await page.mouse.move(lodgingStartX, lodgingStartY);
     await page.mouse.down();
-    await page.mouse.move(lodgingStartX + lodgingDayBox.width, lodgingStartY, { steps: 4 });
+    await page.mouse.move(lodgingStartX + lodgingDayBox.width * 2, lodgingStartY, {
+      steps: 4,
+    });
     const lodgingProxy = calendar.locator("[data-calendar-lodging-drag-proxy]");
     const lodgingTarget = calendar.locator("[data-calendar-lodging-preview]");
     await expect(lodgingProxy).toBeVisible();
     await expect(lodgingTarget).toContainText("2 days");
-    await expect(lodgingTarget).toHaveAttribute("data-start-date", "2027-04-11");
+    await expect(lodgingTarget).toHaveAttribute("data-start-date", "2027-04-12");
     const lodgingProxyBox = await lodgingProxy.boundingBox();
     const lodgingTargetBox = await lodgingTarget.boundingBox();
     if (!lodgingProxyBox || !lodgingTargetBox) {
       throw new Error("Missing lodging preview geometry");
     }
-    expect(lodgingProxyBox.x).toBeCloseTo(originalLodgingBox.x + lodgingDayBox.width, 0);
+    expect(lodgingProxyBox.x).toBeCloseTo(originalLodgingBox.x + lodgingDayBox.width * 2, 0);
     expect(lodgingTargetBox.width).toBeGreaterThan(lodgingDayBox.width * 1.8);
     expect(
       Number(await lodgingTarget.evaluate((element) => getComputedStyle(element).opacity)),
     ).toBeLessThan(1);
+    await page.mouse.up();
+    const shiftedLodging = calendar.locator(
+      '[data-calendar-all-day="2027-04-12"] [data-calendar-lodging-id="calendar-hotel"]',
+    );
+    await shiftedLodging.scrollIntoViewIfNeeded();
+    const shiftedLodgingBox = await shiftedLodging.boundingBox();
+    if (!shiftedLodgingBox) throw new Error("Missing shifted lodging geometry");
+    const shiftedLodgingButton = shiftedLodging.getByRole("button", {
+      name: "City hotel",
+      exact: true,
+    });
+    const shiftedLodgingButtonBox = await shiftedLodgingButton.boundingBox();
+    if (!shiftedLodgingButtonBox) throw new Error("Missing shifted lodging button geometry");
+    const shiftedStartX = shiftedLodgingButtonBox.x + shiftedLodgingButtonBox.width / 2;
+    const shiftedStartY = shiftedLodgingButtonBox.y + shiftedLodgingButtonBox.height / 2;
+    await page.mouse.move(shiftedStartX, shiftedStartY);
+    await page.mouse.down();
+    await page.mouse.move(shiftedStartX - lodgingDayBox.width, shiftedStartY, { steps: 4 });
+    await expect(lodgingTarget).toHaveAttribute("data-start-date", "2027-04-11");
+    await expect(shiftedLodging).toBeHidden();
+    const oneDayLeftProxyBox = await lodgingProxy.boundingBox();
+    if (!oneDayLeftProxyBox) throw new Error("Missing one-day-left lodging proxy geometry");
+    expect(oneDayLeftProxyBox.x).toBeCloseTo(shiftedLodgingBox.x - lodgingDayBox.width, 0);
+    await page.mouse.move(shiftedStartX - lodgingDayBox.width * 2, shiftedStartY, {
+      steps: 4,
+    });
+    await expect(lodgingTarget).toHaveAttribute("data-start-date", "2027-04-10");
+    const twoDaysLeftProxyBox = await lodgingProxy.boundingBox();
+    if (!twoDaysLeftProxyBox) throw new Error("Missing two-days-left lodging proxy geometry");
+    expect(twoDaysLeftProxyBox.x).toBeCloseTo(shiftedLodgingBox.x - lodgingDayBox.width * 2, 0);
+    await page.mouse.move(shiftedStartX - lodgingDayBox.width, shiftedStartY, { steps: 4 });
     await page.mouse.up();
     await expect(
       calendar.locator(
@@ -844,6 +877,7 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     const checkInHandle = calendar.getByRole("button", {
       name: "Change check-in for City hotel",
     });
+    await checkInHandle.scrollIntoViewIfNeeded();
     const checkInBox = await checkInHandle.boundingBox();
     if (!checkInBox) throw new Error("Missing lodging check-in handle geometry");
     await page.mouse.move(
@@ -896,6 +930,32 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
         '[data-calendar-all-day="2027-04-12"] [data-calendar-lodging-id="calendar-hotel"]',
       ),
     ).toHaveCount(0);
+    const extendedCheckOutHandle = calendar.getByRole("button", {
+      name: "Change check-out for City hotel",
+    });
+    await extendedCheckOutHandle.scrollIntoViewIfNeeded();
+    const extendedCheckOutBox = await extendedCheckOutHandle.boundingBox();
+    if (!extendedCheckOutBox) throw new Error("Missing extended check-out handle geometry");
+    expect(extendedCheckOutBox.width).toBeGreaterThanOrEqual(12);
+    await page.mouse.move(
+      extendedCheckOutBox.x + extendedCheckOutBox.width / 2,
+      extendedCheckOutBox.y + extendedCheckOutBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      extendedCheckOutBox.x + extendedCheckOutBox.width / 2 + lodgingDayBox.width,
+      extendedCheckOutBox.y + extendedCheckOutBox.height / 2,
+      { steps: 4 },
+    );
+    await expect(resizeGuide).toBeVisible();
+    await expect(lodgingTarget).toContainText("3 days");
+    await expect(lodgingTarget).toHaveAttribute("data-end-date", "2027-04-12");
+    await page.mouse.up();
+    await expect(
+      calendar.locator(
+        '[data-calendar-all-day="2027-04-12"] [data-calendar-lodging-id="calendar-hotel"]',
+      ),
+    ).toBeVisible();
 
     const calendarScroller = calendar.locator(":scope > div").first();
     const firstDayHeader = calendar.locator("header").first();
