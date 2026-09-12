@@ -968,10 +968,17 @@
     background: var(--surface);
   }
   .planner-panel > [aria-label="Trip calendar"] {
-    height: calc(100% - 3.125rem);
+    min-height: 0;
   }
   .planner-panel:has(> [aria-label="Trip calendar"]) {
     padding: 0;
+  }
+  @media (min-width: 48.0625rem) {
+    .planner-panel:has(> [aria-label="Trip calendar"]) {
+      display: grid;
+      overflow: hidden;
+      grid-template-rows: auto minmax(0, 1fr);
+    }
   }
   .planner-panel:has(> [aria-label="Trip calendar"]) > .planner-content-toolbar {
     margin: 0;

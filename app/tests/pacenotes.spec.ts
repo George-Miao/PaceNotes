@@ -900,15 +900,24 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     const calendarScroller = calendar.locator(":scope > div").first();
     const firstDayHeader = calendar.locator("header").first();
     const allDayLabel = calendar.getByText("All day", { exact: true });
+    const plannerPanel = calendar.locator("xpath=..");
+    const calendarToolbar = plannerPanel.locator(".planner-content-toolbar");
     await calendarScroller.evaluate((element) => {
       element.scrollTop = 300;
     });
+    await plannerPanel.evaluate((element) => {
+      element.scrollTop = 300;
+    });
+    const panelScrollTop = await plannerPanel.evaluate((element) => element.scrollTop);
+    const toolbarBox = await calendarToolbar.boundingBox();
     const scrollerBox = await calendarScroller.boundingBox();
     const headerBox = await firstDayHeader.boundingBox();
     const allDayLabelBox = await allDayLabel.boundingBox();
-    if (!scrollerBox || !headerBox || !allDayLabelBox) {
+    if (!scrollerBox || !toolbarBox || !headerBox || !allDayLabelBox) {
       throw new Error("Missing sticky calendar header geometry");
     }
+    expect(panelScrollTop).toBe(0);
+    expect(scrollerBox.y).toBeCloseTo(toolbarBox.y + toolbarBox.height, 0);
     expect(headerBox.y).toBeCloseTo(scrollerBox.y, 0);
     expect(allDayLabelBox.y).toBeCloseTo(headerBox.y + headerBox.height, 0);
     await calendarScroller.evaluate((element) => {
