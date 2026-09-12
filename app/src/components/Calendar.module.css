@@ -75,7 +75,6 @@
 
 .allDayLabel {
   top: var(--calendar-header-height);
-  left: 0;
   z-index: 9;
   display: flex;
   align-items: flex-start;

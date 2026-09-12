@@ -904,6 +904,7 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     const calendarToolbar = plannerPanel.locator(".planner-content-toolbar");
     await calendarScroller.evaluate((element) => {
       element.scrollTop = 300;
+      element.scrollLeft = 0;
     });
     await plannerPanel.evaluate((element) => {
       element.scrollTop = 300;
@@ -920,6 +921,20 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     expect(scrollerBox.y).toBeCloseTo(toolbarBox.y + toolbarBox.height, 0);
     expect(headerBox.y).toBeCloseTo(scrollerBox.y, 0);
     expect(allDayLabelBox.y).toBeCloseTo(headerBox.y + headerBox.height, 0);
+    await calendarScroller.evaluate((element) => {
+      element.scrollLeft = 180;
+    });
+    const horizontalScrollLeft = await calendarScroller.evaluate((element) => element.scrollLeft);
+    const horizontallyScrolledAllDayLabelBox = await allDayLabel.boundingBox();
+    if (!horizontallyScrolledAllDayLabelBox) {
+      throw new Error("Missing horizontally scrolled all-day label geometry");
+    }
+    expect(horizontalScrollLeft).toBeGreaterThan(0);
+    expect(horizontallyScrolledAllDayLabelBox.x).toBeCloseTo(
+      allDayLabelBox.x - horizontalScrollLeft,
+      0,
+    );
+    expect(horizontallyScrolledAllDayLabelBox.y).toBeCloseTo(allDayLabelBox.y, 0);
     await calendarScroller.evaluate((element) => {
       element.scrollTop = 0;
       element.scrollLeft = 0;
