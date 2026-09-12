@@ -3,6 +3,7 @@ import arrowDownIcon from "@iconify-icons/lucide/arrow-down";
 import arrowLeftIcon from "@iconify-icons/lucide/arrow-left";
 import arrowRightIcon from "@iconify-icons/lucide/arrow-right";
 import arrowUpIcon from "@iconify-icons/lucide/arrow-up";
+import copyIcon from "@iconify-icons/lucide/copy";
 import minusIcon from "@iconify-icons/lucide/minus";
 import plusIcon from "@iconify-icons/lucide/plus";
 import stickyNoteIcon from "@iconify-icons/lucide/sticky-note";
@@ -87,7 +88,14 @@ type LodgingPointer = {
   guideY: number;
 };
 
-type ItemAction = "earlier" | "later" | "previous-day" | "next-day" | "shorter" | "longer";
+type ItemAction =
+  | "earlier"
+  | "later"
+  | "previous-day"
+  | "next-day"
+  | "shorter"
+  | "longer"
+  | "clone";
 type ActionMenuState = {
   segment: CalendarSegment;
   left: number;
@@ -113,6 +121,7 @@ export function Calendar({
   onChangeItem,
   onMoveNote,
   onChangeLodging,
+  onCloneItem,
 }: {
   days: readonly TripDay[];
   orderedItems: readonly TripItem[];
@@ -125,6 +134,7 @@ export function Calendar({
   onChangeItem: (change: ItemChange) => { clamped: boolean };
   onMoveNote: (noteId: string, dayId: string, afterItemId: string | null) => void;
   onChangeLodging: (item: TripItem, startDate: string, endDate: string) => { clamped: boolean };
+  onCloneItem: (item: TripItem) => void;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const [gesture, setGesture] = useState<Gesture | null>(null);
@@ -448,7 +458,7 @@ export function Calendar({
     });
   };
 
-  const adjustItem = (segment: CalendarSegment, action: ItemAction) => {
+  const adjustItem = (segment: CalendarSegment, action: Exclude<ItemAction, "clone">) => {
     const sourceDayIndex = dayIndex.get(segment.item.dayId ?? "") ?? 0;
     const sourceStart =
       sourceDayIndex * 1440 +
@@ -823,7 +833,10 @@ export function Calendar({
         <ItemActions
           title={itemTitle(actionMenu.segment.item, places)}
           position={{ left: actionMenu.left, top: actionMenu.top }}
-          onAction={(action) => adjustItem(actionMenu.segment, action)}
+          onAction={(action) => {
+            if (action === "clone") onCloneItem(actionMenu.segment.item);
+            else adjustItem(actionMenu.segment, action);
+          }}
           onClose={() => setActionMenu(null)}
         />
       ) : null}
@@ -894,6 +907,7 @@ function ItemActions({
     ["later", arrowDownIcon, "15 minutes later"],
     ["longer", plusIcon, "15 minutes longer"],
     ["shorter", minusIcon, "15 minutes shorter"],
+    ["clone", copyIcon, "Clone"],
   ] as const;
   useEffect(() => {
     menu.current?.querySelector<HTMLButtonElement>("button")?.focus();

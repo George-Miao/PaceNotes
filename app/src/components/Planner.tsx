@@ -771,6 +771,17 @@ export function Planner({ tripId }: { tripId: string }) {
     selectCalendarDay(change.dayId);
     return { clamped: result.clamped };
   };
+  const cloneCalendarItem = (item: TripItem) => {
+    const latest = readTripDocument(document);
+    const source = latest.items[item.id];
+    if (!source) return;
+    const sourceIndex = latest.order.indexOf(source.id);
+    addTripItem(
+      document,
+      { ...source, id: crypto.randomUUID() },
+      sourceIndex < 0 ? undefined : sourceIndex + 1,
+    );
+  };
   const moveCalendarNote = (noteId: string, dayId: string, afterItemId: string | null) => {
     const note = snapshot.items[noteId];
     if (note?.type !== "note") return;
@@ -1248,6 +1259,7 @@ export function Planner({ tripId }: { tripId: string }) {
                 onSelectDay={selectCalendarDay}
                 onChangeItem={changeCalendarItem}
                 onMoveNote={moveCalendarNote}
+                onCloneItem={cloneCalendarItem}
                 onChangeLodging={changeCalendarLodging}
               />
             ) : null}

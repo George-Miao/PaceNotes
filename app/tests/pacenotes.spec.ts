@@ -992,7 +992,7 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     });
     await expect(actionMenu).toBeVisible();
     const actionButtons = actionMenu.getByRole("button");
-    await expect(actionButtons).toHaveCount(6);
+    await expect(actionButtons).toHaveCount(7);
     expect(
       await actionButtons.evaluateAll((buttons) => buttons.map((button) => button.ariaLabel)),
     ).toEqual([
@@ -1002,8 +1002,9 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
       "15 minutes later",
       "15 minutes longer",
       "15 minutes shorter",
+      "Clone",
     ]);
-    expect(await actionButtons.locator("svg").count()).toBe(6);
+    expect(await actionButtons.locator("svg").count()).toBe(7);
     const actionButtonTops = await actionButtons.evaluateAll((buttons) =>
       buttons.map((button) => button.getBoundingClientRect().top),
     );
@@ -1044,6 +1045,16 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
       .click();
     await expect(actionMenu).toBeHidden();
     await expect(page).toHaveURL(/#2027-04-11$/);
+    await block.click({ button: "right" });
+    await actionMenu.getByRole("button", { name: "Clone", exact: true }).click();
+    await expect(actionMenu).toBeHidden();
+    const clonedBlocks = calendar.getByRole("button", {
+      name: "Morning museum",
+      exact: true,
+    });
+    await expect(clonedBlocks).toHaveCount(2);
+    await expect(clonedBlocks.nth(0)).toContainText("09:15 - 10:15");
+    await expect(clonedBlocks.nth(1)).toContainText("09:15 - 10:15");
 
     await itineraryButton.click();
     await expect(calendar).toBeHidden();
