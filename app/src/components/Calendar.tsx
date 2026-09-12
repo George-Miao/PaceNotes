@@ -21,14 +21,16 @@ import type { RouteLeg } from "~/features/google/route-legs";
 import {
   buildCalendarLayout,
   type CalendarSegment,
+  calendarDayMinutes,
   calendarHourEm,
   calendarMinimumMinutes,
+  calendarMinuteForTime,
   calendarSnapMinutes,
   snapCalendarMinute,
   timeForCalendarMinute,
 } from "~/features/trip/calendar-layout";
 import { travelModeLabel } from "~/features/trip/language";
-import type { TripDay, TripItem, TripLanguage } from "~/features/trip/model";
+import type { CalendarHours, TripDay, TripItem, TripLanguage } from "~/features/trip/model";
 import styles from "./Calendar.module.css";
 import { iconForItem, iconForTravelMode } from "./item-icon";
 
@@ -107,7 +109,6 @@ type LongPress = {
   startY: number;
   timer: number;
 };
-const hourLabels = Array.from({ length: 25 }, (_, hour) => `${String(hour).padStart(2, "0")}:00`);
 
 export function Calendar({
   days,
@@ -116,6 +117,7 @@ export function Calendar({
   places,
   language,
   selectedId,
+  calendarHours,
   onSelect,
   onSelectDay,
   onChangeItem,
@@ -128,6 +130,7 @@ export function Calendar({
   legsByDay: ReadonlyMap<string, readonly RouteLeg[]>;
   places: ReadonlyMap<string, GooglePlaceView>;
   language: TripLanguage;
+  calendarHours: CalendarHours;
   selectedId: string | null;
   onSelect: (item: TripItem) => void;
   onSelectDay: (dayId: string) => void;
@@ -145,6 +148,14 @@ export function Calendar({
   const [actionMenu, setActionMenu] = useState<ActionMenuState | null>(null);
   const [lodgingPreview, setLodgingPreview] = useState<LodgingPreview | null>(null);
   const [lodgingPointer, setLodgingPointer] = useState<LodgingPointer | null>(null);
+  const hourLabels = useMemo(
+    () =>
+      Array.from({ length: 25 }, (_, index) => {
+        const hour = (calendarHours === 30 ? 6 : 0) + index;
+        return `${String(hour).padStart(2, "0")}:00`;
+      }),
+    [calendarHours],
+  );
   const dayIndex = useMemo(() => new Map(days.map((day, index) => [day.id, index])), [days]);
   const effectiveItems = useMemo(
     () =>
@@ -163,18 +174,20 @@ export function Calendar({
     [orderedItems, preview],
   );
   const layout = useMemo(
-    () => buildCalendarLayout(days, orderedItems, legsByDay),
-    [days, legsByDay, orderedItems],
+    () => buildCalendarLayout(days, orderedItems, legsByDay, calendarHours),
+    [calendarHours, days, legsByDay, orderedItems],
   );
   const previewSegmentsByDay = useMemo(
     () =>
       new Map(
-        (preview ? buildCalendarLayout(days, effectiveItems, legsByDay) : []).map((column) => [
-          column.day.id,
-          column.segments.filter((segment) => segment.item.id === preview?.itemId),
-        ]),
+        (preview ? buildCalendarLayout(days, effectiveItems, legsByDay, calendarHours) : []).map(
+          (column) => [
+            column.day.id,
+            column.segments.filter((segment) => segment.item.id === preview?.itemId),
+          ],
+        ),
       ),
-    [days, effectiveItems, legsByDay, preview],
+    [calendarHours, days, effectiveItems, legsByDay, preview],
   );
   const lodgingTarget = useMemo(() => {
     if (!lodgingPreview) return null;
@@ -250,25 +263,29 @@ export function Calendar({
         );
       }
       const { dayDelta, minuteDelta } = pointerDelta(scroller.current, event, gesture);
-      const maximum = days.length * 24 * 60;
+      const maximum = days.length * calendarDayMinutes;
       let start = gesture.startAbsolute;
       let end = gesture.endAbsolute;
       if (gesture.edge === "move") {
-        start = clamp(gesture.startAbsolute + dayDelta * 1440 + minuteDelta, 0, maximum - 15);
+        start = clamp(
+          gesture.startAbsolute + dayDelta * calendarDayMinutes + minuteDelta,
+          0,
+          maximum - calendarMinimumMinutes,
+        );
         end = start + (gesture.endAbsolute - gesture.startAbsolute);
       } else if (gesture.edge === "start") {
         start = clamp(
-          gesture.startAbsolute + dayDelta * 1440 + minuteDelta,
+          gesture.startAbsolute + dayDelta * calendarDayMinutes + minuteDelta,
           0,
           gesture.endAbsolute - calendarMinimumMinutes,
         );
       } else {
         end = Math.max(
           gesture.startAbsolute + calendarMinimumMinutes,
-          gesture.endAbsolute + dayDelta * 1440 + minuteDelta,
+          gesture.endAbsolute + dayDelta * calendarDayMinutes + minuteDelta,
         );
       }
-      setPreview(previewForAbsolute(gesture.item.id, start, end, days));
+      setPreview(previewForAbsolute(gesture.item.id, start, end, days, calendarHours));
     };
     const finish = (event: PointerEvent) => {
       if (!gesture || event.pointerId !== gesture.pointerId) return;
@@ -285,8 +302,10 @@ export function Calendar({
         if (!next) return;
         const startIndex = dayIndex.get(next.dayId) ?? 0;
         const finalMinute =
-          startIndex * 1440 + minutesForTime(next.startTime) + next.durationMinutes;
-        const finalIndex = Math.max(0, Math.ceil(finalMinute / 1440) - 1);
+          startIndex * calendarDayMinutes +
+          calendarMinuteForTime(next.startTime, calendarHours) +
+          next.durationMinutes;
+        const finalIndex = Math.max(0, Math.ceil(finalMinute / calendarDayMinutes) - 1);
         const lastKnown = days.at(-1)?.date;
         const extendThrough =
           finalIndex >= days.length && lastKnown
@@ -329,7 +348,7 @@ export function Calendar({
       window.removeEventListener("pointerup", finish);
       window.removeEventListener("pointercancel", finish);
     };
-  }, [dayIndex, days, gesture, onChangeItem, onChangeLodging, preview]);
+  }, [calendarHours, dayIndex, days, gesture, onChangeItem, onChangeLodging, preview]);
 
   const openItemActions = (segment: CalendarSegment, x: number, y: number) => {
     if (longPress.current) {
@@ -361,8 +380,11 @@ export function Calendar({
     event.preventDefault();
     const itemDay = dayIndex.get(segment.item.dayId ?? "") ?? 0;
     const start =
-      itemDay * 1440 +
-      minutesForTime(segment.item.startTime ?? timeForCalendarMinute(segment.startMinute));
+      itemDay * calendarDayMinutes +
+      calendarMinuteForTime(
+        segment.item.startTime ?? timeForCalendarMinute(segment.startMinute, calendarHours),
+        calendarHours,
+      );
     setLimitMessage("");
     setActionMenu(null);
     const bounds = event.currentTarget
@@ -461,21 +483,24 @@ export function Calendar({
   const adjustItem = (segment: CalendarSegment, action: Exclude<ItemAction, "clone">) => {
     const sourceDayIndex = dayIndex.get(segment.item.dayId ?? "") ?? 0;
     const sourceStart =
-      sourceDayIndex * 1440 +
-      minutesForTime(segment.item.startTime ?? timeForCalendarMinute(segment.startMinute));
+      sourceDayIndex * calendarDayMinutes +
+      calendarMinuteForTime(
+        segment.item.startTime ?? timeForCalendarMinute(segment.startMinute, calendarHours),
+        calendarHours,
+      );
     const sourceDuration = Math.max(calendarMinimumMinutes, segment.item.durationMinutes || 60);
     let start = sourceStart;
     let duration = sourceDuration;
     if (action === "earlier") start -= 15;
     if (action === "later") start += 15;
-    if (action === "previous-day") start -= 1440;
-    if (action === "next-day") start += 1440;
+    if (action === "previous-day") start -= calendarDayMinutes;
+    if (action === "next-day") start += calendarDayMinutes;
     if (action === "shorter") duration = Math.max(calendarMinimumMinutes, duration - 15);
     if (action === "longer") duration += 15;
     if (start < 0) return;
-    const next = previewForAbsolute(segment.item.id, start, start + duration, days);
+    const next = previewForAbsolute(segment.item.id, start, start + duration, days, calendarHours);
     if (!next) return;
-    const finalIndex = Math.max(0, Math.ceil((start + duration) / 1440) - 1);
+    const finalIndex = Math.max(0, Math.ceil((start + duration) / calendarDayMinutes) - 1);
     const lastKnown = days.at(-1)?.date;
     const extendThrough =
       finalIndex >= days.length && lastKnown
@@ -623,9 +648,9 @@ export function Calendar({
               </small>
             </div>
           ) : null}
-          <div className={styles.timeGutter} aria-hidden="true">
-            {hourLabels.map((label) => (
-              <time key={label} style={{ top: `${(Number(label.slice(0, 2)) / 24) * 100}%` }}>
+          <div className={styles.timeGutter} data-calendar-time-gutter aria-hidden="true">
+            {hourLabels.map((label, index) => (
+              <time key={label} style={{ top: `${(index / 24) * 100}%` }}>
                 {label}
               </time>
             ))}
@@ -656,8 +681,8 @@ export function Calendar({
                     <span>{itemTitle(segment.item, places)}</span>
                   </strong>
                   <time>
-                    {timeForCalendarMinute(segment.startMinute)} -{" "}
-                    {timeForCalendarMinute(segment.endMinute)}
+                    {timeForCalendarMinute(segment.startMinute, calendarHours)} -{" "}
+                    {timeForCalendarMinute(segment.endMinute, calendarHours)}
                   </time>
                 </div>
               ))}
@@ -746,7 +771,7 @@ export function Calendar({
                       <time>
                         {segment.provisional
                           ? "Untimed"
-                          : `${timeForCalendarMinute(segment.startMinute)} - ${timeForCalendarMinute(segment.endMinute)}`}
+                          : `${timeForCalendarMinute(segment.startMinute, calendarHours)} - ${timeForCalendarMinute(segment.endMinute, calendarHours)}`}
                       </time>
                     </button>
                     {!segment.continuesAfter ? (
@@ -795,8 +820,11 @@ export function Calendar({
           <time>
             {preview?.startTime ?? gesture.item.startTime ?? "08:00"} -{" "}
             {timeForCalendarMinute(
-              minutesForTime(preview?.startTime ?? gesture.item.startTime ?? "08:00") +
-                ((preview?.durationMinutes ?? gesture.item.durationMinutes) || 60),
+              calendarMinuteForTime(
+                preview?.startTime ?? gesture.item.startTime ?? "08:00",
+                calendarHours,
+              ) + ((preview?.durationMinutes ?? gesture.item.durationMinutes) || 60),
+              calendarHours,
             )}
           </time>
         </div>
@@ -984,8 +1012,9 @@ function previewForAbsolute(
   start: number,
   end: number,
   days: readonly TripDay[],
+  calendarHours: CalendarHours,
 ): Preview | null {
-  const dayIndex = Math.floor(start / 1440);
+  const dayIndex = Math.floor(start / calendarDayMinutes);
   if (dayIndex < 0) return null;
   const firstDay = days[0];
   const dayId = days[dayIndex]?.id ?? (firstDay ? addDays(firstDay.date, dayIndex) : null);
@@ -993,7 +1022,7 @@ function previewForAbsolute(
   return {
     itemId,
     dayId,
-    startTime: timeForCalendarMinute(start),
+    startTime: timeForCalendarMinute(start, calendarHours),
     durationMinutes: Math.max(calendarMinimumMinutes, snapCalendarMinute(end - start)),
   };
 }
@@ -1037,11 +1066,6 @@ function itemVersion(item: TripItem): string {
 
 function minuteEm(minutes: number): string {
   return `${(minutes / 60) * calendarHourEm}em`;
-}
-
-function minutesForTime(value: string): number {
-  const [hour = "0", minute = "0"] = value.split(":");
-  return Number(hour) * 60 + Number(minute);
 }
 
 function formatDay(date: string, language: TripLanguage): string {

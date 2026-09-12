@@ -35,6 +35,7 @@ describe("trip model", () => {
       language: "en",
       distanceUnit: "metric",
       defaultTravelMode: "DRIVING",
+      calendarHours: 24,
     });
   });
 

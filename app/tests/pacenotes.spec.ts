@@ -2850,12 +2850,19 @@ test("trip settings control language, units, default travel, and persist", async
     await expect(settings.getByLabel("Language")).toHaveValue("en");
     await expect(settings.getByLabel("Distance units")).toHaveValue("metric");
     await expect(settings.getByLabel("Default transportation")).toHaveValue("DRIVING");
+    await expect(settings.getByLabel("Calendar hours")).toHaveValue("24");
     await settings.getByLabel("Language").selectOption("fr");
     await settings.getByLabel("Distance units").selectOption("imperial");
     await settings.getByLabel("Default transportation").selectOption("WALKING");
+    await settings.getByLabel("Calendar hours").selectOption("30");
     await settings.getByRole("button", { name: "Save settings" }).click();
 
     await expect(page.locator(".day-heading h2").first()).toContainText("samedi 10 avril");
+    await page.getByRole("button", { name: "Calendar", exact: true }).click();
+    const calendarHours = page.locator("[data-calendar-time-gutter] time");
+    await expect(calendarHours.first()).toHaveText("06:00");
+    await expect(calendarHours.last()).toHaveText("30:00");
+    await page.getByRole("button", { name: "Itinerary", exact: true }).click();
     await expect(page.locator(".transport-leg").first()).toContainText(/10\s*min - 0,6\s*mi/);
     await page.locator(".day-section").first().getByRole("button", { name: "Lieu" }).click();
     await page.locator("gmp-place-autocomplete").evaluate((element) => {
@@ -2888,12 +2895,14 @@ test("trip settings control language, units, default travel, and persist", async
           language: snapshot.language,
           distanceUnit: snapshot.distanceUnit,
           defaultTravelMode: snapshot.defaultTravelMode,
+          calendarHours: snapshot.calendarHours,
         };
       })
       .toEqual({
         language: "fr",
         distanceUnit: "imperial",
         defaultTravelMode: "WALKING",
+        calendarHours: 30,
       });
     await page.reload();
     await page.getByRole("button", { name: "Paramètres du voyage" }).click();
@@ -2906,6 +2915,9 @@ test("trip settings control language, units, default travel, and persist", async
     await expect(
       page.getByRole("dialog", { name: "Paramètres du voyage" }).getByLabel("Transport par défaut"),
     ).toHaveValue("WALKING");
+    await expect(
+      page.getByRole("dialog", { name: "Paramètres du voyage" }).getByLabel("Heures du calendrier"),
+    ).toHaveValue("30");
   } finally {
     await db.delete(trips).where(eq(trips.id, id));
   }

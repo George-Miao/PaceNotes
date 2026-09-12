@@ -1,10 +1,10 @@
 import type { RouteLeg } from "~/features/google/route-legs";
-import type { TripDay, TripItem } from "./model";
+import type { CalendarHours, TripDay, TripItem } from "./model";
 
 export const calendarHourEm = 4;
 export const calendarSnapMinutes = 15;
 export const calendarMinimumMinutes = 15;
-export const calendarDefaultStartMinutes = 8 * 60;
+export const calendarDayMinutes = 24 * 60;
 
 export type CalendarSegment = {
   key: string;
@@ -47,6 +47,7 @@ export function buildCalendarLayout(
   days: readonly TripDay[],
   orderedItems: readonly TripItem[],
   legsByDay: ReadonlyMap<string, readonly RouteLeg[]>,
+  calendarHours: CalendarHours,
 ): CalendarDayLayout[] {
   const dayIndex = new Map(days.map((day, index) => [day.id, index]));
   const segmentsByDay = new Map(days.map((day) => [day.id, [] as CalendarSegment[]]));
@@ -64,7 +65,7 @@ export function buildCalendarLayout(
         segmentsByDay,
         item,
         index,
-        minutesForTime(item.startTime),
+        calendarMinuteForTime(item.startTime, calendarHours),
         duration,
         false,
       );
@@ -72,8 +73,12 @@ export function buildCalendarLayout(
     }
     const daySegments = segmentsByDay.get(item.dayId);
     if (!daySegments) continue;
-    const start = firstOpenMinute(daySegments, calendarDefaultStartMinutes, duration);
-    if (start + duration > 24 * 60) {
+    const start = firstOpenMinute(
+      daySegments,
+      calendarMinuteForTime("08:00", calendarHours),
+      duration,
+    );
+    if (start + duration > calendarDayMinutes) {
       overflowByDay.get(item.dayId)?.push(item);
       continue;
     }
@@ -101,8 +106,16 @@ export function snapCalendarMinute(value: number): number {
   return Math.max(0, Math.round(value / calendarSnapMinutes) * calendarSnapMinutes);
 }
 
-export function timeForCalendarMinute(value: number): string {
-  const minute = ((Math.floor(value) % (24 * 60)) + 24 * 60) % (24 * 60);
+export function calendarMinuteForTime(value: string, calendarHours: CalendarHours): number {
+  const minute = minutesForTime(value);
+  if (calendarHours === 24) return minute;
+  return minute >= 6 * 60 ? minute - 6 * 60 : minute + 18 * 60;
+}
+
+export function timeForCalendarMinute(value: number, calendarHours: CalendarHours): string {
+  const origin = calendarHours === 30 ? 6 * 60 : 0;
+  const minute =
+    (((Math.floor(value) + origin) % calendarDayMinutes) + calendarDayMinutes) % calendarDayMinutes;
   return `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`;
 }
 
@@ -126,7 +139,7 @@ function addSegments(
   while (remaining > 0) {
     const day = days[startDay + dayOffset];
     if (!day) return;
-    const available = 24 * 60 - minute;
+    const available = calendarDayMinutes - minute;
     const used = Math.min(remaining, available);
     byDay.get(day.id)?.push({
       key: `${item.id}:${day.id}:${dayOffset}`,
@@ -225,9 +238,9 @@ function buildRouteGaps(
   const dayIndex = new Map(days.map((day, index) => [day.id, index]));
   const segments = [...segmentsByDay.values()].flat();
   const absoluteStart = (segment: CalendarSegment) =>
-    (dayIndex.get(segment.dayId) ?? 0) * 1440 + segment.startMinute;
+    (dayIndex.get(segment.dayId) ?? 0) * calendarDayMinutes + segment.startMinute;
   const absoluteEnd = (segment: CalendarSegment) =>
-    (dayIndex.get(segment.dayId) ?? 0) * 1440 + segment.endMinute;
+    (dayIndex.get(segment.dayId) ?? 0) * calendarDayMinutes + segment.endMinute;
   for (const legs of legsByDay.values()) {
     for (const leg of legs) {
       if (leg.durationMinutes === null) continue;
@@ -252,11 +265,11 @@ function buildRouteGaps(
       );
       let part = 0;
       while (remaining > 0) {
-        const index = Math.floor(cursor / 1440);
+        const index = Math.floor(cursor / calendarDayMinutes);
         const day = days[index];
         if (!day) break;
-        const startMinute = cursor % 1440;
-        const used = Math.min(remaining, 1440 - startMinute);
+        const startMinute = cursor % calendarDayMinutes;
+        const used = Math.min(remaining, calendarDayMinutes - startMinute);
         gaps.get(day.id)?.push({
           key: `${leg.fromId}:${leg.toId}:${part}`,
           dayId: day.id,

@@ -1,5 +1,6 @@
 import * as Y from "yjs";
 import {
+  calendarHoursSchema,
   distanceUnitSchema,
   placeReferenceSchema,
   type TripItem,
@@ -29,6 +30,7 @@ export function initializeTripDocument(document: Y.Doc, snapshot: TripSnapshot):
     metadata.set("defaultTravelMode", snapshot.defaultTravelMode);
     metadata.set("language", snapshot.language);
     metadata.set("distanceUnit", snapshot.distanceUnit);
+    metadata.set("calendarHours", snapshot.calendarHours);
 
     const days = document.getArray<{ id: string; date: string }>(daysKey);
     if (days.length > 0) days.delete(0, days.length);
@@ -55,6 +57,7 @@ export function readTripDocument(document: Y.Doc): TripSnapshot {
   const language = tripLanguageSchema.safeParse(metadata.get("language"));
   const distanceUnit = distanceUnitSchema.safeParse(metadata.get("distanceUnit"));
   const defaultTravelMode = travelModeSchema.safeParse(metadata.get("defaultTravelMode"));
+  const calendarHours = calendarHoursSchema.safeParse(metadata.get("calendarHours"));
 
   return {
     id: String(metadata.get("id") ?? ""),
@@ -66,6 +69,7 @@ export function readTripDocument(document: Y.Doc): TripSnapshot {
     language: language.success ? language.data : "en",
     distanceUnit: distanceUnit.success ? distanceUnit.data : "metric",
     defaultTravelMode: defaultTravelMode.success ? defaultTravelMode.data : "DRIVING",
+    calendarHours: calendarHours.success ? calendarHours.data : 24,
     days: document.getArray<{ id: string; date: string }>(daysKey).toArray(),
     order: document.getArray<string>(orderKey).toArray(),
     items,
@@ -87,6 +91,7 @@ export function setTripSettings(document: Y.Doc, settings: TripSettings): void {
     metadata.set("language", parsed.language);
     metadata.set("distanceUnit", parsed.distanceUnit);
     metadata.set("defaultTravelMode", parsed.defaultTravelMode);
+    metadata.set("calendarHours", parsed.calendarHours);
   }, "trip-settings");
 }
 

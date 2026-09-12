@@ -21,7 +21,7 @@ describe("calendar layout", () => {
     const overlap = place("overlap", firstDay, "09:00");
     const untimed = place("untimed", firstDay, null);
 
-    const [day] = buildCalendarLayout(days, [first, overlap, untimed], new Map());
+    const [day] = buildCalendarLayout(days, [first, overlap, untimed], new Map(), 24);
 
     expect(day?.segments.map((segment) => [segment.item.id, segment.startMinute])).toEqual([
       ["first", 480],
@@ -42,7 +42,7 @@ describe("calendar layout", () => {
     const overnight = place("overnight", firstDay, "23:30", 120);
     const attached = itemForCreate("note", firstDay, { id: "attached", title: "Attached" });
 
-    const layout = buildCalendarLayout(days, [leading, overnight, attached], new Map());
+    const layout = buildCalendarLayout(days, [leading, overnight, attached], new Map(), 24);
 
     expect(layout[0]?.segments[0]).toMatchObject({
       item: { id: "overnight" },
@@ -79,7 +79,12 @@ describe("calendar layout", () => {
       state: "ready",
     };
 
-    const layout = buildCalendarLayout(days, [source, destination], new Map([[firstDay, [leg]]]));
+    const layout = buildCalendarLayout(
+      days,
+      [source, destination],
+      new Map([[firstDay, [leg]]]),
+      24,
+    );
 
     expect(layout[0]?.routeGaps).toEqual([
       expect.objectContaining({
@@ -97,5 +102,34 @@ describe("calendar layout", () => {
         conflict: true,
       }),
     ]);
+  });
+
+  it("shows a 30-hour planning day from 06:00 through the next 06:00", () => {
+    const morning = place("morning", firstDay, "06:00");
+    const afterMidnight = place("after-midnight", firstDay, "02:00");
+    const boundary = place("boundary", firstDay, "05:30", 60);
+
+    const layout = buildCalendarLayout(days, [morning, afterMidnight, boundary], new Map(), 30);
+
+    expect(layout[0]?.segments.find((segment) => segment.item.id === "morning")).toMatchObject({
+      startMinute: 0,
+      endMinute: 60,
+    });
+    expect(
+      layout[0]?.segments.find((segment) => segment.item.id === "after-midnight"),
+    ).toMatchObject({
+      startMinute: 1200,
+      endMinute: 1260,
+    });
+    expect(layout[0]?.segments.find((segment) => segment.item.id === "boundary")).toMatchObject({
+      startMinute: 1410,
+      endMinute: 1440,
+      continuesAfter: true,
+    });
+    expect(layout[1]?.segments.find((segment) => segment.item.id === "boundary")).toMatchObject({
+      startMinute: 0,
+      endMinute: 30,
+      continuesBefore: true,
+    });
   });
 });

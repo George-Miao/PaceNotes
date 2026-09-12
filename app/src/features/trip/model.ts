@@ -6,6 +6,7 @@ export const travelModes = ["DRIVING", "TRANSIT", "WALKING"] as const;
 export const transportModes = ["plane", "train", "bus", "ferry", "custom"] as const;
 export const tripLanguages = ["en", "de", "es", "fr", "it", "ja", "zh-CN", "zh-TW"] as const;
 export const distanceUnits = ["metric", "imperial"] as const;
+export const calendarHourOptions = [24, 30] as const;
 export const travelModeLabels = {
   DRIVING: "Car",
   TRANSIT: "Public Transport",
@@ -23,10 +24,12 @@ export type ItemType = (typeof itemTypes)[number];
 export type TravelMode = (typeof travelModes)[number];
 export type TripLanguage = (typeof tripLanguages)[number];
 export type DistanceUnit = (typeof distanceUnits)[number];
+export type CalendarHours = (typeof calendarHourOptions)[number];
 export type TripSettings = {
   language: TripLanguage;
   distanceUnit: DistanceUnit;
   defaultTravelMode: TravelMode;
+  calendarHours: CalendarHours;
 };
 
 export type PlaceReference = {
@@ -73,6 +76,7 @@ export type TripSnapshot = {
   language: TripLanguage;
   distanceUnit: DistanceUnit;
   defaultTravelMode: TravelMode;
+  calendarHours: CalendarHours;
   days: TripDay[];
   order: string[];
   items: Record<string, TripItem>;
@@ -94,10 +98,12 @@ const localTime = z
 export const tripLanguageSchema = z.enum(tripLanguages);
 export const distanceUnitSchema = z.enum(distanceUnits);
 export const travelModeSchema = z.enum(travelModes);
+export const calendarHoursSchema = z.union([z.literal(24), z.literal(30)]);
 export const tripSettingsSchema = z.object({
   language: tripLanguageSchema,
   distanceUnit: distanceUnitSchema,
   defaultTravelMode: travelModeSchema,
+  calendarHours: calendarHoursSchema,
 });
 
 export const placeReferenceSchema = z.object({
@@ -202,6 +208,7 @@ export function createInitialSnapshot(id: string, input: NewTripInput): TripSnap
     language: "en",
     distanceUnit: "metric",
     defaultTravelMode: "DRIVING",
+    calendarHours: 24,
     days,
     order: [],
     items: {},

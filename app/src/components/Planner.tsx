@@ -1254,6 +1254,7 @@ export function Planner({ tripId }: { tripId: string }) {
                 legsByDay={routeLegs}
                 places={placeViews}
                 language={snapshot.language}
+                calendarHours={snapshot.calendarHours}
                 selectedId={selectedId}
                 onSelect={(item) => selectItem(item.id, item.dayId ?? undefined)}
                 onSelectDay={selectCalendarDay}
@@ -1604,6 +1605,7 @@ export function Planner({ tripId }: { tripId: string }) {
               language: snapshot.language,
               distanceUnit: snapshot.distanceUnit,
               defaultTravelMode: snapshot.defaultTravelMode,
+              calendarHours: snapshot.calendarHours,
             }}
             onClose={() => setSettingsOpen(false)}
             onSave={(settings) => {

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { travelModeLabel, useTripLanguage, useTripText } from "~/features/trip/language";
 import {
+  type CalendarHours,
+  calendarHourOptions,
   type DistanceUnit,
   distanceUnits,
   type TravelMode,
@@ -97,6 +99,24 @@ export function TripSettingsDialog({
             {travelModes.map((mode) => (
               <option key={mode} value={mode}>
                 {travelModeLabel(language, mode)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>{text("calendarHours")}</span>
+          <select
+            value={draft.calendarHours}
+            onChange={(event) =>
+              setDraft((current) => ({
+                ...current,
+                calendarHours: Number(event.target.value) as CalendarHours,
+              }))
+            }
+          >
+            {calendarHourOptions.map((hours) => (
+              <option key={hours} value={hours}>
+                {text(hours === 24 ? "calendar24Hours" : "calendar30Hours")}
               </option>
             ))}
           </select>

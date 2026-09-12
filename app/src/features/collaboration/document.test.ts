@@ -39,6 +39,7 @@ describe("collaboration document", () => {
       language: "en",
       distanceUnit: "metric",
       defaultTravelMode: "DRIVING",
+      calendarHours: 24,
     });
   });
 
@@ -53,6 +54,7 @@ describe("collaboration document", () => {
       language: "fr",
       distanceUnit: "imperial",
       defaultTravelMode: "WALKING",
+      calendarHours: 30,
     });
 
     expect(transactions).toBe(1);
@@ -60,6 +62,7 @@ describe("collaboration document", () => {
       language: "fr",
       distanceUnit: "imperial",
       defaultTravelMode: "WALKING",
+      calendarHours: 30,
     });
   });
 
