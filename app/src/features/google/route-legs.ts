@@ -50,6 +50,19 @@ export type RouteLegPlan = {
   stops: MapStop[];
 };
 
+const minimumFutureDepartureMs = 60_000;
+
+export function routeDepartureTime(
+  travelMode: TravelMode,
+  departureTime: string | undefined,
+  now = Date.now(),
+): Date | undefined {
+  if ((travelMode !== "DRIVING" && travelMode !== "TRANSIT") || !departureTime) return undefined;
+  const timestamp = Date.parse(departureTime);
+  if (!Number.isFinite(timestamp) || timestamp < now + minimumFutureDepartureMs) return undefined;
+  return new Date(timestamp);
+}
+
 export function useRouteLegs(
   plans: RouteLegPlan[],
   language: TripLanguage,
@@ -135,10 +148,7 @@ export function useRouteLegs(
           const computed = await Promise.all(
             pairs.map(async ({ from, stop }): Promise<RouteLeg> => {
               try {
-                const departureTime =
-                  stop.travelMode === "DRIVING" || stop.travelMode === "TRANSIT"
-                    ? from.departureTime
-                    : undefined;
+                const departureTime = routeDepartureTime(stop.travelMode, from.departureTime);
                 const response = await Route.computeRoutes({
                   origin: { lat: from.latitude, lng: from.longitude },
                   destination: { lat: stop.latitude, lng: stop.longitude },
