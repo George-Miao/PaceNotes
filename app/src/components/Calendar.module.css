@@ -112,6 +112,9 @@
 }
 
 .lodging > button:not(.dateHandle) {
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
   min-width: 0;
   overflow: hidden;
   padding: 0.375em 0.5em;
@@ -122,9 +125,14 @@
   font-size: 0.6875em;
   font-weight: 700;
   text-align: left;
+  cursor: grab;
+}
+
+.lodgingTitle {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: grab;
 }
 
 .lodging svg {

@@ -408,7 +408,8 @@ export function Calendar({
                         onClick={() => onSelect(item)}
                         onPointerDown={(event) => startLodging(event, item, "move")}
                       >
-                        <Icon icon={bedDoubleIcon} /> {itemTitle(item, places)}
+                        <Icon icon={bedDoubleIcon} />
+                        <span className={styles.lodgingTitle}>{itemTitle(item, places)}</span>
                       </button>
                       {ends ? (
                         <button

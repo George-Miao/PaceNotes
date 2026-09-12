@@ -776,9 +776,17 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     await noteButton.hover();
     await expect(calendar.getByRole("tooltip")).toHaveText("Meet by the east entrance.");
     await expect(calendar.getByRole("tooltip")).toBeVisible();
-    await expect(
-      calendar.getByRole("button", { name: "City hotel", exact: true }).first(),
-    ).toBeVisible();
+    const lodgingButton = calendar.getByRole("button", { name: "City hotel", exact: true }).first();
+    await expect(lodgingButton).toBeVisible();
+    const lodgingIconBox = await lodgingButton.locator("svg").boundingBox();
+    const lodgingTitleBox = await lodgingButton.locator("span").boundingBox();
+    if (!lodgingIconBox || !lodgingTitleBox) {
+      throw new Error("Missing lodging label geometry");
+    }
+    expect(lodgingIconBox.y + lodgingIconBox.height / 2).toBeCloseTo(
+      lodgingTitleBox.y + lodgingTitleBox.height / 2,
+      0,
+    );
 
     const calendarScroller = calendar.locator(":scope > div").first();
     const firstDayHeader = calendar.locator("header").first();
