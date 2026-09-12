@@ -747,6 +747,7 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
   const note = itemForCreate("note", dayId, {
     id: "calendar-note",
     title: "Bring tickets",
+    details: "Meet by the east entrance.",
   });
   const lodging = itemForCreate("lodging", dayId, {
     id: "calendar-hotel",
@@ -767,7 +768,14 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     const calendar = page.getByRole("region", { name: "Trip calendar" });
     await expect(calendarButton).toHaveAttribute("aria-pressed", "true");
     await expect(calendar).toBeVisible();
+    expect(await controls.evaluate((element) => element.closest("section")?.id)).toBe(
+      "planner-itinerary",
+    );
     await expect(calendar.getByRole("button", { name: "Bring tickets" })).toBeVisible();
+    const noteButton = calendar.getByRole("button", { name: "Bring tickets" });
+    await noteButton.hover();
+    await expect(calendar.getByRole("tooltip")).toHaveText("Meet by the east entrance.");
+    await expect(calendar.getByRole("tooltip")).toBeVisible();
     await expect(
       calendar.getByRole("button", { name: "City hotel", exact: true }).first(),
     ).toBeVisible();
@@ -779,8 +787,56 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     await blockButton.press("ArrowDown");
     await expect(block).toContainText("09:15 - 10:15");
 
+    const blockBox = await block.boundingBox();
+    if (!blockBox) throw new Error("Missing calendar block geometry");
+    const pointerX = blockBox.x + blockBox.width / 2;
+    const pointerY = blockBox.y + blockBox.height / 2 + 80;
+    await page.mouse.move(pointerX, blockBox.y + blockBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(pointerX, pointerY, { steps: 4 });
+    const dragProxy = calendar.locator("[data-calendar-drag-proxy]");
+    const dropPreview = calendar.locator("[data-calendar-drop-preview]");
+    await expect(dragProxy).toBeVisible();
+    await expect(dropPreview).toBeVisible();
+    const dragProxyBox = await dragProxy.boundingBox();
+    if (!dragProxyBox) throw new Error("Missing calendar drag proxy geometry");
+    expect(Math.abs(dragProxyBox.y + dragProxyBox.height / 2 - pointerY)).toBeLessThan(4);
+    const dropPreviewBox = await dropPreview.boundingBox();
+    if (!dropPreviewBox) throw new Error("Missing calendar drop preview geometry");
+    expect(Math.abs(dropPreviewBox.y + dropPreviewBox.height / 2 - pointerY)).toBeLessThan(16);
+    expect(
+      Number(await dropPreview.evaluate((element) => getComputedStyle(element).opacity)),
+    ).toBeLessThan(1);
+    await page.mouse.up();
+    await expect(dragProxy).toBeHidden();
+    await expect(dropPreview).toBeHidden();
+    await expect(block).not.toContainText("09:15 - 10:15");
+
+    const movedBlockBox = await block.boundingBox();
+    if (!movedBlockBox) throw new Error("Missing moved calendar block geometry");
+    const earlierPointerX = movedBlockBox.x + 4;
+    const earlierPointerY = movedBlockBox.y + movedBlockBox.height / 2;
+    await page.mouse.move(earlierPointerX, earlierPointerY);
+    await page.mouse.down();
+    await page.mouse.move(earlierPointerX, earlierPointerY - 80, { steps: 4 });
+    await expect(dragProxy).toBeVisible();
+    await expect(dropPreview).toBeVisible();
+    await page.mouse.up();
+    await expect(block).toContainText("09:15 - 10:15");
+
     await block.getByRole("button", { name: /Calendar actions/ }).click();
     await expect(page.getByRole("button", { name: "Next day", exact: true })).toBeVisible();
+    const nextDayAction = page.getByRole("button", { name: "Next day", exact: true });
+    expect(
+      await nextDayAction.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          bounds.left + bounds.width / 2,
+          bounds.top + bounds.height / 2,
+        );
+        return hit === element || element.contains(hit);
+      }),
+    ).toBe(true);
     await calendar
       .locator("[data-calendar-day='2027-04-11']")
       .first()

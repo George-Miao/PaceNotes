@@ -13,6 +13,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import type { GooglePlaceView } from "~/features/google/google";
 import { itemTitle } from "~/features/google/item-title";
 import type { RouteLeg } from "~/features/google/route-legs";
@@ -21,6 +22,7 @@ import {
   type CalendarSegment,
   calendarHourEm,
   calendarMinimumMinutes,
+  calendarSnapMinutes,
   snapCalendarMinute,
   timeForCalendarMinute,
 } from "~/features/trip/calendar-layout";
@@ -59,6 +61,14 @@ type LodgingGesture = {
 type Gesture = ItemGesture | LodgingGesture;
 
 type Preview = { itemId: string; dayId: string; startTime: string; durationMinutes: number };
+type DragPointer = {
+  x: number;
+  y: number;
+  offsetX: number;
+  offsetY: number;
+  width: number;
+  height: number;
+};
 const hourLabels = Array.from({ length: 25 }, (_, hour) => `${String(hour).padStart(2, "0")}:00`);
 
 export function Calendar({
@@ -90,6 +100,7 @@ export function Calendar({
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [limitMessage, setLimitMessage] = useState("");
+  const [dragPointer, setDragPointer] = useState<DragPointer | null>(null);
   const dayIndex = useMemo(() => new Map(days.map((day, index) => [day.id, index])), [days]);
   const effectiveItems = useMemo(
     () =>
@@ -108,8 +119,18 @@ export function Calendar({
     [orderedItems, preview],
   );
   const layout = useMemo(
-    () => buildCalendarLayout(days, effectiveItems, legsByDay),
-    [days, effectiveItems, legsByDay],
+    () => buildCalendarLayout(days, orderedItems, legsByDay),
+    [days, legsByDay, orderedItems],
+  );
+  const previewSegmentsByDay = useMemo(
+    () =>
+      new Map(
+        (preview ? buildCalendarLayout(days, effectiveItems, legsByDay) : []).map((column) => [
+          column.day.id,
+          column.segments.filter((segment) => segment.item.id === preview?.itemId),
+        ]),
+      ),
+    [days, effectiveItems, legsByDay, preview],
   );
   const itemVersions = useMemo(
     () => new Map(orderedItems.map((item) => [item.id, itemVersion(item)])),
@@ -121,6 +142,7 @@ export function Calendar({
     if (itemVersions.get(gesture.item.id) !== gesture.version) {
       setGesture(null);
       setPreview(null);
+      setDragPointer(null);
       setLimitMessage("This item changed in another editor. Your local gesture was canceled.");
     }
   }, [gesture, itemVersions]);
@@ -129,6 +151,11 @@ export function Calendar({
     const move = (event: PointerEvent) => {
       if (!gesture || event.pointerId !== gesture.pointerId) return;
       if (gesture.type === "lodging") return;
+      if (gesture.edge === "move") {
+        setDragPointer((current) =>
+          current ? { ...current, x: event.clientX, y: event.clientY } : current,
+        );
+      }
       const { dayDelta, minuteDelta } = pointerDelta(scroller.current, event, gesture);
       const maximum = days.length * 24 * 60;
       let start = gesture.startAbsolute;
@@ -156,6 +183,7 @@ export function Calendar({
         const next = preview;
         setGesture(null);
         setPreview(null);
+        setDragPointer(null);
         if (!next) return;
         const startIndex = dayIndex.get(next.dayId) ?? 0;
         const finalMinute =
@@ -211,6 +239,21 @@ export function Calendar({
       itemDay * 1440 +
       minutesForTime(segment.item.startTime ?? timeForCalendarMinute(segment.startMinute));
     setLimitMessage("");
+    const bounds = event.currentTarget
+      .closest<HTMLElement>("[data-calendar-item-id]")
+      ?.getBoundingClientRect();
+    setDragPointer(
+      edge === "move" && bounds
+        ? {
+            x: event.clientX,
+            y: event.clientY,
+            offsetX: event.clientX - bounds.left,
+            offsetY: event.clientY - bounds.top,
+            width: bounds.width,
+            height: bounds.height,
+          }
+        : null,
+    );
     setGesture({
       type: "item",
       item: segment.item,
@@ -394,6 +437,27 @@ export function Calendar({
               key={`track:${column.day.id}`}
             >
               <div className={styles.hourLines} aria-hidden="true" />
+              {(previewSegmentsByDay.get(column.day.id) ?? []).map((segment) => (
+                <div
+                  className={styles.dropPreview}
+                  data-calendar-drop-preview
+                  key={`preview:${segment.key}`}
+                  style={{
+                    top: minuteEm(segment.startMinute),
+                    height: minuteEm(
+                      Math.max(calendarMinimumMinutes, segment.endMinute - segment.startMinute),
+                    ),
+                    left: `calc(${(segment.lane / segment.laneCount) * 100}% + 0.25em)`,
+                    width: `calc(${100 / segment.laneCount}% - 0.5em)`,
+                  }}
+                >
+                  <strong>{itemTitle(segment.item, places)}</strong>
+                  <time>
+                    {timeForCalendarMinute(segment.startMinute)} -{" "}
+                    {timeForCalendarMinute(segment.endMinute)}
+                  </time>
+                </div>
+              ))}
               {column.routeGaps.map((gap) => (
                 <div
                   className={`${styles.routeGap}${gap.conflict ? ` ${styles.routeConflict}` : ""}`}
@@ -410,7 +474,7 @@ export function Calendar({
                     ?.notes ?? [];
                 return (
                   <article
-                    className={`${styles.block}${segment.provisional ? ` ${styles.provisional}` : ""}${selectedId === segment.item.id ? ` ${styles.selected}` : ""}`}
+                    className={`${styles.block}${segment.provisional ? ` ${styles.provisional}` : ""}${selectedId === segment.item.id ? ` ${styles.selected}` : ""}${gesture?.type === "item" && gesture.item.id === segment.item.id ? ` ${styles.dragOrigin}` : ""}`}
                     data-calendar-item-id={segment.item.id}
                     key={segment.key}
                     style={{
@@ -420,6 +484,13 @@ export function Calendar({
                       ),
                       left: `calc(${(segment.lane / segment.laneCount) * 100}% + 0.25em)`,
                       width: `calc(${100 / segment.laneCount}% - 0.5em)`,
+                    }}
+                    onPointerDown={(event) => {
+                      const control =
+                        event.target instanceof Element ? event.target.closest("button") : null;
+                      const primary = event.currentTarget.querySelector(`.${styles.blockSelect}`);
+                      if (control && control !== primary) return;
+                      beginItemGesture(event, segment, "move");
                     }}
                   >
                     {!segment.continuesBefore ? (
@@ -445,7 +516,6 @@ export function Calendar({
                       onDrop={(event) =>
                         dropNote(event, column.day.id, segment.item.id, onMoveNote)
                       }
-                      onPointerDown={(event) => beginItemGesture(event, segment, "move")}
                       onKeyDown={(event) => handleItemKey(event, segment)}
                     >
                       <strong>
@@ -489,6 +559,27 @@ export function Calendar({
           ))}
         </div>
       </div>
+      {gesture?.type === "item" && gesture.edge === "move" && dragPointer ? (
+        <div
+          className={styles.dragProxy}
+          data-calendar-drag-proxy
+          style={{
+            left: dragPointer.x - dragPointer.offsetX,
+            top: dragPointer.y - dragPointer.offsetY,
+            width: dragPointer.width,
+            height: dragPointer.height,
+          }}
+        >
+          <strong>{itemTitle(gesture.item, places)}</strong>
+          <time>
+            {preview?.startTime ?? gesture.item.startTime ?? "08:00"} -{" "}
+            {timeForCalendarMinute(
+              minutesForTime(preview?.startTime ?? gesture.item.startTime ?? "08:00") +
+                ((preview?.durationMinutes ?? gesture.item.durationMinutes) || 60),
+            )}
+          </time>
+        </div>
+      ) : null}
       {limitMessage ? (
         <p className={styles.message} role="status">
           {limitMessage}
@@ -508,24 +599,31 @@ function NoteStack({
   if (notes.length === 0) return null;
   return (
     <span className={styles.noteStack}>
-      {notes.map((note) => (
-        <button
-          type="button"
-          draggable
-          key={note.id}
-          title={note.title}
-          aria-label={note.title}
-          onClick={(event) => {
-            event.stopPropagation();
-            onSelect(note);
-          }}
-          onDragStart={(event) =>
-            event.dataTransfer.setData("application/x-pacenotes-note", note.id)
-          }
-        >
-          <Icon icon={stickyNoteIcon} />
-        </button>
-      ))}
+      {notes.map((note) => {
+        const tooltipId = `calendar-note-${note.id}`;
+        const tooltip = note.details?.trim() || note.title;
+        return (
+          <button
+            type="button"
+            draggable
+            key={note.id}
+            aria-label={note.title}
+            aria-describedby={tooltipId}
+            onClick={(event) => {
+              event.stopPropagation();
+              onSelect(note);
+            }}
+            onDragStart={(event) =>
+              event.dataTransfer.setData("application/x-pacenotes-note", note.id)
+            }
+          >
+            <Icon icon={stickyNoteIcon} />
+            <span className={styles.noteTooltip} id={tooltipId} role="tooltip">
+              {tooltip}
+            </span>
+          </button>
+        );
+      })}
     </span>
   );
 }
@@ -540,7 +638,9 @@ function ItemActions({
   ) => void;
 }) {
   const root = useRef<HTMLDivElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ top: 0, right: 0 });
   const actions = [
     ["previous-day", arrowLeftIcon, "Previous day"],
     ["next-day", arrowRightIcon, "Next day"],
@@ -552,46 +652,70 @@ function ItemActions({
   useEffect(() => {
     if (!open) return;
     const closeOutside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !root.current?.contains(event.target)) setOpen(false);
+      if (
+        event.target instanceof Node &&
+        !root.current?.contains(event.target) &&
+        !menu.current?.contains(event.target)
+      )
+        setOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setOpen(false);
     };
+    const closeOnViewportChange = () => setOpen(false);
     document.addEventListener("pointerdown", closeOutside);
     document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", closeOnViewportChange);
     return () => {
       document.removeEventListener("pointerdown", closeOutside);
       document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", closeOnViewportChange);
     };
   }, [open]);
   return (
-    <div ref={root} className={styles.actions}>
-      <button
-        type="button"
-        aria-label={`Calendar actions for ${title}`}
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-      >
-        <Icon icon={ellipsisIcon} />
-      </button>
-      {open ? (
-        <div>
-          {actions.map(([action, icon, label]) => (
-            <button
-              key={action}
-              type="button"
-              onClick={() => {
-                onAction(action);
-                setOpen(false);
-              }}
-            >
-              <Icon icon={icon} />
-              {label}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
+    <>
+      <div ref={root} className={styles.actions}>
+        <button
+          type="button"
+          aria-label={`Calendar actions for ${title}`}
+          aria-expanded={open}
+          onClick={(event) => {
+            if (open) {
+              setOpen(false);
+              return;
+            }
+            const bounds = event.currentTarget.getBoundingClientRect();
+            setPosition({
+              top: Math.max(4, Math.min(bounds.bottom + 4, window.innerHeight - 190)),
+              right: Math.max(4, window.innerWidth - bounds.right),
+            });
+            setOpen(true);
+          }}
+        >
+          <Icon icon={ellipsisIcon} />
+        </button>
+      </div>
+      {open
+        ? createPortal(
+            <div ref={menu} className={styles.actionMenu} style={position}>
+              {actions.map(([action, icon, label]) => (
+                <button
+                  key={action}
+                  type="button"
+                  onClick={() => {
+                    onAction(action);
+                    setOpen(false);
+                  }}
+                >
+                  <Icon icon={icon} />
+                  {label}
+                </button>
+              ))}
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   );
 }
 
@@ -614,7 +738,9 @@ function pointerDelta(scroller: HTMLDivElement | null, event: PointerEvent, gest
     Number.parseFloat(getComputedStyle(scroller ?? document.documentElement).fontSize);
   return {
     dayDelta: Math.round((event.clientX - gesture.startX) / columnWidth),
-    minuteDelta: snapCalendarMinute(((event.clientY - gesture.startY) / pixelsPerHour) * 60),
+    minuteDelta:
+      Math.round(((event.clientY - gesture.startY) / pixelsPerHour / calendarSnapMinutes) * 60) *
+      calendarSnapMinutes,
   };
 }
 

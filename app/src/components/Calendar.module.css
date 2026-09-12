@@ -208,6 +208,60 @@
   border-radius: var(--radius-s);
   background: var(--raised);
   box-shadow: var(--shadow);
+  cursor: grab;
+  touch-action: none;
+}
+
+.block:has(.noteStack button:hover),
+.block:has(.noteStack button:focus-visible) {
+  z-index: 20;
+}
+
+.dragOrigin {
+  opacity: 0.2;
+}
+
+.dropPreview,
+.dragProxy {
+  display: grid;
+  align-content: start;
+  gap: 0.15em;
+  overflow: hidden;
+  padding: 0.4em 0.5em;
+  border: var(--line) dashed var(--accent);
+  border-radius: var(--radius-s);
+  color: var(--ink);
+  pointer-events: none;
+}
+
+.dropPreview {
+  position: absolute;
+  z-index: 5;
+  background: color-mix(in srgb, var(--accent) 20%, var(--raised));
+  opacity: 0.5;
+}
+
+.dragProxy {
+  position: fixed;
+  z-index: 100;
+  background: var(--raised);
+  box-shadow: var(--shadow-panel);
+  opacity: 0.92;
+}
+
+.dropPreview strong,
+.dragProxy strong {
+  overflow: hidden;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dropPreview time,
+.dragProxy time {
+  color: var(--muted);
+  font-size: 0.6em;
 }
 
 .blockSelect {
@@ -242,7 +296,8 @@
 }
 
 .block strong {
-  font-size: 0.6875em;
+  font-size: 0.75rem;
+  font-weight: 700;
 }
 
 .block time {
@@ -293,6 +348,7 @@
 }
 
 .noteStack button {
+  position: relative;
   display: grid;
   width: 1.5em;
   height: 1.5em;
@@ -312,6 +368,41 @@
 .noteStack svg {
   width: 0.8em;
   height: 0.8em;
+}
+
+.noteTooltip {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 0.4em);
+  left: 50%;
+  width: max-content;
+  max-width: 16rem;
+  visibility: hidden;
+  padding: 0.4rem 0.55rem;
+  border: var(--line) solid var(--border-strong);
+  border-radius: var(--radius-s);
+  background: var(--raised);
+  box-shadow: var(--shadow-panel);
+  color: var(--ink);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.35;
+  opacity: 0;
+  pointer-events: none;
+  text-align: left;
+  transform: translate(-50%, -0.2rem);
+  transition:
+    opacity 100ms ease,
+    transform 100ms ease,
+    visibility 100ms;
+  white-space: normal;
+}
+
+.noteStack button:hover .noteTooltip,
+.noteStack button:focus-visible .noteTooltip {
+  visibility: visible;
+  opacity: 1;
+  transform: translate(-50%, 0);
 }
 
 .actions {
@@ -339,10 +430,9 @@
   height: 0.85em;
 }
 
-.actions > div {
-  position: absolute;
-  z-index: 12;
-  right: 0;
+.actionMenu {
+  position: fixed;
+  z-index: 1000;
   display: grid;
   width: 11.5em;
   padding: 0.25em;
@@ -352,7 +442,7 @@
   box-shadow: var(--shadow-panel);
 }
 
-.actions > div button {
+.actionMenu button {
   display: flex;
   align-items: center;
   gap: 0.5em;
@@ -367,12 +457,12 @@
   white-space: nowrap;
 }
 
-.actions > div button:hover,
-.actions > div button:focus-visible {
+.actionMenu button:hover,
+.actionMenu button:focus-visible {
   background: var(--hover-surface);
 }
 
-.actions > div button svg {
+.actionMenu button svg {
   width: 1em;
   height: 1em;
 }

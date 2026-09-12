@@ -1163,25 +1163,6 @@ export function Planner({ tripId }: { tripId: string }) {
               <Icon icon={mapPinIcon} />
             </button>
           </nav>
-          <fieldset className="content-tabs">
-            <legend>Planner content</legend>
-            <button
-              type="button"
-              aria-pressed={plannerContent === "itinerary"}
-              onClick={() => changePlannerContent("itinerary")}
-            >
-              <Icon icon={listIcon} />
-              Itinerary
-            </button>
-            <button
-              type="button"
-              aria-pressed={plannerContent === "calendar"}
-              onClick={() => changePlannerContent("calendar")}
-            >
-              <Icon icon={calendarIcon} />
-              Calendar
-            </button>
-          </fieldset>
           <fieldset className="view-tabs">
             <legend>{text("plannerView")}</legend>
             <button
@@ -1233,6 +1214,27 @@ export function Planner({ tripId }: { tripId: string }) {
           >
             <div className="mobile-sheet-handle" onPointerDown={resizeSheet}>
               <span />
+            </div>
+            <div className="planner-content-toolbar">
+              <fieldset className="content-tabs">
+                <legend>Planner content</legend>
+                <button
+                  type="button"
+                  aria-pressed={plannerContent === "itinerary"}
+                  onClick={() => changePlannerContent("itinerary")}
+                >
+                  <Icon icon={listIcon} />
+                  Itinerary
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={plannerContent === "calendar"}
+                  onClick={() => changePlannerContent("calendar")}
+                >
+                  <Icon icon={calendarIcon} />
+                  Calendar
+                </button>
+              </fieldset>
             </div>
             {plannerContent === "calendar" ? (
               <Calendar
