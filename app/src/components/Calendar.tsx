@@ -3,7 +3,6 @@ import arrowDownIcon from "@iconify-icons/lucide/arrow-down";
 import arrowLeftIcon from "@iconify-icons/lucide/arrow-left";
 import arrowRightIcon from "@iconify-icons/lucide/arrow-right";
 import arrowUpIcon from "@iconify-icons/lucide/arrow-up";
-import bedDoubleIcon from "@iconify-icons/lucide/bed-double";
 import ellipsisIcon from "@iconify-icons/lucide/ellipsis-vertical";
 import stickyNoteIcon from "@iconify-icons/lucide/sticky-note";
 import {
@@ -28,6 +27,7 @@ import {
 } from "~/features/trip/calendar-layout";
 import type { TripDay, TripItem, TripLanguage } from "~/features/trip/model";
 import styles from "./Calendar.module.css";
+import { iconForItem } from "./item-icon";
 
 type ItemChange = {
   item: TripItem;
@@ -408,7 +408,7 @@ export function Calendar({
                         onClick={() => onSelect(item)}
                         onPointerDown={(event) => startLodging(event, item, "move")}
                       >
-                        <Icon icon={bedDoubleIcon} />
+                        <Icon icon={iconForItem(item)} />
                         <span className={styles.lodgingTitle}>{itemTitle(item, places)}</span>
                       </button>
                       {ends ? (
@@ -452,7 +452,10 @@ export function Calendar({
                     width: `calc(${100 / segment.laneCount}% - 0.5em)`,
                   }}
                 >
-                  <strong>{itemTitle(segment.item, places)}</strong>
+                  <strong className={styles.blockTitle}>
+                    <Icon icon={iconForItem(segment.item)} />
+                    <span>{itemTitle(segment.item, places)}</span>
+                  </strong>
                   <time>
                     {timeForCalendarMinute(segment.startMinute)} -{" "}
                     {timeForCalendarMinute(segment.endMinute)}
@@ -519,8 +522,11 @@ export function Calendar({
                       }
                       onKeyDown={(event) => handleItemKey(event, segment)}
                     >
-                      <strong>
-                        {segment.continuesBefore ? "Continued" : itemTitle(segment.item, places)}
+                      <strong className={styles.blockTitle}>
+                        <Icon icon={iconForItem(segment.item)} />
+                        <span>
+                          {segment.continuesBefore ? "Continued" : itemTitle(segment.item, places)}
+                        </span>
                       </strong>
                       <time>
                         {segment.provisional
@@ -571,7 +577,10 @@ export function Calendar({
             height: dragPointer.height,
           }}
         >
-          <strong>{itemTitle(gesture.item, places)}</strong>
+          <strong className={styles.blockTitle}>
+            <Icon icon={iconForItem(gesture.item)} />
+            <span>{itemTitle(gesture.item, places)}</span>
+          </strong>
           <time>
             {preview?.startTime ?? gesture.item.startTime ?? "08:00"} -{" "}
             {timeForCalendarMinute(

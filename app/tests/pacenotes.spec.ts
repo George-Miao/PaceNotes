@@ -809,6 +809,7 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     const block = calendar.locator('[data-calendar-item-id="calendar-museum"]').first();
     await expect(block).toContainText("09:00 - 10:00");
     const blockButton = block.getByRole("button", { name: "Morning museum", exact: true });
+    await expect(blockButton.locator("svg")).toBeVisible();
     await blockButton.focus();
     await blockButton.press("ArrowDown");
     await expect(block).toContainText("09:15 - 10:15");

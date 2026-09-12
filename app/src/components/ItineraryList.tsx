@@ -6,19 +6,11 @@ import {
   type DropResult,
 } from "@hello-pangea/dnd";
 import { Icon } from "@iconify/react";
-import bedDoubleIcon from "@iconify-icons/lucide/bed-double";
-import busIcon from "@iconify-icons/lucide/bus";
-import calendarCheckIcon from "@iconify-icons/lucide/calendar-check-2";
 import carFrontIcon from "@iconify-icons/lucide/car-front";
 import chevronDownIcon from "@iconify-icons/lucide/chevron-down";
 import chevronUpIcon from "@iconify-icons/lucide/chevron-up";
-import clockIcon from "@iconify-icons/lucide/clock-3";
 import footprintsIcon from "@iconify-icons/lucide/footprints";
-import mapPinIcon from "@iconify-icons/lucide/map-pin";
-import planeIcon from "@iconify-icons/lucide/plane";
 import routeIcon from "@iconify-icons/lucide/route";
-import shipIcon from "@iconify-icons/lucide/ship";
-import stickyNoteIcon from "@iconify-icons/lucide/sticky-note";
 import trainFrontIcon from "@iconify-icons/lucide/train-front";
 import trashIcon from "@iconify-icons/lucide/trash-2";
 import {
@@ -46,6 +38,7 @@ import {
   type TripLanguage,
   travelModes,
 } from "~/features/trip/model";
+import { iconForItem } from "./item-icon";
 
 export type ItineraryDrop = {
   itemId: string;
@@ -346,27 +339,6 @@ function TransportLeg({
       </label>
     </div>
   );
-}
-
-function iconForItem(item: TripItem) {
-  if (item.type === "note") return stickyNoteIcon;
-  if (item.type === "lodging") return bedDoubleIcon;
-  if (item.type === "reservation") return calendarCheckIcon;
-  if (item.type === "transport") {
-    switch (item.transport?.mode) {
-      case "plane":
-        return planeIcon;
-      case "bus":
-        return busIcon;
-      case "ferry":
-        return shipIcon;
-      case "custom":
-        return routeIcon;
-      default:
-        return trainFrontIcon;
-    }
-  }
-  return item.place ? mapPinIcon : clockIcon;
 }
 
 function iconForMode(mode: TravelMode) {

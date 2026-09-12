@@ -309,6 +309,27 @@
   font-weight: 700;
 }
 
+.blockTitle {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.35em;
+}
+
+.blockTitle svg {
+  flex: none;
+  width: 1em;
+  height: 1em;
+  color: var(--accent);
+}
+
+.blockTitle span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .block time {
   color: var(--muted);
   font-size: 0.6em;
