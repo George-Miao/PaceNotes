@@ -70,6 +70,21 @@ type DragPointer = {
   width: number;
   height: number;
 };
+type LodgingPreview = {
+  item: TripItem;
+  startDate: string;
+  endDate: string;
+};
+type LodgingPointer = {
+  x: number;
+  y: number;
+  offsetX: number;
+  offsetY: number;
+  width: number;
+  height: number;
+  anchorX: number;
+  guideY: number;
+};
 
 type ItemAction = "earlier" | "later" | "previous-day" | "next-day" | "shorter" | "longer";
 type ActionMenuState = {
@@ -117,6 +132,8 @@ export function Calendar({
   const [dragPointer, setDragPointer] = useState<DragPointer | null>(null);
   const longPress = useRef<LongPress | null>(null);
   const [actionMenu, setActionMenu] = useState<ActionMenuState | null>(null);
+  const [lodgingPreview, setLodgingPreview] = useState<LodgingPreview | null>(null);
+  const [lodgingPointer, setLodgingPointer] = useState<LodgingPointer | null>(null);
   const dayIndex = useMemo(() => new Map(days.map((day, index) => [day.id, index])), [days]);
   const effectiveItems = useMemo(
     () =>
@@ -148,6 +165,25 @@ export function Calendar({
       ),
     [days, effectiveItems, legsByDay, preview],
   );
+  const lodgingTarget = useMemo(() => {
+    if (!lodgingPreview) return null;
+    const startIndex = days.findIndex((day) => day.date >= lodgingPreview.startDate);
+    let endIndex = -1;
+    for (let index = days.length - 1; index >= 0; index -= 1) {
+      const day = days[index];
+      if (day && day.date <= lodgingPreview.endDate) {
+        endIndex = index;
+        break;
+      }
+    }
+    if (startIndex < 0 || endIndex < startIndex) return null;
+    return {
+      ...lodgingPreview,
+      startIndex,
+      endIndex,
+      dayCount: daysBetween(lodgingPreview.startDate, lodgingPreview.endDate) + 1,
+    };
+  }, [days, lodgingPreview]);
   const itemVersions = useMemo(
     () => new Map(orderedItems.map((item) => [item.id, itemVersion(item)])),
     [orderedItems],
@@ -167,6 +203,8 @@ export function Calendar({
       setPreview(null);
       setDragPointer(null);
       setLimitMessage("This item changed in another editor. Your local gesture was canceled.");
+      setLodgingPreview(null);
+      setLodgingPointer(null);
     }
   }, [gesture, itemVersions]);
 
@@ -181,7 +219,20 @@ export function Calendar({
         window.clearTimeout(pending.timer);
         longPress.current = null;
       }
-      if (gesture.type === "lodging") return;
+      if (gesture.type === "lodging") {
+        const range = lodgingRangeForPointer(gesture, event.clientX, scroller.current, days);
+        if (range) setLodgingPreview({ item: gesture.item, ...range });
+        setLodgingPointer((current) =>
+          current
+            ? {
+                ...current,
+                x: event.clientX,
+                y: gesture.edge === "move" ? event.clientY : current.y,
+              }
+            : current,
+        );
+        return;
+      }
       if (gesture.edge === "move") {
         setDragPointer((current) =>
           current ? { ...current, x: event.clientX, y: event.clientY } : current,
@@ -242,8 +293,19 @@ export function Calendar({
         }
         return;
       }
-      const result = finishLodgingGesture(gesture, event, days, onChangeLodging);
+      const next = lodgingRangeForPointer(gesture, event.clientX, scroller.current, days);
       setGesture(null);
+      setLodgingPreview(null);
+      setLodgingPointer(null);
+      if (!next) return;
+      const sourceLodging = gesture.item.lodging;
+      if (
+        sourceLodging &&
+        next.startDate === sourceLodging.startDate &&
+        next.endDate === sourceLodging.endDate
+      )
+        return;
+      const result = onChangeLodging(gesture.item, next.startDate, next.endDate);
       if (result.clamped) {
         setLimitMessage("The stay ends at the 30-day trip limit.");
       }
@@ -342,8 +404,39 @@ export function Calendar({
   };
 
   const startLodging = (event: ReactPointerEvent, item: TripItem, edge: LodgingGesture["edge"]) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || !item.lodging) return;
     event.preventDefault();
+    const block = event.currentTarget
+      .closest<HTMLElement>("[data-calendar-lodging-id]")
+      ?.getBoundingClientRect();
+    if (!block) return;
+    const root = event.currentTarget.closest<HTMLElement>("[aria-label='Trip calendar']");
+    const segments = Array.from(
+      root?.querySelectorAll<HTMLElement>("[data-calendar-lodging-id]") ?? [],
+    ).filter((segment) => segment.dataset.calendarLodgingId === item.id);
+    setActionMenu(null);
+    const anchorX =
+      edge === "start"
+        ? Math.max(...segments.map((segment) => segment.getBoundingClientRect().right))
+        : Math.min(...segments.map((segment) => segment.getBoundingClientRect().left));
+    setLimitMessage("");
+    setPreview(null);
+    setDragPointer(null);
+    setLodgingPreview({
+      item,
+      startDate: item.lodging.startDate,
+      endDate: item.lodging.endDate,
+    });
+    setLodgingPointer({
+      x: event.clientX,
+      y: event.clientY,
+      offsetX: event.clientX - block.left,
+      offsetY: event.clientY - block.top,
+      width: block.width,
+      height: block.height,
+      anchorX,
+      guideY: block.top + block.height / 2,
+    });
     setGesture({
       type: "lodging",
       item,
@@ -447,7 +540,11 @@ export function Calendar({
           })}
           <div className={styles.allDayLabel}>All day</div>
           {days.map((day) => (
-            <div className={styles.allDayCell} key={`all-day:${day.id}`}>
+            <div
+              className={styles.allDayCell}
+              data-calendar-all-day={day.id}
+              key={`all-day:${day.id}`}
+            >
               {orderedItems
                 .filter(
                   (item) =>
@@ -463,7 +560,8 @@ export function Calendar({
                   const ends = lodging.endDate === day.date;
                   return (
                     <div
-                      className={`${styles.lodging}${starts ? ` ${styles.checkIn}` : ""}${ends ? ` ${styles.checkOut}` : ""}`}
+                      className={`${styles.lodging}${starts ? ` ${styles.checkIn}` : ""}${ends ? ` ${styles.checkOut}` : ""}${gesture?.type === "lodging" && gesture.item.id === item.id ? ` ${styles.lodgingOrigin}` : ""}`}
+                      data-calendar-lodging-id={item.id}
                       key={item.id}
                     >
                       {starts ? (
@@ -495,6 +593,25 @@ export function Calendar({
                 })}
             </div>
           ))}
+          {lodgingTarget ? (
+            <div
+              className={styles.lodgingTarget}
+              data-calendar-lodging-preview
+              data-start-date={lodgingTarget.startDate}
+              data-end-date={lodgingTarget.endDate}
+              style={{
+                gridColumn: `${lodgingTarget.startIndex + 2} / ${lodgingTarget.endIndex + 3}`,
+                gridRow: 2,
+              }}
+              aria-hidden="true"
+            >
+              <Icon icon={iconForItem(lodgingTarget.item)} />
+              <span>{itemTitle(lodgingTarget.item, places)}</span>
+              <small>
+                {lodgingTarget.dayCount} {lodgingTarget.dayCount === 1 ? "day" : "days"}
+              </small>
+            </div>
+          ) : null}
           <div className={styles.timeGutter} aria-hidden="true">
             {hourLabels.map((label) => (
               <time key={label} style={{ top: `${(Number(label.slice(0, 2)) / 24) * 100}%` }}>
@@ -667,6 +784,34 @@ export function Calendar({
           </time>
         </div>
       ) : null}
+      {gesture?.type === "lodging" && gesture.edge === "move" && lodgingPointer ? (
+        <div
+          className={styles.lodgingDragProxy}
+          data-calendar-lodging-drag-proxy
+          style={{
+            left: lodgingPointer.x - lodgingPointer.offsetX,
+            top: lodgingPointer.y - lodgingPointer.offsetY,
+            width: lodgingPointer.width,
+            height: lodgingPointer.height,
+          }}
+          aria-hidden="true"
+        >
+          <Icon icon={iconForItem(gesture.item)} />
+          <span>{itemTitle(gesture.item, places)}</span>
+        </div>
+      ) : null}
+      {gesture?.type === "lodging" && gesture.edge !== "move" && lodgingPointer ? (
+        <div
+          className={styles.lodgingResizeGuide}
+          data-calendar-lodging-resize-guide
+          style={{
+            left: Math.min(lodgingPointer.anchorX, lodgingPointer.x),
+            top: lodgingPointer.guideY,
+            width: Math.max(2, Math.abs(lodgingPointer.x - lodgingPointer.anchorX)),
+          }}
+          aria-hidden="true"
+        />
+      ) : null}
       {actionMenu ? (
         <ItemActions
           title={itemTitle(actionMenu.segment.item, places)}
@@ -832,19 +977,18 @@ function previewForAbsolute(
   };
 }
 
-function finishLodgingGesture(
+function lodgingRangeForPointer(
   gesture: LodgingGesture,
-  event: PointerEvent,
+  clientX: number,
+  scroller: HTMLDivElement | null,
   days: readonly TripDay[],
-  onChange: (item: TripItem, startDate: string, endDate: string) => { clamped: boolean },
-): { clamped: boolean } {
+): { startDate: string; endDate: string } | null {
   const lodging = gesture.item.lodging;
-  if (!lodging) return { clamped: false };
+  if (!lodging) return null;
   const width =
-    document.querySelector<HTMLElement>("[data-calendar-day]")?.getBoundingClientRect().width ||
+    scroller?.querySelector<HTMLElement>("[data-calendar-day]")?.getBoundingClientRect().width ||
     288;
-  const delta = Math.round((event.clientX - gesture.startX) / width);
-  if (delta === 0) return { clamped: false };
+  const delta = Math.round((clientX - gesture.startX) / width);
   let startDate = lodging.startDate;
   let endDate = lodging.endDate;
   if (gesture.edge === "move") {
@@ -863,7 +1007,7 @@ function finishLodgingGesture(
     startDate = first;
     endDate = addDays(first, nights);
   }
-  return onChange(gesture.item, startDate, endDate);
+  return { startDate, endDate };
 }
 
 function itemVersion(item: TripItem): string {

@@ -106,9 +106,97 @@
   min-width: 0;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: stretch;
+  touch-action: none;
   border: var(--line) solid var(--border-strong);
   border-radius: var(--radius-s);
   background: var(--muted-surface);
+}
+
+.lodgingOrigin {
+  opacity: 0.2;
+}
+
+.lodgingTarget,
+.lodgingDragProxy {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.35em;
+  overflow: hidden;
+  padding: 0.375em 0.5em;
+  border: var(--line) dashed var(--accent);
+  border-radius: var(--radius-s);
+  color: var(--ink);
+  font-size: 0.6875em;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.lodgingTarget {
+  position: sticky;
+  top: var(--calendar-header-height);
+  z-index: 12;
+  align-self: start;
+  margin: 0.375em;
+  background: color-mix(in srgb, var(--accent) 20%, var(--raised));
+  opacity: 0.55;
+}
+
+.lodgingDragProxy {
+  position: fixed;
+  z-index: 100;
+  background: var(--raised);
+  box-shadow: var(--shadow-panel);
+  opacity: 0.92;
+}
+
+.lodgingTarget svg,
+.lodgingDragProxy svg {
+  flex: none;
+  width: 1em;
+  height: 1em;
+  color: var(--accent);
+}
+
+.lodgingTarget span,
+.lodgingDragProxy span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lodgingTarget small {
+  flex: none;
+  margin-left: auto;
+  color: var(--muted);
+  font: inherit;
+}
+
+.lodgingResizeGuide {
+  position: fixed;
+  z-index: 100;
+  height: 0;
+  border-top: 0.15em solid var(--accent);
+  pointer-events: none;
+}
+
+.lodgingResizeGuide::before,
+.lodgingResizeGuide::after {
+  position: absolute;
+  top: -0.45em;
+  width: 0.15em;
+  height: 0.8em;
+  background: var(--accent);
+  content: "";
+}
+
+.lodgingResizeGuide::before {
+  left: 0;
+}
+
+.lodgingResizeGuide::after {
+  right: 0;
 }
 
 .lodging > button:not(.dateHandle) {

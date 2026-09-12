@@ -802,6 +802,101 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
       0,
     );
 
+    const lodgingSegments = calendar.locator('[data-calendar-lodging-id="calendar-hotel"]');
+    await expect(lodgingSegments).toHaveCount(2);
+    const lodgingDayBox = await calendar.locator("header").first().boundingBox();
+    const originalLodgingBox = await lodgingSegments.first().boundingBox();
+    if (!lodgingDayBox || !originalLodgingBox) {
+      throw new Error("Missing lodging drag geometry");
+    }
+    const lodgingStartX = originalLodgingBox.x + originalLodgingBox.width / 2;
+    const lodgingStartY = originalLodgingBox.y + originalLodgingBox.height / 2;
+    await page.mouse.move(lodgingStartX, lodgingStartY);
+    await page.mouse.down();
+    await page.mouse.move(lodgingStartX + lodgingDayBox.width, lodgingStartY, { steps: 4 });
+    const lodgingProxy = calendar.locator("[data-calendar-lodging-drag-proxy]");
+    const lodgingTarget = calendar.locator("[data-calendar-lodging-preview]");
+    await expect(lodgingProxy).toBeVisible();
+    await expect(lodgingTarget).toContainText("2 days");
+    await expect(lodgingTarget).toHaveAttribute("data-start-date", "2027-04-11");
+    const lodgingProxyBox = await lodgingProxy.boundingBox();
+    const lodgingTargetBox = await lodgingTarget.boundingBox();
+    if (!lodgingProxyBox || !lodgingTargetBox) {
+      throw new Error("Missing lodging preview geometry");
+    }
+    expect(lodgingProxyBox.x).toBeCloseTo(originalLodgingBox.x + lodgingDayBox.width, 0);
+    expect(lodgingTargetBox.width).toBeGreaterThan(lodgingDayBox.width * 1.8);
+    expect(
+      Number(await lodgingTarget.evaluate((element) => getComputedStyle(element).opacity)),
+    ).toBeLessThan(1);
+    await page.mouse.up();
+    await expect(
+      calendar.locator(
+        '[data-calendar-all-day="2027-04-10"] [data-calendar-lodging-id="calendar-hotel"]',
+      ),
+    ).toHaveCount(0);
+    await expect(
+      calendar.locator(
+        '[data-calendar-all-day="2027-04-11"] [data-calendar-lodging-id="calendar-hotel"]',
+      ),
+    ).toBeVisible();
+
+    const checkInHandle = calendar.getByRole("button", {
+      name: "Change check-in for City hotel",
+    });
+    const checkInBox = await checkInHandle.boundingBox();
+    if (!checkInBox) throw new Error("Missing lodging check-in handle geometry");
+    await page.mouse.move(
+      checkInBox.x + checkInBox.width / 2,
+      checkInBox.y + checkInBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      checkInBox.x + checkInBox.width / 2 - lodgingDayBox.width,
+      checkInBox.y + checkInBox.height / 2,
+      { steps: 4 },
+    );
+    const resizeGuide = calendar.locator("[data-calendar-lodging-resize-guide]");
+    await expect(resizeGuide).toBeVisible();
+    await expect(lodgingTarget).toContainText("3 days");
+    await expect(lodgingTarget).toHaveAttribute("data-start-date", "2027-04-10");
+    const resizeGuideBox = await resizeGuide.boundingBox();
+    if (!resizeGuideBox) throw new Error("Missing lodging resize guide geometry");
+    expect(resizeGuideBox.width).toBeGreaterThan(lodgingDayBox.width * 1.8);
+    expect(resizeGuideBox.height).toBeLessThan(4);
+    await page.mouse.up();
+    await expect(
+      calendar.locator(
+        '[data-calendar-all-day="2027-04-10"] [data-calendar-lodging-id="calendar-hotel"]',
+      ),
+    ).toBeVisible();
+
+    const checkOutHandle = calendar.getByRole("button", {
+      name: "Change check-out for City hotel",
+    });
+    await checkOutHandle.scrollIntoViewIfNeeded();
+    const checkOutBox = await checkOutHandle.boundingBox();
+    if (!checkOutBox) throw new Error("Missing lodging check-out handle geometry");
+    await page.mouse.move(
+      checkOutBox.x + checkOutBox.width / 2,
+      checkOutBox.y + checkOutBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      checkOutBox.x + checkOutBox.width / 2 - lodgingDayBox.width,
+      checkOutBox.y + checkOutBox.height / 2,
+      { steps: 4 },
+    );
+    await expect(resizeGuide).toBeVisible();
+    await expect(lodgingTarget).toContainText("2 days");
+    await expect(lodgingTarget).toHaveAttribute("data-end-date", "2027-04-11");
+    await page.mouse.up();
+    await expect(
+      calendar.locator(
+        '[data-calendar-all-day="2027-04-12"] [data-calendar-lodging-id="calendar-hotel"]',
+      ),
+    ).toHaveCount(0);
+
     const calendarScroller = calendar.locator(":scope > div").first();
     const firstDayHeader = calendar.locator("header").first();
     const allDayLabel = calendar.getByText("All day", { exact: true });
@@ -818,6 +913,7 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     expect(allDayLabelBox.y).toBeCloseTo(headerBox.y + headerBox.height, 0);
     await calendarScroller.evaluate((element) => {
       element.scrollTop = 0;
+      element.scrollLeft = 0;
     });
 
     const block = calendar.locator('[data-calendar-item-id="calendar-museum"]').first();
