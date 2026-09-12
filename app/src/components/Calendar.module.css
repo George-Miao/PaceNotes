@@ -221,6 +221,8 @@
   touch-action: none;
 }
 
+.dayHeader:has(.noteStack button:hover),
+.dayHeader:has(.noteStack button:focus-visible),
 .block:has(.noteStack button:hover),
 .block:has(.noteStack button:focus-visible) {
   z-index: 20;

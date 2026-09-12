@@ -755,7 +755,7 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     place: { placeId: "calendar-hotel-place" },
     lodging: { startDate: dayId, endDate: "2027-04-11" },
   });
-  const id = await createEmptyTrip([timed, note, lodging]);
+  const id = await createEmptyTrip([note, timed, lodging]);
   try {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.addInitScript(() =>
@@ -774,8 +774,22 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     await expect(calendar.getByRole("button", { name: "Bring tickets" })).toBeVisible();
     const noteButton = calendar.getByRole("button", { name: "Bring tickets" });
     await noteButton.hover();
-    await expect(calendar.getByRole("tooltip")).toHaveText("Meet by the east entrance.");
-    await expect(calendar.getByRole("tooltip")).toBeVisible();
+    const noteTooltip = calendar.getByRole("tooltip");
+    await expect(noteTooltip).toHaveText("Meet by the east entrance.");
+    await expect(noteTooltip).toBeVisible();
+    expect(
+      await noteTooltip.evaluate((element) => {
+        const pointerEvents = element.style.pointerEvents;
+        element.style.pointerEvents = "auto";
+        const bounds = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          bounds.left + bounds.width / 2,
+          bounds.top + bounds.height / 2,
+        );
+        element.style.pointerEvents = pointerEvents;
+        return hit === element || element.contains(hit);
+      }),
+    ).toBe(true);
     const lodgingButton = calendar.getByRole("button", { name: "City hotel", exact: true }).first();
     await expect(lodgingButton).toBeVisible();
     const lodgingIconBox = await lodgingButton.locator("svg").boundingBox();
