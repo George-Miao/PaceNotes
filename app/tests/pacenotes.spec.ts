@@ -851,9 +851,30 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     await page.mouse.up();
     await expect(block).toContainText("09:15 - 10:15");
 
-    await block.getByRole("button", { name: /Calendar actions/ }).click();
-    await expect(page.getByRole("button", { name: "Next day", exact: true })).toBeVisible();
-    const nextDayAction = page.getByRole("button", { name: "Next day", exact: true });
+    await expect(block.getByRole("button", { name: /Calendar actions/ })).toHaveCount(0);
+    await block.click({ button: "right" });
+    const actionMenu = page.getByRole("toolbar", {
+      name: "Calendar actions for Morning museum",
+    });
+    await expect(actionMenu).toBeVisible();
+    const actionButtons = actionMenu.getByRole("button");
+    await expect(actionButtons).toHaveCount(6);
+    expect(
+      await actionButtons.evaluateAll((buttons) => buttons.map((button) => button.ariaLabel)),
+    ).toEqual([
+      "Previous day",
+      "Next day",
+      "15 minutes earlier",
+      "15 minutes later",
+      "15 minutes longer",
+      "15 minutes shorter",
+    ]);
+    expect(await actionButtons.locator("svg").count()).toBe(6);
+    const actionButtonTops = await actionButtons.evaluateAll((buttons) =>
+      buttons.map((button) => button.getBoundingClientRect().top),
+    );
+    expect(Math.max(...actionButtonTops) - Math.min(...actionButtonTops)).toBeLessThan(1);
+    const nextDayAction = actionMenu.getByRole("button", { name: "Next day", exact: true });
     expect(
       await nextDayAction.evaluate((element) => {
         const bounds = element.getBoundingClientRect();
@@ -864,13 +885,30 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
         return hit === element || element.contains(hit);
       }),
     ).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(actionMenu).toBeHidden();
+
+    const longTapBox = await block.boundingBox();
+    if (!longTapBox) throw new Error("Missing calendar block long tap geometry");
+    const longTap = {
+      pointerId: 91,
+      pointerType: "touch",
+      isPrimary: true,
+      button: 0,
+      buttons: 1,
+      clientX: longTapBox.x + longTapBox.width / 2,
+      clientY: longTapBox.y + longTapBox.height / 2,
+    };
+    await block.dispatchEvent("pointerdown", longTap);
+    await expect(actionMenu).toBeVisible({ timeout: 1_000 });
+    await block.dispatchEvent("pointerup", { ...longTap, buttons: 0 });
     await calendar
       .locator("[data-calendar-day='2027-04-11']")
       .first()
       .getByRole("button")
       .first()
       .click();
-    await expect(page.getByRole("button", { name: "Next day", exact: true })).toBeHidden();
+    await expect(actionMenu).toBeHidden();
     await expect(page).toHaveURL(/#2027-04-11$/);
 
     await itineraryButton.click();

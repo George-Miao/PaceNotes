@@ -435,36 +435,14 @@
   transform: translate(-50%, 0);
 }
 
-.actions {
-  position: absolute;
-  z-index: 6;
-  right: 0.2em;
-  bottom: 0.2em;
-}
-
-.actions > button {
-  display: grid;
-  width: 1.4em;
-  height: 1.4em;
-  place-items: center;
-  border: var(--line) solid var(--border);
-  border-radius: var(--radius-s);
-  background: var(--raised);
-  color: var(--muted);
-  cursor: pointer;
-  list-style: none;
-}
-
-.actions > button svg {
-  width: 0.85em;
-  height: 0.85em;
-}
-
 .actionMenu {
   position: fixed;
   z-index: 1000;
   display: grid;
-  width: 11.5em;
+  width: max-content;
+  grid-auto-columns: 2.25em;
+  grid-auto-flow: column;
+  gap: 0.25em;
   padding: 0.25em;
   border: var(--line) solid var(--border-strong);
   border-radius: var(--radius-s);
@@ -473,18 +451,16 @@
 }
 
 .actionMenu button {
-  display: flex;
-  align-items: center;
-  gap: 0.5em;
-  padding: 0.45em 0.55em;
+  display: grid;
+  width: 2.25em;
+  height: 2.25em;
+  place-items: center;
+  padding: 0;
   border: 0;
   border-radius: var(--radius-s);
   background: transparent;
   color: var(--ink);
-  font: inherit;
-  font-size: 0.65em;
-  text-align: left;
-  white-space: nowrap;
+  cursor: pointer;
 }
 
 .actionMenu button:hover,

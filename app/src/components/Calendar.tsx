@@ -3,7 +3,8 @@ import arrowDownIcon from "@iconify-icons/lucide/arrow-down";
 import arrowLeftIcon from "@iconify-icons/lucide/arrow-left";
 import arrowRightIcon from "@iconify-icons/lucide/arrow-right";
 import arrowUpIcon from "@iconify-icons/lucide/arrow-up";
-import ellipsisIcon from "@iconify-icons/lucide/ellipsis-vertical";
+import minusIcon from "@iconify-icons/lucide/minus";
+import plusIcon from "@iconify-icons/lucide/plus";
 import stickyNoteIcon from "@iconify-icons/lucide/sticky-note";
 import {
   type PointerEvent as ReactPointerEvent,
@@ -69,6 +70,19 @@ type DragPointer = {
   width: number;
   height: number;
 };
+
+type ItemAction = "earlier" | "later" | "previous-day" | "next-day" | "shorter" | "longer";
+type ActionMenuState = {
+  segment: CalendarSegment;
+  left: number;
+  top: number;
+};
+type LongPress = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  timer: number;
+};
 const hourLabels = Array.from({ length: 25 }, (_, hour) => `${String(hour).padStart(2, "0")}:00`);
 
 export function Calendar({
@@ -101,6 +115,8 @@ export function Calendar({
   const [preview, setPreview] = useState<Preview | null>(null);
   const [limitMessage, setLimitMessage] = useState("");
   const [dragPointer, setDragPointer] = useState<DragPointer | null>(null);
+  const longPress = useRef<LongPress | null>(null);
+  const [actionMenu, setActionMenu] = useState<ActionMenuState | null>(null);
   const dayIndex = useMemo(() => new Map(days.map((day, index) => [day.id, index])), [days]);
   const effectiveItems = useMemo(
     () =>
@@ -137,6 +153,13 @@ export function Calendar({
     [orderedItems],
   );
 
+  useEffect(
+    () => () => {
+      if (longPress.current) window.clearTimeout(longPress.current.timer);
+    },
+    [],
+  );
+
   useEffect(() => {
     if (!gesture) return;
     if (itemVersions.get(gesture.item.id) !== gesture.version) {
@@ -150,6 +173,14 @@ export function Calendar({
   useEffect(() => {
     const move = (event: PointerEvent) => {
       if (!gesture || event.pointerId !== gesture.pointerId) return;
+      const pending = longPress.current;
+      if (
+        pending?.pointerId === event.pointerId &&
+        Math.hypot(event.clientX - pending.startX, event.clientY - pending.startY) > 8
+      ) {
+        window.clearTimeout(pending.timer);
+        longPress.current = null;
+      }
       if (gesture.type === "lodging") return;
       if (gesture.edge === "move") {
         setDragPointer((current) =>
@@ -179,6 +210,11 @@ export function Calendar({
     };
     const finish = (event: PointerEvent) => {
       if (!gesture || event.pointerId !== gesture.pointerId) return;
+      const pending = longPress.current;
+      if (pending?.pointerId === event.pointerId) {
+        window.clearTimeout(pending.timer);
+        longPress.current = null;
+      }
       if (gesture.type === "item") {
         const next = preview;
         setGesture(null);
@@ -222,6 +258,22 @@ export function Calendar({
     };
   }, [dayIndex, days, gesture, onChangeItem, onChangeLodging, preview]);
 
+  const openItemActions = (segment: CalendarSegment, x: number, y: number) => {
+    if (longPress.current) {
+      window.clearTimeout(longPress.current.timer);
+      longPress.current = null;
+    }
+    const width = Math.min(224, window.innerWidth - 8);
+    setGesture(null);
+    setPreview(null);
+    setDragPointer(null);
+    setActionMenu({
+      segment,
+      left: clamp(x - width / 2, 4, window.innerWidth - width - 4),
+      top: clamp(y + 4, 4, window.innerHeight - 44),
+    });
+  };
+
   const beginItemGesture = (
     event: ReactPointerEvent,
     segment: CalendarSegment,
@@ -239,6 +291,7 @@ export function Calendar({
       itemDay * 1440 +
       minutesForTime(segment.item.startTime ?? timeForCalendarMinute(segment.startMinute));
     setLimitMessage("");
+    setActionMenu(null);
     const bounds = event.currentTarget
       .closest<HTMLElement>("[data-calendar-item-id]")
       ?.getBoundingClientRect();
@@ -267,6 +320,27 @@ export function Calendar({
     });
   };
 
+  const beginItemInteraction = (event: ReactPointerEvent, segment: CalendarSegment) => {
+    if (event.pointerType !== "mouse") {
+      if (longPress.current) window.clearTimeout(longPress.current.timer);
+      const pointerId = event.pointerId;
+      const x = event.clientX;
+      const y = event.clientY;
+      const timer = window.setTimeout(() => {
+        if (longPress.current?.pointerId !== pointerId) return;
+        longPress.current = null;
+        openItemActions(segment, x, y);
+      }, 500);
+      longPress.current = {
+        pointerId,
+        startX: x,
+        startY: y,
+        timer,
+      };
+    }
+    beginItemGesture(event, segment, "move");
+  };
+
   const startLodging = (event: ReactPointerEvent, item: TripItem, edge: LodgingGesture["edge"]) => {
     if (event.button !== 0) return;
     event.preventDefault();
@@ -280,10 +354,7 @@ export function Calendar({
     });
   };
 
-  const adjustItem = (
-    segment: CalendarSegment,
-    action: "earlier" | "later" | "previous-day" | "next-day" | "shorter" | "longer",
-  ) => {
+  const adjustItem = (segment: CalendarSegment, action: ItemAction) => {
     const sourceDayIndex = dayIndex.get(segment.item.dayId ?? "") ?? 0;
     const sourceStart =
       sourceDayIndex * 1440 +
@@ -494,7 +565,16 @@ export function Calendar({
                         event.target instanceof Element ? event.target.closest("button") : null;
                       const primary = event.currentTarget.querySelector(`.${styles.blockSelect}`);
                       if (control && control !== primary) return;
-                      beginItemGesture(event, segment, "move");
+                      beginItemInteraction(event, segment);
+                    }}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      const bounds = event.currentTarget.getBoundingClientRect();
+                      openItemActions(
+                        segment,
+                        event.clientX || bounds.left + bounds.width / 2,
+                        event.clientY || bounds.top + bounds.height / 2,
+                      );
                     }}
                   >
                     {!segment.continuesBefore ? (
@@ -513,6 +593,7 @@ export function Calendar({
                       className={styles.blockSelect}
                       aria-label={itemTitle(segment.item, places)}
                       onClick={() => {
+                        if (actionMenu?.segment.item.id === segment.item.id) return;
                         onSelectDay(column.day.id);
                         onSelect(segment.item);
                       }}
@@ -545,10 +626,6 @@ export function Calendar({
                         }}
                       />
                     ) : null}
-                    <ItemActions
-                      title={itemTitle(segment.item, places)}
-                      onAction={(action) => adjustItem(segment, action)}
-                    />
                     <NoteStack notes={notes} onSelect={onSelect} />
                   </article>
                 );
@@ -589,6 +666,14 @@ export function Calendar({
             )}
           </time>
         </div>
+      ) : null}
+      {actionMenu ? (
+        <ItemActions
+          title={itemTitle(actionMenu.segment.item, places)}
+          position={{ left: actionMenu.left, top: actionMenu.top }}
+          onAction={(action) => adjustItem(actionMenu.segment, action)}
+          onClose={() => setActionMenu(null)}
+        />
       ) : null}
       {limitMessage ? (
         <p className={styles.message} role="status">
@@ -640,39 +725,33 @@ function NoteStack({
 
 function ItemActions({
   title,
+  position,
   onAction,
+  onClose,
 }: {
   title: string;
-  onAction: (
-    action: "earlier" | "later" | "previous-day" | "next-day" | "shorter" | "longer",
-  ) => void;
+  position: { left: number; top: number };
+  onAction: (action: ItemAction) => void;
+  onClose: () => void;
 }) {
-  const root = useRef<HTMLDivElement>(null);
   const menu = useRef<HTMLDivElement>(null);
-  const [open, setOpen] = useState(false);
-  const [position, setPosition] = useState({ top: 0, right: 0 });
   const actions = [
     ["previous-day", arrowLeftIcon, "Previous day"],
     ["next-day", arrowRightIcon, "Next day"],
     ["earlier", arrowUpIcon, "15 minutes earlier"],
     ["later", arrowDownIcon, "15 minutes later"],
-    ["shorter", arrowUpIcon, "15 minutes shorter"],
-    ["longer", arrowDownIcon, "15 minutes longer"],
+    ["longer", plusIcon, "15 minutes longer"],
+    ["shorter", minusIcon, "15 minutes shorter"],
   ] as const;
   useEffect(() => {
-    if (!open) return;
+    menu.current?.querySelector<HTMLButtonElement>("button")?.focus();
     const closeOutside = (event: PointerEvent) => {
-      if (
-        event.target instanceof Node &&
-        !root.current?.contains(event.target) &&
-        !menu.current?.contains(event.target)
-      )
-        setOpen(false);
+      if (event.target instanceof Node && !menu.current?.contains(event.target)) onClose();
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") onClose();
     };
-    const closeOnViewportChange = () => setOpen(false);
+    const closeOnViewportChange = () => onClose();
     document.addEventListener("pointerdown", closeOutside);
     document.addEventListener("keydown", closeOnEscape);
     window.addEventListener("resize", closeOnViewportChange);
@@ -681,51 +760,31 @@ function ItemActions({
       document.removeEventListener("keydown", closeOnEscape);
       window.removeEventListener("resize", closeOnViewportChange);
     };
-  }, [open]);
-  return (
-    <>
-      <div ref={root} className={styles.actions}>
+  }, [onClose]);
+  return createPortal(
+    <div
+      ref={menu}
+      className={styles.actionMenu}
+      style={position}
+      role="toolbar"
+      aria-label={`Calendar actions for ${title}`}
+    >
+      {actions.map(([action, icon, label]) => (
         <button
+          key={action}
           type="button"
-          aria-label={`Calendar actions for ${title}`}
-          aria-expanded={open}
-          onClick={(event) => {
-            if (open) {
-              setOpen(false);
-              return;
-            }
-            const bounds = event.currentTarget.getBoundingClientRect();
-            setPosition({
-              top: Math.max(4, Math.min(bounds.bottom + 4, window.innerHeight - 190)),
-              right: Math.max(4, window.innerWidth - bounds.right),
-            });
-            setOpen(true);
+          aria-label={label}
+          title={label}
+          onClick={() => {
+            onAction(action);
+            onClose();
           }}
         >
-          <Icon icon={ellipsisIcon} />
+          <Icon icon={icon} />
         </button>
-      </div>
-      {open
-        ? createPortal(
-            <div ref={menu} className={styles.actionMenu} style={position}>
-              {actions.map(([action, icon, label]) => (
-                <button
-                  key={action}
-                  type="button"
-                  onClick={() => {
-                    onAction(action);
-                    setOpen(false);
-                  }}
-                >
-                  <Icon icon={icon} />
-                  {label}
-                </button>
-              ))}
-            </div>,
-            document.body,
-          )
-        : null}
-    </>
+      ))}
+    </div>,
+    document.body,
   );
 }
 
