@@ -4,6 +4,7 @@ import { createInitialSnapshot, itemForCreate } from "../trip/model";
 import {
   addTripItem,
   applyCalendarItemChange,
+  applyCalendarItemChanges,
   deleteTripDay,
   initializeTripDocument,
   moveTripItem,
@@ -263,6 +264,45 @@ describe("collaboration document", () => {
       durationMinutes: 15,
     });
     document.destroy();
+  });
+  it("moves calendar items together in one transaction", () => {
+    const document = seedDocument();
+    addTripItem(
+      document,
+      itemForCreate("place", "2027-01-01", {
+        id: "group-first",
+        title: "First",
+        startTime: "09:00",
+      }),
+    );
+    addTripItem(
+      document,
+      itemForCreate("place", "2027-01-01", {
+        id: "group-second",
+        title: "Second",
+        startTime: "11:00",
+      }),
+    );
+    let transactions = 0;
+    document.on("afterTransaction", (transaction) => {
+      if (transaction.origin === "calendar-item") transactions += 1;
+    });
+
+    applyCalendarItemChanges(document, [
+      { id: "group-first", patch: { dayId: "2027-01-02", startTime: "10:00" } },
+      { id: "group-second", patch: { dayId: "2027-01-02", startTime: "12:00" } },
+    ]);
+
+    expect(transactions).toBe(1);
+    const snapshot = readTripDocument(document);
+    expect(snapshot.items["group-first"]).toMatchObject({
+      dayId: "2027-01-02",
+      startTime: "10:00",
+    });
+    expect(snapshot.items["group-second"]).toMatchObject({
+      dayId: "2027-01-02",
+      startTime: "12:00",
+    });
   });
 
   it("normalizes legacy note schedule fields in the shared document", () => {

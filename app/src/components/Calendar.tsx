@@ -44,6 +44,13 @@ type ItemChange = {
   extendThrough?: string;
 };
 
+type ItemGestureMember = {
+  item: TripItem;
+  startAbsolute: number;
+  endAbsolute: number;
+  version: string;
+};
+
 type ItemGesture = {
   type: "item";
   item: TripItem;
@@ -53,7 +60,7 @@ type ItemGesture = {
   startY: number;
   startAbsolute: number;
   endAbsolute: number;
-  version: string;
+  members: readonly ItemGestureMember[];
 };
 
 type LodgingGesture = {
@@ -65,7 +72,14 @@ type LodgingGesture = {
   version: string;
 };
 
-type Gesture = ItemGesture | LodgingGesture;
+type SelectionGesture = {
+  type: "selection";
+  pointerId: number;
+  startX: number;
+  startY: number;
+  baseIds: readonly string[];
+};
+type Gesture = ItemGesture | LodgingGesture | SelectionGesture;
 
 type Preview = { itemId: string; dayId: string; startTime: string; durationMinutes: number };
 type DragPointer = {
@@ -91,6 +105,7 @@ type LodgingPointer = {
   anchorX: number;
   guideY: number;
 };
+type SelectionBox = { left: number; top: number; width: number; height: number };
 
 type ItemAction =
   | "earlier"
@@ -125,7 +140,9 @@ export function Calendar({
   onSelect,
   onChangeItem,
   onMoveNote,
+  onClearSelection,
   onChangeLodging,
+  onChangeItems,
   onCloneItem,
 }: {
   days: readonly TripDay[];
@@ -141,11 +158,18 @@ export function Calendar({
   onChangeItem: (change: ItemChange) => { clamped: boolean };
   onMoveNote: (noteId: string, dayId: string, afterItemId: string | null) => void;
   onChangeLodging: (item: TripItem, startDate: string, endDate: string) => { clamped: boolean };
+  onClearSelection: () => void;
+  onChangeItems: (changes: readonly ItemChange[]) => { clamped: boolean };
   onCloneItem: (item: TripItem) => void;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
+  const [groupPreviews, setGroupPreviews] = useState<readonly Preview[]>([]);
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
+    () => new Set(selectedId ? [selectedId] : []),
+  );
+  const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
   const [limitMessage, setLimitMessage] = useState("");
   const [dragPointer, setDragPointer] = useState<DragPointer | null>(null);
   const longPress = useRef<LongPress | null>(null);
@@ -161,38 +185,47 @@ export function Calendar({
     [calendarHours],
   );
   const dayIndex = useMemo(() => new Map(days.map((day, index) => [day.id, index])), [days]);
+  const activePreviews = useMemo(
+    () => (groupPreviews.length > 0 ? groupPreviews : preview ? [preview] : []),
+    [groupPreviews, preview],
+  );
+  const previewById = useMemo(
+    () => new Map(activePreviews.map((candidate) => [candidate.itemId, candidate])),
+    [activePreviews],
+  );
   const effectiveItems = useMemo(
     () =>
-      preview
-        ? orderedItems.map((item) =>
-            item.id === preview.itemId
+      activePreviews.length > 0
+        ? orderedItems.map((item) => {
+            const itemPreview = previewById.get(item.id);
+            return itemPreview
               ? {
                   ...item,
-                  dayId: preview.dayId,
-                  startTime: preview.startTime,
-                  durationMinutes: preview.durationMinutes,
+                  dayId: itemPreview.dayId,
+                  startTime: itemPreview.startTime,
+                  durationMinutes: itemPreview.durationMinutes,
                 }
-              : item,
-          )
+              : item;
+          })
         : orderedItems,
-    [orderedItems, preview],
+    [activePreviews, orderedItems, previewById],
   );
   const layout = useMemo(
     () => buildCalendarLayout(days, orderedItems, legsByDay, calendarHours),
     [calendarHours, days, legsByDay, orderedItems],
   );
-  const previewSegmentsByDay = useMemo(
-    () =>
-      new Map(
-        (preview ? buildCalendarLayout(days, effectiveItems, legsByDay, calendarHours) : []).map(
-          (column) => [
-            column.day.id,
-            column.segments.filter((segment) => segment.item.id === preview?.itemId),
-          ],
-        ),
-      ),
-    [calendarHours, days, effectiveItems, legsByDay, preview],
-  );
+  const previewSegmentsByDay = useMemo(() => {
+    const previewIds = new Set(activePreviews.map((candidate) => candidate.itemId));
+    return new Map(
+      (activePreviews.length > 0
+        ? buildCalendarLayout(days, effectiveItems, legsByDay, calendarHours)
+        : []
+      ).map((column) => [
+        column.day.id,
+        column.segments.filter((segment) => previewIds.has(segment.item.id)),
+      ]),
+    );
+  }, [activePreviews, calendarHours, days, effectiveItems, legsByDay]);
   const lodgingTarget = useMemo(() => {
     if (!lodgingPreview) return null;
     const startIndex = days.findIndex((day) => day.date >= lodgingPreview.startDate);
@@ -225,15 +258,23 @@ export function Calendar({
   );
 
   useEffect(() => {
-    if (!gesture) return;
-    if (itemVersions.get(gesture.item.id) !== gesture.version) {
-      setGesture(null);
-      setPreview(null);
-      setDragPointer(null);
-      setLimitMessage("This item changed in another editor. Your local gesture was canceled.");
-      setLodgingPreview(null);
-      setLodgingPointer(null);
-    }
+    setSelectedIds(selectedId ? new Set([selectedId]) : new Set());
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!gesture || gesture.type === "selection") return;
+    const changed =
+      gesture.type === "item"
+        ? gesture.members.some((member) => itemVersions.get(member.item.id) !== member.version)
+        : itemVersions.get(gesture.item.id) !== gesture.version;
+    if (!changed) return;
+    setGesture(null);
+    setPreview(null);
+    setGroupPreviews([]);
+    setDragPointer(null);
+    setLimitMessage("This item changed in another editor. Your local gesture was canceled.");
+    setLodgingPreview(null);
+    setLodgingPointer(null);
   }, [gesture, itemVersions]);
 
   useEffect(() => {
@@ -257,6 +298,26 @@ export function Calendar({
   useEffect(() => {
     const move = (event: PointerEvent) => {
       if (!gesture || event.pointerId !== gesture.pointerId) return;
+      if (gesture.type === "selection") {
+        const box = rectangleForPoints(
+          gesture.startX,
+          gesture.startY,
+          event.clientX,
+          event.clientY,
+        );
+        setSelectionBox(box);
+        const selected = new Set(gesture.baseIds);
+        for (const element of scroller.current?.querySelectorAll<HTMLElement>(
+          "[data-calendar-item-id]",
+        ) ?? []) {
+          if (rectanglesIntersect(box, element.getBoundingClientRect())) {
+            const id = element.dataset.calendarItemId;
+            if (id) selected.add(id);
+          }
+        }
+        setSelectedIds(selected);
+        return;
+      }
       const pending = longPress.current;
       if (
         pending?.pointerId === event.pointerId &&
@@ -289,13 +350,28 @@ export function Calendar({
       let start = gesture.startAbsolute;
       let end = gesture.endAbsolute;
       if (gesture.edge === "move") {
-        start = clamp(
-          gesture.startAbsolute + dayDelta * calendarDayMinutes + minuteDelta,
-          0,
-          maximum - calendarMinimumMinutes,
+        const earliest = Math.min(...gesture.members.map((member) => member.startAbsolute));
+        const latestEnd = Math.max(...gesture.members.map((member) => member.endAbsolute));
+        const delta = clamp(
+          dayDelta * calendarDayMinutes + minuteDelta,
+          -earliest,
+          maximum - latestEnd,
         );
-        end = start + (gesture.endAbsolute - gesture.startAbsolute);
-      } else if (gesture.edge === "start") {
+        const previews = gesture.members.flatMap((member) => {
+          const next = previewForAbsolute(
+            member.item.id,
+            member.startAbsolute + delta,
+            member.endAbsolute + delta,
+            days,
+            calendarHours,
+          );
+          return next ? [next] : [];
+        });
+        setGroupPreviews(previews);
+        setPreview(previews.find((candidate) => candidate.itemId === gesture.item.id) ?? null);
+        return;
+      }
+      if (gesture.edge === "start") {
         start = clamp(
           gesture.startAbsolute + dayDelta * calendarDayMinutes + minuteDelta,
           0,
@@ -308,40 +384,65 @@ export function Calendar({
         );
       }
       setPreview(previewForAbsolute(gesture.item.id, start, end, days, calendarHours));
+      setGroupPreviews([]);
     };
     const finish = (event: PointerEvent) => {
       if (!gesture || event.pointerId !== gesture.pointerId) return;
+      if (gesture.type === "selection") {
+        setGesture(null);
+        setSelectionBox(null);
+        return;
+      }
       const pending = longPress.current;
       if (pending?.pointerId === event.pointerId) {
         window.clearTimeout(pending.timer);
         longPress.current = null;
       }
       if (gesture.type === "item") {
-        const next = preview;
+        const nextPreviews =
+          gesture.edge === "move" && groupPreviews.length > 0
+            ? groupPreviews
+            : preview
+              ? [preview]
+              : [];
         setGesture(null);
         setPreview(null);
+        setGroupPreviews([]);
         setDragPointer(null);
-        if (!next) return;
-        const startIndex = dayIndex.get(next.dayId) ?? 0;
-        const finalMinute =
-          startIndex * calendarDayMinutes +
-          calendarMinuteForTime(next.startTime, calendarHours) +
-          next.durationMinutes;
-        const finalIndex = Math.max(0, Math.ceil(finalMinute / calendarDayMinutes) - 1);
-        const lastKnown = days.at(-1)?.date;
-        const extendThrough =
-          finalIndex >= days.length && lastKnown
-            ? addDays(lastKnown, finalIndex - days.length + 1)
-            : undefined;
-        const result = onChangeItem({
-          item: gesture.item,
-          dayId: next.dayId,
-          startTime: next.startTime,
-          durationMinutes: next.durationMinutes,
-          ...(extendThrough ? { extendThrough } : {}),
+        if (nextPreviews.length === 0) return;
+        const changes = nextPreviews.flatMap((next) => {
+          const member = gesture.members.find((candidate) => candidate.item.id === next.itemId);
+          if (!member) return [];
+          const startIndex =
+            dayIndex.get(next.dayId) ?? (days[0] ? daysBetween(days[0].date, next.dayId) : 0);
+          const finalMinute =
+            startIndex * calendarDayMinutes +
+            calendarMinuteForTime(next.startTime, calendarHours) +
+            next.durationMinutes;
+          const finalIndex = Math.max(0, Math.ceil(finalMinute / calendarDayMinutes) - 1);
+          const lastKnown = days.at(-1)?.date;
+          const extendThrough =
+            finalIndex >= days.length && lastKnown
+              ? addDays(lastKnown, finalIndex - days.length + 1)
+              : undefined;
+          return [
+            {
+              item: member.item,
+              dayId: next.dayId,
+              startTime: next.startTime,
+              durationMinutes: next.durationMinutes,
+              ...(extendThrough ? { extendThrough } : {}),
+            },
+          ];
         });
-        if (result.clamped) {
-          setLimitMessage("The item ends at the 30-day trip limit.");
+        const result =
+          changes.length > 1
+            ? onChangeItems(changes)
+            : changes[0]
+              ? onChangeItem(changes[0])
+              : null;
+        if (result?.clamped) {
+          setLimitMessage("The items end at the 30-day trip limit.");
         }
         return;
       }
@@ -370,7 +471,17 @@ export function Calendar({
       window.removeEventListener("pointerup", finish);
       window.removeEventListener("pointercancel", finish);
     };
-  }, [calendarHours, dayIndex, days, gesture, onChangeItem, onChangeLodging, preview]);
+  }, [
+    calendarHours,
+    dayIndex,
+    days,
+    gesture,
+    groupPreviews,
+    onChangeItem,
+    onChangeItems,
+    onChangeLodging,
+    preview,
+  ]);
 
   const openItemActions = (segment: CalendarSegment, x: number, y: number) => {
     if (longPress.current) {
@@ -400,15 +511,43 @@ export function Calendar({
     )
       return;
     event.preventDefault();
-    const itemDay = dayIndex.get(segment.item.dayId ?? "") ?? 0;
-    const start =
-      itemDay * calendarDayMinutes +
-      calendarMinuteForTime(
-        segment.item.startTime ?? timeForCalendarMinute(segment.startMinute, calendarHours),
-        calendarHours,
-      );
+    const selectedItems =
+      edge === "move" && selectedIds.has(segment.item.id)
+        ? orderedItems.filter(
+            (item) =>
+              selectedIds.has(item.id) &&
+              item.type !== "note" &&
+              item.type !== "lodging" &&
+              item.dayId &&
+              item.startTime,
+          )
+        : [segment.item];
+    const members = selectedItems.map((item) => {
+      const itemDay = dayIndex.get(item.dayId ?? "") ?? 0;
+      const startAbsolute =
+        itemDay * calendarDayMinutes +
+        calendarMinuteForTime(
+          item.startTime ??
+            (item.id === segment.item.id
+              ? timeForCalendarMinute(segment.startMinute, calendarHours)
+              : "08:00"),
+          calendarHours,
+        );
+      return {
+        item,
+        startAbsolute,
+        endAbsolute: startAbsolute + Math.max(calendarMinimumMinutes, item.durationMinutes || 60),
+        version: itemVersion(item),
+      };
+    });
+    const primary = members.find((member) => member.item.id === segment.item.id);
+    if (!primary) return;
+    if (edge === "move" && !selectedIds.has(segment.item.id) && !event.ctrlKey && !event.metaKey) {
+      setSelectedIds(new Set([segment.item.id]));
+    }
     setLimitMessage("");
     setActionMenu(null);
+    setGroupPreviews([]);
     const bounds = event.currentTarget
       .closest<HTMLElement>("[data-calendar-item-id]")
       ?.getBoundingClientRect();
@@ -431,9 +570,9 @@ export function Calendar({
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
-      startAbsolute: start,
-      endAbsolute: start + Math.max(calendarMinimumMinutes, segment.item.durationMinutes || 60),
-      version: itemVersion(segment.item),
+      startAbsolute: primary.startAbsolute,
+      endAbsolute: primary.endAbsolute,
+      members,
     });
   };
 
@@ -456,6 +595,27 @@ export function Calendar({
       };
     }
     beginItemGesture(event, segment, "move");
+  };
+
+  const beginSelection = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || event.target !== event.currentTarget) return;
+    event.preventDefault();
+    const baseIds = event.ctrlKey || event.metaKey ? [...selectedIds] : [];
+    if (baseIds.length === 0) {
+      setSelectedIds(new Set());
+      onClearSelection();
+    }
+    setActionMenu(null);
+    setPreview(null);
+    setGroupPreviews([]);
+    setSelectionBox({ left: event.clientX, top: event.clientY, width: 0, height: 0 });
+    setGesture({
+      type: "selection",
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      baseIds,
+    });
   };
 
   const startLodging = (event: ReactPointerEvent, item: TripItem, edge: LodgingGesture["edge"]) => {
@@ -678,7 +838,9 @@ export function Calendar({
             <div
               className={styles.dayTrack}
               data-calendar-day={column.day.id}
+              data-calendar-track={column.day.id}
               key={`track:${column.day.id}`}
+              onPointerDown={beginSelection}
             >
               <div className={styles.hourLines} aria-hidden="true" />
               {(previewSegmentsByDay.get(column.day.id) ?? []).map((segment) => (
@@ -727,8 +889,9 @@ export function Calendar({
                     ?.notes ?? [];
                 return (
                   <article
-                    className={`${styles.block}${segment.provisional ? ` ${styles.provisional}` : ""}${selectedId === segment.item.id ? ` ${styles.selected}` : ""}${gesture?.type === "item" && gesture.item.id === segment.item.id ? ` ${styles.dragOrigin}` : ""}`}
+                    className={`${styles.block}${segment.provisional ? ` ${styles.provisional}` : ""}${selectedIds.has(segment.item.id) ? ` ${styles.selected}` : ""}${gesture?.type === "item" && gesture.members.some((member) => member.item.id === segment.item.id) ? ` ${styles.dragOrigin}` : ""}`}
                     data-calendar-item-id={segment.item.id}
+                    data-calendar-selected={selectedIds.has(segment.item.id) ? "true" : "false"}
                     key={segment.key}
                     style={{
                       top: minuteEm(segment.startMinute),
@@ -769,9 +932,21 @@ export function Calendar({
                     <button
                       type="button"
                       className={styles.blockSelect}
+                      aria-pressed={selectedIds.has(segment.item.id)}
                       aria-label={itemTitle(segment.item, places)}
-                      onClick={() => {
+                      onClick={(event) => {
                         if (actionMenu?.segment.item.id === segment.item.id) return;
+                        if (event.ctrlKey || event.metaKey) {
+                          setSelectedIds((current) => {
+                            const next = new Set(current);
+                            if (next.has(segment.item.id)) next.delete(segment.item.id);
+                            else next.add(segment.item.id);
+                            return next;
+                          });
+                          if (selectedId === segment.item.id) onClearSelection();
+                          return;
+                        }
+                        setSelectedIds(new Set([segment.item.id]));
                         onSelect(segment.item);
                       }}
                       onDragOver={(event) => event.preventDefault()}
@@ -821,6 +996,14 @@ export function Calendar({
         </div>
       </div>
       {editor ? <div className={styles.editor}>{editor}</div> : null}
+      {selectionBox ? (
+        <div
+          className={styles.selectionBox}
+          data-calendar-selection-box
+          style={selectionBox}
+          aria-hidden="true"
+        />
+      ) : null}
       {gesture?.type === "item" && gesture.edge === "move" && dragPointer ? (
         <div
           className={styles.dragProxy}
@@ -1044,6 +1227,24 @@ function previewForAbsolute(
     startTime: timeForCalendarMinute(start, calendarHours),
     durationMinutes: Math.max(calendarMinimumMinutes, snapCalendarMinute(end - start)),
   };
+}
+
+function rectangleForPoints(startX: number, startY: number, endX: number, endY: number) {
+  return {
+    left: Math.min(startX, endX),
+    top: Math.min(startY, endY),
+    width: Math.abs(endX - startX),
+    height: Math.abs(endY - startY),
+  };
+}
+
+function rectanglesIntersect(first: SelectionBox, second: DOMRect): boolean {
+  return (
+    first.left <= second.right &&
+    first.left + first.width >= second.left &&
+    first.top <= second.bottom &&
+    first.top + first.height >= second.top
+  );
 }
 
 function lodgingRangeForPointer(

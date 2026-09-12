@@ -212,45 +212,59 @@ export function applyCalendarItemChange(
   document: Y.Doc,
   change: CalendarItemChange,
 ): { endDate: string; clamped: boolean } {
-  const item = document.getMap<Y.Map<unknown>>(itemsKey).get(change.id);
-  if (!item) {
-    return {
-      endDate: String(document.getMap(metadataKey).get("endDate") ?? ""),
-      clamped: false,
-    };
-  }
-  const parsed = requireReservationSchedule(
-    tripItemSchema.parse({ ...item.toJSON(), ...change.patch, id: change.id }),
-  );
+  return applyCalendarItemChanges(document, [change], change.order);
+}
+
+export function applyCalendarItemChanges(
+  document: Y.Doc,
+  changes: readonly CalendarItemChange[],
+  order?: readonly string[],
+): { endDate: string; clamped: boolean } {
   const metadata = document.getMap<unknown>(metadataKey);
   const currentEnd = String(metadata.get("endDate") ?? "");
   const startDate = String(metadata.get("startDate") ?? "");
-  const requestedEnd =
-    change.extendThrough && change.extendThrough > currentEnd ? change.extendThrough : currentEnd;
+  const requestedEnd = changes.reduce(
+    (end, change) =>
+      change.extendThrough && change.extendThrough > end ? change.extendThrough : end,
+    currentEnd,
+  );
   const requestedDays = tripDates(startDate, requestedEnd);
   const nextDays = requestedDays.slice(0, 30).map((date) => ({ id: date, date }));
   const endDate = nextDays.at(-1)?.date ?? currentEnd;
-  const next = clampCalendarItem(parsed, endDate);
+  const items = document.getMap<Y.Map<unknown>>(itemsKey);
+  const prepared = changes.flatMap((change) => {
+    const item = items.get(change.id);
+    if (!item) return [];
+    const parsed = requireReservationSchedule(
+      tripItemSchema.parse({ ...item.toJSON(), ...change.patch, id: change.id }),
+    );
+    return [{ item, parsed, next: clampCalendarItem(parsed, endDate) }];
+  });
   const clamped =
     requestedEnd > endDate ||
-    next.dayId !== parsed.dayId ||
-    next.startTime !== parsed.startTime ||
-    next.durationMinutes !== parsed.durationMinutes ||
-    next.lodging?.startDate !== parsed.lodging?.startDate ||
-    next.lodging?.endDate !== parsed.lodging?.endDate;
+    prepared.some(
+      ({ parsed, next }) =>
+        next.dayId !== parsed.dayId ||
+        next.startTime !== parsed.startTime ||
+        next.durationMinutes !== parsed.durationMinutes ||
+        next.lodging?.startDate !== parsed.lodging?.startDate ||
+        next.lodging?.endDate !== parsed.lodging?.endDate,
+    );
 
   document.transact(() => {
-    for (const [key, value] of Object.entries(next)) item.set(key, value);
+    for (const { item, next } of prepared) {
+      for (const [key, value] of Object.entries(next)) item.set(key, value);
+    }
     if (endDate !== currentEnd) {
       metadata.set("endDate", endDate);
       const days = document.getArray<{ id: string; date: string }>(daysKey);
       if (days.length > 0) days.delete(0, days.length);
       days.insert(0, nextDays);
     }
-    if (change.order) {
-      const order = document.getArray<string>(orderKey);
-      if (order.length > 0) order.delete(0, order.length);
-      if (change.order.length > 0) order.insert(0, change.order);
+    if (order) {
+      const currentOrder = document.getArray<string>(orderKey);
+      if (currentOrder.length > 0) currentOrder.delete(0, currentOrder.length);
+      if (order.length > 0) currentOrder.insert(0, [...order]);
     }
   }, "calendar-item");
   return { endDate, clamped };

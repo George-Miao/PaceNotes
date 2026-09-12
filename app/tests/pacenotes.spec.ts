@@ -744,6 +744,12 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     startTime: "09:00",
     durationMinutes: 60,
   });
+  const timedSecond = itemForCreate("place", dayId, {
+    id: "calendar-lunch",
+    title: "Lunch",
+    startTime: "11:00",
+    durationMinutes: 60,
+  });
   const note = itemForCreate("note", dayId, {
     id: "calendar-note",
     title: "Bring tickets",
@@ -755,7 +761,7 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     place: { placeId: "calendar-hotel-place" },
     lodging: { startDate: dayId, endDate: "2027-04-11" },
   });
-  const id = await createEmptyTrip([note, timed, lodging], "2027-04-14");
+  const id = await createEmptyTrip([note, timed, timedSecond, lodging], "2027-04-14");
   try {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.addInitScript(() =>
@@ -1076,6 +1082,56 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     );
     await calendarEditor.getByRole("button", { name: "Close editor" }).click();
     await expect(calendarEditor).toBeHidden();
+    const secondBlock = calendar.locator('[data-calendar-item-id="calendar-lunch"]').first();
+    const secondBlockButton = secondBlock.getByRole("button", { name: "Lunch", exact: true });
+    await blockButton.click({ modifiers: ["Control"] });
+    await secondBlockButton.click({ modifiers: ["Control"] });
+    await expect(block).toHaveAttribute("data-calendar-selected", "true");
+    await expect(secondBlock).toHaveAttribute("data-calendar-selected", "true");
+    const groupDragBox = await block.boundingBox();
+    if (!groupDragBox) throw new Error("Missing group drag geometry");
+    await page.mouse.move(
+      groupDragBox.x + groupDragBox.width / 2,
+      groupDragBox.y + groupDragBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      groupDragBox.x + groupDragBox.width / 2 + lodgingDayBox.width,
+      groupDragBox.y + groupDragBox.height / 2,
+      { steps: 4 },
+    );
+    await expect(dropPreview).toHaveCount(2);
+    await page.mouse.up();
+    const movedGroupTrack = calendar.locator('[data-calendar-track="2027-04-11"]');
+    await expect(
+      movedGroupTrack.locator('[data-calendar-item-id="calendar-museum"]'),
+    ).toBeVisible();
+    await expect(movedGroupTrack.locator('[data-calendar-item-id="calendar-lunch"]')).toBeVisible();
+
+    const movedFirstBox = await block.boundingBox();
+    const movedSecondBox = await secondBlock.boundingBox();
+    const movedTrackBox = await movedGroupTrack.boundingBox();
+    if (!movedFirstBox || !movedSecondBox || !movedTrackBox) {
+      throw new Error("Missing drag selection geometry");
+    }
+    const selectionStartX = movedTrackBox.x + 1;
+    const selectionStartY = Math.min(movedFirstBox.y, movedSecondBox.y) - 4;
+    await page.mouse.click(selectionStartX, selectionStartY);
+    await expect(block).toHaveAttribute("data-calendar-selected", "false");
+    await expect(secondBlock).toHaveAttribute("data-calendar-selected", "false");
+    await page.mouse.move(selectionStartX, selectionStartY);
+    await page.mouse.down();
+    await page.mouse.move(
+      movedTrackBox.x + movedTrackBox.width - 1,
+      Math.max(movedFirstBox.y + movedFirstBox.height, movedSecondBox.y + movedSecondBox.height) +
+        4,
+      { steps: 4 },
+    );
+    await expect(calendar.locator("[data-calendar-selection-box]")).toBeVisible();
+    await expect(block).toHaveAttribute("data-calendar-selected", "true");
+    await expect(secondBlock).toHaveAttribute("data-calendar-selected", "true");
+    await page.mouse.up();
+    await expect(calendar.locator("[data-calendar-selection-box]")).toBeHidden();
 
     await expect(block.getByRole("button", { name: /Calendar actions/ })).toHaveCount(0);
     await block.click({ button: "right" });

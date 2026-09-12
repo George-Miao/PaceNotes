@@ -368,6 +368,14 @@
   font-size: 0.6em;
 }
 
+.selectionBox {
+  position: fixed;
+  z-index: 100;
+  border: var(--line) solid var(--focus);
+  background: color-mix(in srgb, var(--focus) 12%, transparent);
+  pointer-events: none;
+}
+
 .blockSelect {
   display: grid;
   width: 100%;

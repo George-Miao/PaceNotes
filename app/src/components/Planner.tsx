@@ -28,6 +28,7 @@ import {
 import {
   addTripItem,
   applyCalendarItemChange,
+  applyCalendarItemChanges,
   deleteTripDay,
   moveTripItem,
   readTripDocument,
@@ -55,6 +56,7 @@ import {
 } from "~/features/google/route-legs";
 import { useGooglePlaceViews } from "~/features/google/use-place-views";
 import { useTripTitle } from "~/features/google/use-trip-title";
+import { calendarMinuteForTime } from "~/features/trip/calendar-layout";
 import { dayColor } from "~/features/trip/day-colors";
 import { buildDayPlans } from "~/features/trip/day-plan";
 import { createTripText, TripLanguageProvider, useTripText } from "~/features/trip/language";
@@ -91,6 +93,13 @@ const TripMap = lazy(async () => {
   return { default: module.TripMap };
 });
 type ViewMode = "map" | "list" | "split";
+type CalendarChange = {
+  item: TripItem;
+  dayId: string;
+  startTime: string;
+  durationMinutes: number;
+  extendThrough?: string;
+};
 
 export function Planner({ tripId }: { tripId: string }) {
   const navigate = useNavigate();
@@ -766,32 +775,37 @@ export function Planner({ tripId }: { tripId: string }) {
       next,
     );
   };
-  const changeCalendarItem = (change: {
-    item: TripItem;
-    dayId: string;
-    startTime: string;
-    durationMinutes: number;
-    extendThrough?: string;
-  }) => {
-    const nextItem = {
-      ...change.item,
-      dayId: change.dayId,
-      startTime: change.startTime,
-      durationMinutes: change.durationMinutes,
-    };
-    const result = applyCalendarItemChange(document, {
-      id: change.item.id,
-      patch: {
+  const changeCalendarItems = (changes: readonly CalendarChange[]) => {
+    let working = snapshot;
+    const mutations = changes.map((change) => {
+      const nextItem = {
+        ...change.item,
         dayId: change.dayId,
         startTime: change.startTime,
         durationMinutes: change.durationMinutes,
-      },
-      order: calendarOrder(snapshot, nextItem),
-      ...(change.extendThrough ? { extendThrough: change.extendThrough } : {}),
+      };
+      const items = { ...working.items, [nextItem.id]: nextItem };
+      working = {
+        ...working,
+        items,
+        order: calendarOrder({ ...working, items }, nextItem),
+      };
+      return {
+        id: change.item.id,
+        patch: {
+          dayId: change.dayId,
+          startTime: change.startTime,
+          durationMinutes: change.durationMinutes,
+        },
+        ...(change.extendThrough ? { extendThrough: change.extendThrough } : {}),
+      };
     });
-    selectCalendarDay(change.dayId);
+    const result = applyCalendarItemChanges(document, mutations, working.order);
+    const first = changes[0];
+    if (first) selectCalendarDay(first.dayId);
     return { clamped: result.clamped };
   };
+  const changeCalendarItem = (change: CalendarChange) => changeCalendarItems([change]);
   const cloneCalendarItem = (item: TripItem) => {
     const latest = readTripDocument(document);
     const source = latest.items[item.id];
@@ -1280,6 +1294,8 @@ export function Planner({ tripId }: { tripId: string }) {
                 selectedId={selectedId}
                 onSelect={(item) => selectItem(item.id, item.dayId ?? undefined)}
                 editor={renderEditor()}
+                onClearSelection={closeEditor}
+                onChangeItems={changeCalendarItems}
                 onChangeItem={changeCalendarItem}
                 onMoveNote={moveCalendarNote}
                 onCloneItem={cloneCalendarItem}
@@ -2183,12 +2199,12 @@ function calendarOrder(snapshot: TripSnapshot, changed: TripItem): string[] {
   const next = snapshot.order.filter((id) => id !== changed.id);
   const sameDay = next.filter((id) => snapshot.items[id]?.dayId === changed.dayId);
   const changedMinute = changed.startTime
-    ? Number(changed.startTime.slice(0, 2)) * 60 + Number(changed.startTime.slice(3))
+    ? calendarMinuteForTime(changed.startTime, snapshot.calendarHours)
     : Number.POSITIVE_INFINITY;
   const before = sameDay.find((id) => {
     const item = snapshot.items[id];
     if (!item?.startTime) return false;
-    const minute = Number(item.startTime.slice(0, 2)) * 60 + Number(item.startTime.slice(3));
+    const minute = calendarMinuteForTime(item.startTime, snapshot.calendarHours);
     return minute > changedMinute;
   });
   const last = sameDay.at(-1);
