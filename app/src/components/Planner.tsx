@@ -710,7 +710,10 @@ export function Planner({ tripId }: { tripId: string }) {
     dayId: string | null,
     boundary: "start" | "end" | null = null,
   ) =>
-    selected?.id === item.id && editorDay === dayId && editorBoundary === boundary
+    plannerContent !== "calendar" &&
+    selected?.id === item.id &&
+    editorDay === dayId &&
+    editorBoundary === boundary
       ? renderEditor()
       : null;
 
@@ -1276,6 +1279,7 @@ export function Planner({ tripId }: { tripId: string }) {
                 focusRequest={calendarFocusRequest}
                 selectedId={selectedId}
                 onSelect={(item) => selectItem(item.id, item.dayId ?? undefined)}
+                editor={renderEditor()}
                 onChangeItem={changeCalendarItem}
                 onMoveNote={moveCalendarNote}
                 onCloneItem={cloneCalendarItem}

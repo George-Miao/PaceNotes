@@ -1,14 +1,30 @@
 .root {
   min-width: 0;
   height: 100%;
+  display: grid;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr) auto;
   background: var(--surface);
 }
 
 .scroller {
   width: 100%;
-  height: 100%;
+  height: auto;
+  min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
+}
+
+.editor {
+  max-height: min(45vh, 24rem);
+  overflow: auto;
+  border-top: var(--line) solid var(--border);
+  background: var(--raised);
+}
+
+.editor :global(.item-editor) {
+  border: 0;
+  border-radius: 0;
 }
 
 .calendar {

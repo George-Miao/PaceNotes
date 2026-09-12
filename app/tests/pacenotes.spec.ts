@@ -1063,6 +1063,19 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     await expect(dropPreview).toBeVisible();
     await page.mouse.up();
     await expect(block).toContainText("09:15 - 10:15");
+    await blockButton.click();
+    const calendarEditor = calendar.locator(".item-editor");
+    await expect(calendarEditor).toBeVisible();
+    const calendarScrollerWithEditorBox = await calendarScroller.boundingBox();
+    const calendarEditorBox = await calendarEditor.boundingBox();
+    if (!calendarScrollerWithEditorBox || !calendarEditorBox) {
+      throw new Error("Missing calendar editor geometry");
+    }
+    expect(calendarEditorBox.y).toBeGreaterThanOrEqual(
+      calendarScrollerWithEditorBox.y + calendarScrollerWithEditorBox.height - 1,
+    );
+    await calendarEditor.getByRole("button", { name: "Close editor" }).click();
+    await expect(calendarEditor).toBeHidden();
 
     await expect(block.getByRole("button", { name: /Calendar actions/ })).toHaveCount(0);
     await block.click({ button: "right" });

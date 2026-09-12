@@ -9,6 +9,7 @@ import plusIcon from "@iconify-icons/lucide/plus";
 import stickyNoteIcon from "@iconify-icons/lucide/sticky-note";
 import {
   Fragment,
+  type ReactNode,
   type PointerEvent as ReactPointerEvent,
   useEffect,
   useMemo,
@@ -119,6 +120,7 @@ export function Calendar({
   language,
   selectedId,
   calendarHours,
+  editor,
   focusRequest,
   onSelect,
   onChangeItem,
@@ -132,6 +134,7 @@ export function Calendar({
   places: ReadonlyMap<string, GooglePlaceView>;
   language: TripLanguage;
   calendarHours: CalendarHours;
+  editor: ReactNode;
   focusRequest: { dayId: string; serial: number } | null;
   selectedId: string | null;
   onSelect: (item: TripItem) => void;
@@ -817,6 +820,7 @@ export function Calendar({
           ))}
         </div>
       </div>
+      {editor ? <div className={styles.editor}>{editor}</div> : null}
       {gesture?.type === "item" && gesture.edge === "move" && dragPointer ? (
         <div
           className={styles.dragProxy}
