@@ -30,6 +30,7 @@ export type CalendarRouteGap = {
   startMinute: number;
   durationMinutes: number;
   state: RouteLeg["state"];
+  mode: RouteLeg["mode"];
   label: string;
   conflict: boolean;
 };
@@ -262,6 +263,7 @@ function buildRouteGaps(
           startMinute,
           durationMinutes: used,
           state: leg.state,
+          mode: leg.mode,
           label: leg.duration,
           conflict,
         });

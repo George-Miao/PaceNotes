@@ -6,12 +6,9 @@ import {
   type DropResult,
 } from "@hello-pangea/dnd";
 import { Icon } from "@iconify/react";
-import carFrontIcon from "@iconify-icons/lucide/car-front";
 import chevronDownIcon from "@iconify-icons/lucide/chevron-down";
 import chevronUpIcon from "@iconify-icons/lucide/chevron-up";
-import footprintsIcon from "@iconify-icons/lucide/footprints";
 import routeIcon from "@iconify-icons/lucide/route";
-import trainFrontIcon from "@iconify-icons/lucide/train-front";
 import trashIcon from "@iconify-icons/lucide/trash-2";
 import {
   type CSSProperties,
@@ -38,7 +35,7 @@ import {
   type TripLanguage,
   travelModes,
 } from "~/features/trip/model";
-import { iconForItem } from "./item-icon";
+import { iconForItem, iconForTravelMode } from "./item-icon";
 
 export type ItineraryDrop = {
   itemId: string;
@@ -302,7 +299,7 @@ function TransportLeg({
     >
       <i className="leg-rail" aria-hidden="true" />
       <span className="leg-summary">
-        <Icon icon={iconForMode(leg.mode)} aria-hidden="true" />
+        <Icon icon={iconForTravelMode(leg.mode)} aria-hidden="true" />
         {leg.state === "updating"
           ? text("updatingRoute")
           : `${leg.state === "stale" ? `${text("stale")} - ` : ""}${[
@@ -339,12 +336,6 @@ function TransportLeg({
       </label>
     </div>
   );
-}
-
-function iconForMode(mode: TravelMode) {
-  if (mode === "WALKING") return footprintsIcon;
-  if (mode === "TRANSIT") return trainFrontIcon;
-  return carFrontIcon;
 }
 
 function firstLine(value: string): string {

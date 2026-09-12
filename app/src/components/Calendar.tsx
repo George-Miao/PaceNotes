@@ -26,9 +26,10 @@ import {
   snapCalendarMinute,
   timeForCalendarMinute,
 } from "~/features/trip/calendar-layout";
+import { travelModeLabel } from "~/features/trip/language";
 import type { TripDay, TripItem, TripLanguage } from "~/features/trip/model";
 import styles from "./Calendar.module.css";
-import { iconForItem } from "./item-icon";
+import { iconForItem, iconForTravelMode } from "./item-icon";
 
 type ItemChange = {
   item: TripItem;
@@ -652,12 +653,18 @@ export function Calendar({
               ))}
               {column.routeGaps.map((gap) => (
                 <div
+                  data-calendar-route-leg
+                  data-travel-mode={gap.mode}
                   className={`${styles.routeGap}${gap.conflict ? ` ${styles.routeConflict}` : ""}`}
                   key={gap.key}
                   style={{ top: minuteEm(gap.startMinute), height: minuteEm(gap.durationMinutes) }}
                 >
-                  <i />
-                  <span>{gap.conflict ? `${gap.label} - conflict` : gap.label}</span>
+                  <i aria-hidden="true" />
+                  <span>
+                    <Icon icon={iconForTravelMode(gap.mode)} aria-hidden="true" />
+                    {travelModeLabel(language, gap.mode)} -{" "}
+                    {gap.conflict ? `${gap.label} - conflict` : gap.label}
+                  </span>
                 </div>
               ))}
               {column.segments.map((segment) => {

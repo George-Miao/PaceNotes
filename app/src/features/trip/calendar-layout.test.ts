@@ -82,10 +82,20 @@ describe("calendar layout", () => {
     const layout = buildCalendarLayout(days, [source, destination], new Map([[firstDay, [leg]]]));
 
     expect(layout[0]?.routeGaps).toEqual([
-      expect.objectContaining({ startMinute: 1380, durationMinutes: 60, conflict: true }),
+      expect.objectContaining({
+        startMinute: 1380,
+        durationMinutes: 60,
+        mode: "DRIVING",
+        conflict: true,
+      }),
     ]);
     expect(layout[1]?.routeGaps).toEqual([
-      expect.objectContaining({ startMinute: 0, durationMinutes: 60, conflict: true }),
+      expect.objectContaining({
+        startMinute: 0,
+        durationMinutes: 60,
+        mode: "DRIVING",
+        conflict: true,
+      }),
     ]);
   });
 });
