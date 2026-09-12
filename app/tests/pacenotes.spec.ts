@@ -891,9 +891,7 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     expect(checkInBox.x - checkInBlockBox.x).toBeLessThanOrEqual(3);
     expect(Math.abs(checkInBox.y - checkInBlockBox.y)).toBeLessThanOrEqual(3);
     expect(
-      Math.abs(
-        checkInBox.y + checkInBox.height - (checkInBlockBox.y + checkInBlockBox.height),
-      ),
+      Math.abs(checkInBox.y + checkInBox.height - (checkInBlockBox.y + checkInBlockBox.height)),
     ).toBeLessThanOrEqual(3);
     await page.mouse.move(
       checkInBox.x + checkInBox.width / 2,
@@ -929,17 +927,11 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     const checkOutBlockBox = await checkOutHandle.locator("..").boundingBox();
     if (!checkOutBlockBox) throw new Error("Missing lodging check-out block geometry");
     expect(
-      Math.abs(
-        checkOutBox.x +
-          checkOutBox.width -
-          (checkOutBlockBox.x + checkOutBlockBox.width),
-      ),
+      Math.abs(checkOutBox.x + checkOutBox.width - (checkOutBlockBox.x + checkOutBlockBox.width)),
     ).toBeLessThanOrEqual(3);
     expect(Math.abs(checkOutBox.y - checkOutBlockBox.y)).toBeLessThanOrEqual(3);
     expect(
-      Math.abs(
-        checkOutBox.y + checkOutBox.height - (checkOutBlockBox.y + checkOutBlockBox.height),
-      ),
+      Math.abs(checkOutBox.y + checkOutBox.height - (checkOutBlockBox.y + checkOutBlockBox.height)),
     ).toBeLessThanOrEqual(3);
     await page.mouse.move(
       checkOutBox.x + checkOutBox.width / 2,

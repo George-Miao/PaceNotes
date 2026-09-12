@@ -731,6 +731,7 @@ export function Calendar({
     event.preventDefault();
     adjustItem(segment, action);
   };
+  const lodgingGuide = lodgingPointer ? clippedLodgingGuide(lodgingPointer) : null;
 
   return (
     <section className={styles.root} aria-label="Trip calendar">
@@ -1055,15 +1056,11 @@ export function Calendar({
           <span>{itemTitle(gesture.item, places)}</span>
         </div>
       ) : null}
-      {gesture?.type === "lodging" && gesture.edge !== "move" && lodgingPointer ? (
+      {gesture?.type === "lodging" && gesture.edge !== "move" && lodgingGuide ? (
         <div
           className={styles.lodgingResizeGuide}
           data-calendar-lodging-resize-guide
-          style={{
-            left: Math.min(lodgingPointer.anchorX, lodgingPointer.x),
-            top: lodgingPointer.guideY,
-            width: Math.max(2, Math.abs(lodgingPointer.x - lodgingPointer.anchorX)),
-          }}
+          style={lodgingGuide}
           aria-hidden="true"
         />
       ) : null}
@@ -1085,6 +1082,17 @@ export function Calendar({
       ) : null}
     </section>
   );
+}
+
+function clippedLodgingGuide(pointer: LodgingPointer) {
+  const left = Math.max(Math.min(pointer.anchorX, pointer.x), pointer.clipLeft);
+  const right = Math.min(Math.max(pointer.anchorX, pointer.x), pointer.clipRight);
+  if (right <= left) return null;
+  return {
+    left,
+    top: pointer.guideY,
+    width: right - left,
+  };
 }
 
 function NoteStack({

@@ -246,8 +246,7 @@
 .dateHandle {
   position: absolute;
   z-index: 2;
-  top: 0;
-  bottom: 0;
+  inset-block: 0;
   width: 1em;
   padding: 0;
   border: 0;
@@ -256,11 +255,11 @@
 }
 
 .dateHandleStart {
-  left: 0;
+  inset-inline-start: 0;
 }
 
 .dateHandleEnd {
-  right: 0;
+  inset-inline-end: 0;
 }
 
 .timeGutter {
