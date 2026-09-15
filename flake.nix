@@ -52,7 +52,7 @@
               inherit (finalAttrs) pname version src;
               inherit pnpm;
               fetcherVersion = 4;
-              hash = "sha256-l8DcZVPIu/S7NHeP6Lp9TswPA6OMeLyLMxoA+QPZfzg=";
+              hash = "sha256-05xxnUdO276sH3q8naNu1KshbS4GrqIaWH6knu6pfcU=";
             };
             buildPhase = ''
               runHook preBuild
@@ -187,6 +187,7 @@
             packages = [
               pkgs.infisical
               pkgs.nodejs_24
+              pkgs.typescript-go
               pnpm
               pkgs.postgresql_18
               pkgs.docker-compose

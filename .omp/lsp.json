@@ -1,0 +1,16 @@
+{
+  "servers": {
+    "typescript-language-server": {
+      "disabled": true
+    },
+    "typescript-native": {
+      "disabled": true
+    },
+    "typescript-go": {
+      "command": "tsgo",
+      "args": ["--lsp", "--stdio"],
+      "fileTypes": [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"],
+      "rootMarkers": ["flake.nix"]
+    }
+  }
+}
