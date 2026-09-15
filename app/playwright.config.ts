@@ -15,7 +15,7 @@ export default defineConfig({
     {
       name: "firefox",
       use: { ...devices["Desktop Firefox"] },
-      grep: /map and list toggles keep at least one panel visible|selected places are added directly|continuous days support transport|per-day add controls|resizing a 500-place split avoids itinerary recommits/,
+      grep: /map and list toggles keep at least one panel visible|selected places are added directly|continuous days support transport|per-day add controls|resizing a 500-place split avoids itinerary recommits|calendar colors the full stay|calendar ends on the final labeled hour|itinerary drag remains active|changing calendar duration keeps item order/,
     },
   ],
 });

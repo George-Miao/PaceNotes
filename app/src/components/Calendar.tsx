@@ -1,16 +1,13 @@
 import { Icon } from "@iconify/react";
-import arrowDownIcon from "@iconify-icons/lucide/arrow-down";
-import arrowLeftIcon from "@iconify-icons/lucide/arrow-left";
-import arrowRightIcon from "@iconify-icons/lucide/arrow-right";
-import arrowUpIcon from "@iconify-icons/lucide/arrow-up";
-import copyIcon from "@iconify-icons/lucide/copy";
-import minusIcon from "@iconify-icons/lucide/minus";
-import plusIcon from "@iconify-icons/lucide/plus";
+import bedDoubleIcon from "@iconify-icons/lucide/bed-double";
 import stickyNoteIcon from "@iconify-icons/lucide/sticky-note";
+import triangleAlertIcon from "@iconify-icons/lucide/triangle-alert";
 import {
   Fragment,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -19,28 +16,63 @@ import {
 import { createPortal } from "react-dom";
 import type { GooglePlaceView } from "~/features/google/google";
 import { itemTitle } from "~/features/google/item-title";
-import type { RouteLeg } from "~/features/google/route-legs";
+import type { RouteLeg } from "~/features/routing/route-legs";
 import {
   buildCalendarLayout,
+  buildCalendarLodgingLayout,
   type CalendarSegment,
+  type CalendarStay,
   calendarDayMinutes,
-  calendarHourEm,
   calendarMinimumMinutes,
   calendarMinuteForTime,
   calendarSnapMinutes,
+  rollingTimeForCalendarMinute,
   snapCalendarMinute,
   timeForCalendarMinute,
 } from "~/features/trip/calendar-layout";
-import { travelModeLabel } from "~/features/trip/language";
-import type { CalendarHours, TripDay, TripItem, TripLanguage } from "~/features/trip/model";
+import { createTripText, travelModeLabel } from "~/features/trip/language";
+import {
+  type CalendarStartHour,
+  type Lodging,
+  lodgingForDates,
+  type TripDay,
+  type TripItem,
+  type TripLanguage,
+} from "~/features/trip/model";
 import styles from "./Calendar.module.css";
+import { CalendarHourLines } from "./CalendarHourLines";
+import {
+  type CalendarAddType,
+  type CalendarMenuState,
+  CalendarMenus,
+  type CalendarItemAction as ItemAction,
+  type CalendarMenuPosition as MenuPosition,
+} from "./CalendarMenus";
+import {
+  addDays,
+  clamp,
+  clippedLodgingGuide,
+  daysBetween,
+  formatDay,
+  isCalendarDropPoint,
+  itemVersion,
+  lodgingRangeForPointer,
+  minutePercent,
+  type CalendarPreview as Preview,
+  pointerDelta,
+  previewForAbsolute,
+  rectangleForPoints,
+  rectanglesIntersect,
+  type CalendarSelectionBox as SelectionBox,
+} from "./calendar-coordinates";
 import { iconForItem, iconForTravelMode } from "./item-icon";
 
 type ItemChange = {
   item: TripItem;
   dayId: string;
-  startTime: string;
+  startTime: string | null;
   durationMinutes: number;
+  orderBeforeId?: string | null;
   extendThrough?: string;
 };
 
@@ -50,14 +82,19 @@ type ItemGestureMember = {
   endAbsolute: number;
   version: string;
 };
+type PointerPosition = Pick<PointerEvent, "pointerId" | "clientX" | "clientY">;
 
 type ItemGesture = {
   type: "item";
   item: TripItem;
   edge: "move" | "start" | "end";
+  active: boolean;
+  dragBox: Omit<DragPointer, "x" | "y"> | null;
   pointerId: number;
   startX: number;
   startY: number;
+  startScrollLeft: number;
+  startScrollTop: number;
   startAbsolute: number;
   endAbsolute: number;
   members: readonly ItemGestureMember[];
@@ -67,8 +104,22 @@ type LodgingGesture = {
   type: "lodging";
   item: TripItem;
   edge: "move" | "start" | "end";
+  active: boolean;
+  pointer: LodgingPointer;
   pointerId: number;
   startX: number;
+  startY: number;
+  version: string;
+  startScrollLeft: number;
+};
+
+type StayGesture = {
+  type: "stay";
+  item: TripItem;
+  dayId: string;
+  pointerId: number;
+  startY: number;
+  startMinute: number;
   version: string;
 };
 
@@ -79,9 +130,8 @@ type SelectionGesture = {
   startY: number;
   baseIds: readonly string[];
 };
-type Gesture = ItemGesture | LodgingGesture | SelectionGesture;
+type Gesture = ItemGesture | LodgingGesture | StayGesture | SelectionGesture;
 
-type Preview = { itemId: string; dayId: string; startTime: string; durationMinutes: number };
 type DragPointer = {
   x: number;
   y: number;
@@ -95,6 +145,7 @@ type LodgingPreview = {
   startDate: string;
   endDate: string;
 };
+type StayPreview = { key: string; endMinute: number };
 type LodgingPointer = {
   x: number;
   y: number;
@@ -107,27 +158,39 @@ type LodgingPointer = {
   clipLeft: number;
   clipRight: number;
 };
-type SelectionBox = { left: number; top: number; width: number; height: number };
 
-type ItemAction =
-  | "earlier"
-  | "later"
-  | "previous-day"
-  | "next-day"
-  | "shorter"
-  | "longer"
-  | "clone";
-type ActionMenuState = {
-  segment: CalendarSegment;
-  left: number;
-  top: number;
-};
+type AdjustmentAction = Exclude<
+  ItemAction,
+  "move-up" | "move-down" | "flexible" | "duplicate" | "edit" | "delete"
+>;
 type LongPress = {
   pointerId: number;
   startX: number;
   startY: number;
   timer: number;
 };
+
+type TimeGuide = {
+  dayId: string;
+  minute: number;
+};
+type CalendarTrackGeometry = {
+  height: number;
+  origin: number;
+  devicePixelRatio: number;
+};
+
+function deviceAlignedMinutePosition(
+  minute: number,
+  geometry: CalendarTrackGeometry | null,
+): string {
+  if (!geometry) return minutePercent(minute);
+  const rawPosition = geometry.origin + (geometry.height * minute) / calendarDayMinutes;
+  const alignedPosition =
+    Math.round(rawPosition * geometry.devicePixelRatio) / geometry.devicePixelRatio -
+    geometry.origin;
+  return `${alignedPosition}px`;
+}
 
 export function Calendar({
   days,
@@ -136,8 +199,9 @@ export function Calendar({
   places,
   language,
   selectedId,
-  calendarHours,
+  calendarStartHour,
   editor,
+  creationPanel,
   focusRequest,
   onSelect,
   onChangeItem,
@@ -145,25 +209,42 @@ export function Calendar({
   onClearSelection,
   onChangeLodging,
   onChangeItems,
-  onCloneItem,
+  onDuplicateItem,
+  canReorderItem,
+  onReorderItem,
+  onDeleteItem,
+  onMakeFlexible,
+  onAddItem,
 }: {
   days: readonly TripDay[];
   orderedItems: readonly TripItem[];
   legsByDay: ReadonlyMap<string, readonly RouteLeg[]>;
   places: ReadonlyMap<string, GooglePlaceView>;
   language: TripLanguage;
-  calendarHours: CalendarHours;
+  calendarStartHour: CalendarStartHour;
   editor: ReactNode;
+  creationPanel: ReactNode;
   focusRequest: { dayId: string; serial: number } | null;
   selectedId: string | null;
-  onSelect: (item: TripItem) => void;
+  onSelect: (item: TripItem, dayId?: string) => void;
   onChangeItem: (change: ItemChange) => { clamped: boolean };
   onMoveNote: (noteId: string, dayId: string, afterItemId: string | null) => void;
-  onChangeLodging: (item: TripItem, startDate: string, endDate: string) => { clamped: boolean };
+  onChangeLodging: (item: TripItem, lodging: Lodging) => { clamped: boolean };
   onClearSelection: () => void;
   onChangeItems: (changes: readonly ItemChange[]) => { clamped: boolean };
-  onCloneItem: (item: TripItem) => void;
+  canReorderItem: (item: TripItem, delta: -1 | 1) => boolean;
+  onReorderItem: (item: TripItem, delta: -1 | 1) => void;
+  onDuplicateItem: (item: TripItem) => void;
+  onDeleteItem: (item: TripItem) => void;
+  onMakeFlexible: (item: TripItem) => void;
+  onAddItem: (
+    type: CalendarAddType,
+    dayId: string,
+    startTime: string | null,
+    position: MenuPosition,
+  ) => void;
 }) {
+  const text = createTripText(language);
   const scroller = useRef<HTMLDivElement>(null);
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -175,16 +256,33 @@ export function Calendar({
   const [limitMessage, setLimitMessage] = useState("");
   const [dragPointer, setDragPointer] = useState<DragPointer | null>(null);
   const longPress = useRef<LongPress | null>(null);
-  const [actionMenu, setActionMenu] = useState<ActionMenuState | null>(null);
+  const suppressItemClick = useRef(false);
+  const lastPointer = useRef<PointerPosition | null>(null);
+  const [calendarMenu, setCalendarMenu] = useState<CalendarMenuState | null>(null);
+  const [creationPosition, setCreationPosition] = useState<MenuPosition | null>(null);
   const [lodgingPreview, setLodgingPreview] = useState<LodgingPreview | null>(null);
   const [lodgingPointer, setLodgingPointer] = useState<LodgingPointer | null>(null);
+  const [stayPreview, setStayPreview] = useState<StayPreview | null>(null);
+  const [timeGuide, setTimeGuide] = useState<TimeGuide | null>(null);
+  const [trackGeometry, setTrackGeometry] = useState<CalendarTrackGeometry | null>(null);
+  const updateTrackGeometry = useCallback(
+    (height: number, origin: number, devicePixelRatio: number) => {
+      setTrackGeometry((current) =>
+        current?.height === height &&
+        current.origin === origin &&
+        current.devicePixelRatio === devicePixelRatio
+          ? current
+          : { height, origin, devicePixelRatio },
+      );
+    },
+    [],
+  );
   const hourLabels = useMemo(
     () =>
-      Array.from({ length: 25 }, (_, index) => {
-        const hour = (calendarHours === 30 ? 6 : 0) + index;
-        return `${String(hour).padStart(2, "0")}:00`;
-      }),
-    [calendarHours],
+      Array.from({ length: 25 }, (_, index) =>
+        rollingTimeForCalendarMinute(index * 60, calendarStartHour),
+      ),
+    [calendarStartHour],
   );
   const dayIndex = useMemo(() => new Map(days.map((day, index) => [day.id, index])), [days]);
   const activePreviews = useMemo(
@@ -213,44 +311,30 @@ export function Calendar({
     [activePreviews, orderedItems, previewById],
   );
   const layout = useMemo(
-    () => buildCalendarLayout(days, orderedItems, legsByDay, calendarHours),
-    [calendarHours, days, legsByDay, orderedItems],
+    () => buildCalendarLayout(days, orderedItems, legsByDay, calendarStartHour),
+    [calendarStartHour, days, legsByDay, orderedItems],
   );
   const previewSegmentsByDay = useMemo(() => {
     const previewIds = new Set(activePreviews.map((candidate) => candidate.itemId));
     return new Map(
       (activePreviews.length > 0
-        ? buildCalendarLayout(days, effectiveItems, legsByDay, calendarHours)
+        ? buildCalendarLayout(days, effectiveItems, legsByDay, calendarStartHour)
         : []
       ).map((column) => [
         column.day.id,
         column.segments.filter((segment) => previewIds.has(segment.item.id)),
       ]),
     );
-  }, [activePreviews, calendarHours, days, effectiveItems, legsByDay]);
-  const lodgingTarget = useMemo(() => {
-    if (!lodgingPreview) return null;
-    const startIndex = days.findIndex((day) => day.date >= lodgingPreview.startDate);
-    let endIndex = -1;
-    for (let index = days.length - 1; index >= 0; index -= 1) {
-      const day = days[index];
-      if (day && day.date <= lodgingPreview.endDate) {
-        endIndex = index;
-        break;
-      }
-    }
-    if (startIndex < 0 || endIndex < startIndex) return null;
-    return {
-      ...lodgingPreview,
-      startIndex,
-      endIndex,
-      dayCount: daysBetween(lodgingPreview.startDate, lodgingPreview.endDate) + 1,
-    };
-  }, [days, lodgingPreview]);
+  }, [activePreviews, calendarStartHour, days, effectiveItems, legsByDay]);
   const itemVersions = useMemo(
     () => new Map(orderedItems.map((item) => [item.id, itemVersion(item)])),
     [orderedItems],
   );
+  const itemDragging =
+    ((gesture?.type === "item" || gesture?.type === "lodging") &&
+      gesture.active &&
+      gesture.edge === "move") ??
+    false;
 
   useEffect(
     () => () => {
@@ -258,10 +342,20 @@ export function Calendar({
     },
     [],
   );
+  useEffect(() => {
+    if (!itemDragging) return;
+    document.documentElement.dataset.calendarDragging = "";
+    return () => {
+      delete document.documentElement.dataset.calendarDragging;
+    };
+  }, [itemDragging]);
 
   useEffect(() => {
     setSelectedIds(selectedId ? new Set([selectedId]) : new Set());
   }, [selectedId]);
+  useEffect(() => {
+    if (!creationPanel) setCreationPosition(null);
+  }, [creationPanel]);
 
   useEffect(() => {
     if (!gesture || gesture.type === "selection") return;
@@ -276,6 +370,7 @@ export function Calendar({
     setDragPointer(null);
     setLimitMessage("This item changed in another editor. Your local gesture was canceled.");
     setLodgingPreview(null);
+    setStayPreview(null);
     setLodgingPointer(null);
   }, [gesture, itemVersions]);
 
@@ -298,7 +393,7 @@ export function Calendar({
   }, [focusRequest]);
 
   useEffect(() => {
-    const move = (event: PointerEvent) => {
+    const update = (event: PointerPosition) => {
       if (!gesture || event.pointerId !== gesture.pointerId) return;
       if (gesture.type === "selection") {
         const box = rectangleForPoints(
@@ -328,26 +423,57 @@ export function Calendar({
         window.clearTimeout(pending.timer);
         longPress.current = null;
       }
-      if (gesture.type === "lodging") {
-        const range = lodgingRangeForPointer(gesture, event.clientX, scroller.current, days);
-        if (range) setLodgingPreview({ item: gesture.item, ...range });
-        setLodgingPointer((current) =>
-          current
-            ? {
-                ...current,
-                x:
-                  gesture.edge === "move"
-                    ? event.clientX
-                    : clamp(event.clientX, current.clipLeft, current.clipRight),
-                y: gesture.edge === "move" ? event.clientY : current.y,
-              }
-            : current,
-        );
+      if (gesture.type === "stay") {
+        const track = scroller.current?.querySelector<HTMLElement>("[data-calendar-track]");
+        if (!track) return;
+        const pixelsPerHour = track.getBoundingClientRect().height / (calendarDayMinutes / 60);
+        const minuteDelta = ((event.clientY - gesture.startY) / pixelsPerHour) * 60;
+        setStayPreview({
+          key: `${gesture.item.id}:${gesture.dayId}`,
+          endMinute: clamp(
+            snapCalendarMinute(gesture.startMinute + minuteDelta),
+            0,
+            calendarDayMinutes,
+          ),
+        });
         return;
       }
+      if (gesture.type === "lodging") {
+        const moved =
+          Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY) > 4;
+        if (gesture.edge === "move" && !gesture.active && !moved) return;
+        if (gesture.edge === "move" && !gesture.active) {
+          suppressItemClick.current = true;
+          setGesture({ ...gesture, active: true });
+          setLodgingPreview({
+            item: gesture.item,
+            startDate: gesture.item.lodging?.startDate ?? "",
+            endDate: gesture.item.lodging?.endDate ?? "",
+          });
+        }
+        const range = lodgingRangeForPointer(gesture, event.clientX, scroller.current, days);
+        if (range) setLodgingPreview({ item: gesture.item, ...range });
+        setLodgingPointer({
+          ...gesture.pointer,
+          x:
+            gesture.edge === "move"
+              ? event.clientX
+              : clamp(event.clientX, gesture.pointer.clipLeft, gesture.pointer.clipRight),
+          y: gesture.edge === "move" ? event.clientY : gesture.pointer.y,
+        });
+        return;
+      }
+      const moved =
+        gesture.type === "item" &&
+        Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY) > 4;
+      if (gesture.type === "item" && gesture.edge === "move" && !gesture.active && !moved) return;
+      if (gesture.type === "item" && gesture.edge === "move" && !gesture.active) {
+        setGesture({ ...gesture, active: true });
+      }
+      if (moved) suppressItemClick.current = true;
       if (gesture.edge === "move") {
-        setDragPointer((current) =>
-          current ? { ...current, x: event.clientX, y: event.clientY } : current,
+        setDragPointer(
+          gesture.dragBox ? { ...gesture.dragBox, x: event.clientX, y: event.clientY } : null,
         );
       }
       const { dayDelta, minuteDelta } = pointerDelta(scroller.current, event, gesture);
@@ -368,7 +494,7 @@ export function Calendar({
             member.startAbsolute + delta,
             member.endAbsolute + delta,
             days,
-            calendarHours,
+            calendarStartHour,
           );
           return next ? [next] : [];
         });
@@ -388,11 +514,20 @@ export function Calendar({
           gesture.endAbsolute + dayDelta * calendarDayMinutes + minuteDelta,
         );
       }
-      setPreview(previewForAbsolute(gesture.item.id, start, end, days, calendarHours));
+      setPreview(previewForAbsolute(gesture.item.id, start, end, days, calendarStartHour));
       setGroupPreviews([]);
+    };
+    const move = (event: PointerEvent) => {
+      lastPointer.current = {
+        pointerId: event.pointerId,
+        clientX: event.clientX,
+        clientY: event.clientY,
+      };
+      update(event);
     };
     const finish = (event: PointerEvent) => {
       if (!gesture || event.pointerId !== gesture.pointerId) return;
+      lastPointer.current = null;
       if (gesture.type === "selection") {
         setGesture(null);
         setSelectionBox(null);
@@ -403,7 +538,13 @@ export function Calendar({
         window.clearTimeout(pending.timer);
         longPress.current = null;
       }
+      if (suppressItemClick.current) {
+        window.setTimeout(() => {
+          suppressItemClick.current = false;
+        }, 0);
+      }
       if (gesture.type === "item") {
+        const validDrop = gesture.edge !== "move" || isCalendarDropPoint(scroller.current, event);
         const nextPreviews =
           gesture.edge === "move" && groupPreviews.length > 0
             ? groupPreviews
@@ -415,15 +556,18 @@ export function Calendar({
         setGroupPreviews([]);
         setDragPointer(null);
         if (nextPreviews.length === 0) return;
+        if (!validDrop) return;
+        const movingIds = new Set(nextPreviews.map((next) => next.itemId));
         const changes = nextPreviews.flatMap((next) => {
           const member = gesture.members.find((candidate) => candidate.item.id === next.itemId);
           if (!member) return [];
           const startIndex =
             dayIndex.get(next.dayId) ?? (days[0] ? daysBetween(days[0].date, next.dayId) : 0);
-          const finalMinute =
+          const nextStart =
             startIndex * calendarDayMinutes +
-            calendarMinuteForTime(next.startTime, calendarHours) +
-            next.durationMinutes;
+            calendarMinuteForTime(next.startTime, calendarStartHour);
+          const finalMinute = nextStart + next.durationMinutes;
+          if (nextStart === member.startAbsolute && finalMinute === member.endAbsolute) return [];
           const finalIndex = Math.max(0, Math.ceil(finalMinute / calendarDayMinutes) - 1);
           const lastKnown = days.at(-1)?.date;
           const extendThrough =
@@ -434,7 +578,14 @@ export function Calendar({
             {
               item: member.item,
               dayId: next.dayId,
-              startTime: next.startTime,
+              startTime: gesture.edge === "end" ? member.item.startTime : next.startTime,
+              orderBeforeId:
+                layout[startIndex]?.segments.find(
+                  (segment) =>
+                    segment.item.dayId === next.dayId &&
+                    !movingIds.has(segment.item.id) &&
+                    segment.startMinute > calendarMinuteForTime(next.startTime, calendarStartHour),
+                )?.item.id ?? null,
               durationMinutes: next.durationMinutes,
               ...(extendThrough ? { extendThrough } : {}),
             },
@@ -451,7 +602,29 @@ export function Calendar({
         }
         return;
       }
-      const next = lodgingRangeForPointer(gesture, event.clientX, scroller.current, days);
+      if (gesture.type === "stay") {
+        const nextMinute =
+          stayPreview?.key === `${gesture.item.id}:${gesture.dayId}`
+            ? stayPreview.endMinute
+            : gesture.startMinute;
+        setGesture(null);
+        setStayPreview(null);
+        const lodging = gesture.item.lodging;
+        if (!lodging || nextMinute === gesture.startMinute) return;
+        onChangeLodging(gesture.item, {
+          ...lodging,
+          leaveTimes: {
+            ...lodging.leaveTimes,
+            [gesture.dayId]: timeForCalendarMinute(nextMinute, calendarStartHour),
+          },
+        });
+        return;
+      }
+      const validDrop =
+        gesture.edge !== "move" || isCalendarDropPoint(scroller.current, event, true);
+      const next = validDrop
+        ? lodgingRangeForPointer(gesture, event.clientX, scroller.current, days)
+        : null;
       setGesture(null);
       setLodgingPreview(null);
       setLodgingPointer(null);
@@ -463,45 +636,114 @@ export function Calendar({
         next.endDate === sourceLodging.endDate
       )
         return;
-      const result = onChangeLodging(gesture.item, next.startDate, next.endDate);
+      const result = onChangeLodging(
+        gesture.item,
+        lodgingForDates(next.startDate, next.endDate, sourceLodging?.leaveTimes),
+      );
       if (result.clamped) {
         setLimitMessage("The stay ends at the 30-day trip limit.");
       }
     };
     window.addEventListener("pointermove", move);
+    const replay = () => {
+      if (lastPointer.current) update(lastPointer.current);
+    };
+    const container = scroller.current;
+    container?.addEventListener("scroll", replay, { passive: true });
     window.addEventListener("pointerup", finish);
     window.addEventListener("pointercancel", finish);
     return () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", finish);
+      container?.removeEventListener("scroll", replay);
       window.removeEventListener("pointercancel", finish);
     };
   }, [
-    calendarHours,
+    calendarStartHour,
     dayIndex,
     days,
     gesture,
+    layout,
     groupPreviews,
     onChangeItem,
     onChangeItems,
     onChangeLodging,
     preview,
+    stayPreview,
   ]);
 
-  const openItemActions = (segment: CalendarSegment, x: number, y: number) => {
+  const menuPosition = (x: number, y: number): MenuPosition => {
+    const width = Math.min(272, window.innerWidth - 8);
+    return {
+      left: clamp(x, 4, window.innerWidth - width - 4),
+      top: clamp(y, 4, window.innerHeight - 360),
+    };
+  };
+  const creationPopoverPosition = ({ left, top }: MenuPosition): MenuPosition => {
+    const width = Math.min(384, window.innerWidth - 8);
+    const height = Math.min(480, window.innerHeight - 8);
+    return {
+      left: clamp(left, 4, window.innerWidth - width - 4),
+      top: clamp(top, 4, window.innerHeight - height - 4),
+    };
+  };
+
+  const openItemActions = (segment: CalendarSegment, x: number, y: number, focusFirst = false) => {
     if (longPress.current) {
       window.clearTimeout(longPress.current.timer);
       longPress.current = null;
     }
-    const width = Math.min(224, window.innerWidth - 8);
     setGesture(null);
     setPreview(null);
     setDragPointer(null);
-    setActionMenu({
-      segment,
-      left: clamp(x - width / 2, 4, window.innerWidth - width - 4),
-      top: clamp(y + 4, 4, window.innerHeight - 44),
+    setCreationPosition(null);
+    setCalendarMenu({ type: "item", segment, position: menuPosition(x, y), focusFirst });
+  };
+  const openLodgingActions = (item: TripItem, event: ReactMouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (longPress.current) {
+      window.clearTimeout(longPress.current.timer);
+      longPress.current = null;
+    }
+    setGesture(null);
+    setPreview(null);
+    setDragPointer(null);
+    setCreationPosition(null);
+    setCalendarMenu({
+      type: "lodging",
+      item,
+      position: menuPosition(event.clientX, event.clientY),
+      focusFirst: event.button !== 2,
     });
+  };
+  const openAddActions = (
+    type: "all-day" | "empty",
+    dayId: string,
+    startTime: string,
+    x: number,
+    y: number,
+    focusFirst = false,
+  ) => {
+    setCreationPosition(null);
+    const position = menuPosition(x, y);
+    setCalendarMenu(
+      type === "empty"
+        ? { type, dayId, startTime, position, focusFirst }
+        : { type, dayId, position, focusFirst },
+    );
+  };
+
+  const addItem = (
+    type: CalendarAddType,
+    dayId: string,
+    startTime: string | null,
+    position: MenuPosition,
+  ) => {
+    setCalendarMenu(null);
+    if (type === "transport") setCreationPosition(null);
+    else setCreationPosition(creationPopoverPosition(position));
+    onAddItem(type, dayId, startTime, position);
   };
 
   const beginItemGesture = (
@@ -509,11 +751,7 @@ export function Calendar({
     segment: CalendarSegment,
     edge: ItemGesture["edge"],
   ) => {
-    if (
-      event.button !== 0 ||
-      (edge === "start" && segment.continuesBefore) ||
-      (edge === "end" && segment.continuesAfter)
-    )
+    if ((edge === "start" && segment.continuesBefore) || (edge === "end" && segment.continuesAfter))
       return;
     event.preventDefault();
     const selectedItems =
@@ -524,7 +762,7 @@ export function Calendar({
               item.type !== "note" &&
               item.type !== "lodging" &&
               item.dayId &&
-              item.startTime,
+              (item.id === segment.item.id || item.startTime),
           )
         : [segment.item];
     const members = selectedItems.map((item) => {
@@ -534,9 +772,9 @@ export function Calendar({
         calendarMinuteForTime(
           item.startTime ??
             (item.id === segment.item.id
-              ? timeForCalendarMinute(segment.startMinute, calendarHours)
+              ? timeForCalendarMinute(segment.startMinute, calendarStartHour)
               : "08:00"),
-          calendarHours,
+          calendarStartHour,
         );
       return {
         item,
@@ -551,28 +789,29 @@ export function Calendar({
       setSelectedIds(new Set([segment.item.id]));
     }
     setLimitMessage("");
-    setActionMenu(null);
+    setCalendarMenu(null);
     setGroupPreviews([]);
     const bounds = event.currentTarget
       .closest<HTMLElement>("[data-calendar-item-id]")
       ?.getBoundingClientRect();
-    setDragPointer(
-      edge === "move" && bounds
-        ? {
-            x: event.clientX,
-            y: event.clientY,
-            offsetX: event.clientX - bounds.left,
-            offsetY: event.clientY - bounds.top,
-            width: bounds.width,
-            height: bounds.height,
-          }
-        : null,
-    );
+    setDragPointer(null);
     setGesture({
       type: "item",
       item: segment.item,
       edge,
+      active: edge !== "move",
+      dragBox:
+        edge === "move" && bounds
+          ? {
+              offsetX: event.clientX - bounds.left,
+              offsetY: event.clientY - bounds.top,
+              width: bounds.width,
+              height: bounds.height,
+            }
+          : null,
       pointerId: event.pointerId,
+      startScrollLeft: scroller.current?.scrollLeft ?? 0,
+      startScrollTop: scroller.current?.scrollTop ?? 0,
       startX: event.clientX,
       startY: event.clientY,
       startAbsolute: primary.startAbsolute,
@@ -582,6 +821,7 @@ export function Calendar({
   };
 
   const beginItemInteraction = (event: ReactPointerEvent, segment: CalendarSegment) => {
+    suppressItemClick.current = false;
     if (event.pointerType !== "mouse") {
       if (longPress.current) window.clearTimeout(longPress.current.timer);
       const pointerId = event.pointerId;
@@ -602,7 +842,7 @@ export function Calendar({
     beginItemGesture(event, segment, "move");
   };
 
-  const beginSelection = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const beginSelection = (event: ReactPointerEvent<HTMLFieldSetElement>) => {
     if (event.button !== 0 || event.target !== event.currentTarget) return;
     event.preventDefault();
     const baseIds = event.ctrlKey || event.metaKey ? [...selectedIds] : [];
@@ -610,7 +850,7 @@ export function Calendar({
       setSelectedIds(new Set());
       onClearSelection();
     }
-    setActionMenu(null);
+    setCalendarMenu(null);
     setPreview(null);
     setGroupPreviews([]);
     setSelectionBox({ left: event.clientX, top: event.clientY, width: 0, height: 0 });
@@ -624,18 +864,20 @@ export function Calendar({
   };
 
   const startLodging = (event: ReactPointerEvent, item: TripItem, edge: LodgingGesture["edge"]) => {
+    if (edge === "move") suppressItemClick.current = false;
     if (event.button !== 0 || !item.lodging) return;
     event.preventDefault();
+    event.stopPropagation();
     const block = event.currentTarget
       .closest<HTMLElement>("[data-calendar-lodging-id]")
       ?.getBoundingClientRect();
     if (!block) return;
-    const root = event.currentTarget.closest<HTMLElement>("[aria-label='Trip calendar']");
+    const root = event.currentTarget.closest<HTMLElement>("[data-trip-calendar]");
     const calendarBounds = root?.getBoundingClientRect();
     const segments = Array.from(
       root?.querySelectorAll<HTMLElement>("[data-calendar-lodging-id]") ?? [],
     ).filter((segment) => segment.dataset.calendarLodgingId === item.id);
-    setActionMenu(null);
+    setCalendarMenu(null);
     const anchorX =
       edge === "start"
         ? Math.max(...segments.map((segment) => segment.getBoundingClientRect().right))
@@ -643,12 +885,7 @@ export function Calendar({
     setLimitMessage("");
     setPreview(null);
     setDragPointer(null);
-    setLodgingPreview({
-      item,
-      startDate: item.lodging.startDate,
-      endDate: item.lodging.endDate,
-    });
-    setLodgingPointer({
+    const pointer = {
       x: event.clientX,
       y: event.clientY,
       offsetX: event.clientX - block.left,
@@ -656,31 +893,60 @@ export function Calendar({
       width: block.width,
       height: block.height,
       anchorX,
-      guideY: block.top + block.height / 2,
+      guideY: block.bottom,
       clipLeft: calendarBounds?.left ?? 0,
       clipRight: calendarBounds?.right ?? window.innerWidth,
-    });
+    };
+    const active = edge !== "move";
+    setLodgingPreview(
+      active ? { item, startDate: item.lodging.startDate, endDate: item.lodging.endDate } : null,
+    );
+    setLodgingPointer(active ? pointer : null);
     setGesture({
       type: "lodging",
       item,
       edge,
+      startScrollLeft: scroller.current?.scrollLeft ?? 0,
       pointerId: event.pointerId,
+      active,
+      pointer,
       startX: event.clientX,
+      startY: event.clientY,
       version: itemVersion(item),
     });
   };
 
-  const adjustItem = (segment: CalendarSegment, action: Exclude<ItemAction, "clone">) => {
+  const startStay = (event: ReactPointerEvent, stay: CalendarStay) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setCalendarMenu(null);
+    setLimitMessage("");
+    setSelectedIds(new Set([stay.item.id]));
+    setStayPreview({ key: stay.key, endMinute: stay.endMinute });
+    setGesture({
+      type: "stay",
+      item: stay.item,
+      dayId: stay.dayId,
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startMinute: stay.endMinute,
+      version: itemVersion(stay.item),
+    });
+  };
+
+  const adjustItem = (segment: CalendarSegment, action: AdjustmentAction) => {
     const sourceDayIndex = dayIndex.get(segment.item.dayId ?? "") ?? 0;
     const sourceStart =
       sourceDayIndex * calendarDayMinutes +
       calendarMinuteForTime(
-        segment.item.startTime ?? timeForCalendarMinute(segment.startMinute, calendarHours),
-        calendarHours,
+        segment.item.startTime ?? timeForCalendarMinute(segment.startMinute, calendarStartHour),
+        calendarStartHour,
       );
     const sourceDuration = Math.max(calendarMinimumMinutes, segment.item.durationMinutes || 60);
     let start = sourceStart;
     let duration = sourceDuration;
+    const durationOnly = action === "shorter" || action === "longer";
     if (action === "earlier") start -= 15;
     if (action === "later") start += 15;
     if (action === "previous-day") start -= calendarDayMinutes;
@@ -688,7 +954,13 @@ export function Calendar({
     if (action === "shorter") duration = Math.max(calendarMinimumMinutes, duration - 15);
     if (action === "longer") duration += 15;
     if (start < 0) return;
-    const next = previewForAbsolute(segment.item.id, start, start + duration, days, calendarHours);
+    const next = previewForAbsolute(
+      segment.item.id,
+      start,
+      start + duration,
+      days,
+      calendarStartHour,
+    );
     if (!next) return;
     const finalIndex = Math.max(0, Math.ceil((start + duration) / calendarDayMinutes) - 1);
     const lastKnown = days.at(-1)?.date;
@@ -699,7 +971,7 @@ export function Calendar({
     const result = onChangeItem({
       item: segment.item,
       dayId: next.dayId,
-      startTime: next.startTime,
+      startTime: durationOnly ? segment.item.startTime : next.startTime,
       durationMinutes: next.durationMinutes,
       ...(extendThrough ? { extendThrough } : {}),
     });
@@ -708,11 +980,6 @@ export function Calendar({
 
   const handleItemKey = (event: React.KeyboardEvent<HTMLElement>, segment: CalendarSegment) => {
     if (event.target !== event.currentTarget) return;
-    if (event.key === "Enter") {
-      event.preventDefault();
-      onSelect(segment.item);
-      return;
-    }
     const action =
       event.key === "ArrowLeft"
         ? "previous-day"
@@ -731,17 +998,68 @@ export function Calendar({
     event.preventDefault();
     adjustItem(segment, action);
   };
+  const updateTimeGuide = (event: ReactPointerEvent<HTMLElement>, dayId: string) => {
+    if (event.pointerType === "touch" || gesture) {
+      setTimeGuide(null);
+      return;
+    }
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const minute = clamp(
+      Math.round(((event.clientY - bounds.top) / bounds.height) * calendarDayMinutes),
+      0,
+      calendarDayMinutes - 1,
+    );
+    setTimeGuide((current) =>
+      current?.dayId === dayId && current.minute === minute ? current : { dayId, minute },
+    );
+  };
+  const clearTimeGuide = (dayId: string) => {
+    setTimeGuide((current) => (current?.dayId === dayId ? null : current));
+  };
   const lodgingGuide = lodgingPointer ? clippedLodgingGuide(lodgingPointer) : null;
+  const activeLodgingPreview =
+    gesture?.type === "lodging" && gesture.active ? lodgingPreview : null;
+  const activeLodgingResize =
+    gesture?.type === "lodging" && gesture.edge !== "move" ? activeLodgingPreview : null;
+  const lodgingLayout = useMemo(
+    () =>
+      buildCalendarLodgingLayout(
+        days,
+        orderedItems,
+        activeLodgingPreview
+          ? {
+              itemId: activeLodgingPreview.item.id,
+              lodging: activeLodgingPreview,
+            }
+          : undefined,
+      ),
+    [activeLodgingPreview, days, orderedItems],
+  );
+  const lodgingTarget =
+    gesture?.type === "lodging" && gesture.active && gesture.edge === "move" && activeLodgingPreview
+      ? (lodgingLayout.bars.find((bar) => bar.item.id === activeLodgingPreview.item.id) ?? null)
+      : null;
+  const itemDragStartTime =
+    preview?.startTime ?? (gesture?.type === "item" ? gesture.item.startTime : null) ?? "08:00";
+  const itemDragStartMinute = calendarMinuteForTime(itemDragStartTime, calendarStartHour);
+  const lodgingTargetDayCount = lodgingTarget
+    ? daysBetween(lodgingTarget.lodging.startDate, lodgingTarget.lodging.endDate) + 1
+    : 0;
 
   return (
-    <section className={styles.root} aria-label="Trip calendar">
+    <section className={styles.root} data-trip-calendar aria-label={text("tripCalendar")}>
       <div className={styles.scroller} ref={scroller}>
         <div
           className={styles.calendar}
-          style={{ "--calendar-day-count": days.length } as React.CSSProperties}
+          style={
+            {
+              "--calendar-day-count": days.length,
+              "--calendar-lodging-height": `${0.75 + lodgingLayout.laneCount * 2}em`,
+            } as React.CSSProperties
+          }
         >
           <div className={styles.corner} aria-hidden="true" />
-          {days.map((day) => {
+          {days.map((day, dayIndex) => {
             const leading =
               layout
                 .find((column) => column.day.id === day.id)
@@ -755,111 +1073,281 @@ export function Calendar({
                   data-calendar-day-header={day.id}
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={(event) => dropNote(event, day.id, null, onMoveNote)}
+                  style={{ gridColumn: dayIndex + 2, gridRow: 1 }}
                 >
-                  <time dateTime={day.date}>{formatDay(day.date, language)}</time>
+                  <span className={styles.dayHeading}>
+                    <time dateTime={day.date}>{formatDay(day.date, language)}</time>
+                    {lodgingLayout.missingDayIds.has(day.id) ? (
+                      <small className={styles.missingLodging}>
+                        <Icon icon={triangleAlertIcon} aria-hidden="true" />
+                        {text("noLodging")}
+                      </small>
+                    ) : null}
+                  </span>
                   <NoteStack notes={leading} onSelect={onSelect} />
                 </header>
               </Fragment>
             );
           })}
-          <div className={styles.allDayLabel}>All day</div>
-          {days.map((day) => (
-            <div
+          <div className={styles.endHeader} aria-hidden="true" />
+          <div className={styles.allDayLabel}>{text("allDay")}</div>
+          {days.map((day, dayIndex) => (
+            <fieldset
               className={styles.allDayCell}
               data-calendar-all-day={day.id}
               key={`all-day:${day.id}`}
-            >
-              {orderedItems
-                .filter(
-                  (item) =>
-                    item.type === "lodging" &&
-                    item.lodging &&
-                    item.lodging.startDate <= day.date &&
-                    day.date <= item.lodging.endDate,
-                )
-                .map((item) => {
-                  const lodging = item.lodging;
-                  if (!lodging) return null;
-                  const starts = lodging.startDate === day.date;
-                  const ends = lodging.endDate === day.date;
-                  return (
-                    <div
-                      className={`${styles.lodging}${starts ? ` ${styles.checkIn}` : ""}${ends ? ` ${styles.checkOut}` : ""}${gesture?.type === "lodging" && gesture.item.id === item.id ? ` ${styles.lodgingOrigin}` : ""}`}
-                      data-calendar-lodging-id={item.id}
-                      key={item.id}
-                    >
-                      {starts ? (
-                        <button
-                          type="button"
-                          className={`${styles.dateHandle} ${styles.dateHandleStart}`}
-                          aria-label={`Change check-in for ${itemTitle(item, places)}`}
-                          onPointerDown={(event) => startLodging(event, item, "start")}
-                        />
-                      ) : null}
-                      <button
-                        type="button"
-                        onClick={() => onSelect(item)}
-                        onPointerDown={(event) => startLodging(event, item, "move")}
-                      >
-                        <Icon icon={iconForItem(item)} />
-                        <span className={styles.lodgingTitle}>{itemTitle(item, places)}</span>
-                      </button>
-                      {ends ? (
-                        <button
-                          type="button"
-                          className={`${styles.dateHandle} ${styles.dateHandleEnd}`}
-                          aria-label={`Change check-out for ${itemTitle(item, places)}`}
-                          onPointerDown={(event) => startLodging(event, item, "end")}
-                        />
-                      ) : null}
-                    </div>
-                  );
-                })}
-            </div>
+              style={{ gridColumn: dayIndex + 2, gridRow: 2 }}
+              onContextMenu={(event) => {
+                if (event.target !== event.currentTarget) return;
+                event.preventDefault();
+                openAddActions(
+                  "all-day",
+                  day.id,
+                  "",
+                  event.clientX,
+                  event.clientY,
+                  event.button !== 2,
+                );
+              }}
+            ></fieldset>
           ))}
+          {lodgingLayout.bars.map((bar) => {
+            const lodging = bar.lodging;
+            const firstDay = days[bar.startIndex];
+            const lastDay = days[bar.endIndex];
+            if (!firstDay || !lastDay) return null;
+            const starts = lodging.startDate === firstDay.date;
+            const ends = lodging.endDate === lastDay.date;
+            const resizing = activeLodgingResize?.item.id === bar.item.id;
+            const dayCount = daysBetween(lodging.startDate, lodging.endDate) + 1;
+            return (
+              <div
+                className={`${styles.lodging}${starts ? ` ${styles.checkIn}` : ""}${ends ? ` ${styles.checkOut}` : ""}${resizing ? ` ${styles.lodgingResizing}` : ""}${gesture?.type === "lodging" && gesture.active && gesture.edge === "move" && gesture.item.id === bar.item.id ? ` ${styles.lodgingOrigin}` : ""}`}
+                data-calendar-lodging-id={bar.item.id}
+                data-calendar-lodging-preview={resizing ? "true" : undefined}
+                data-calendar-lodging-lane={bar.lane}
+                data-start-date={lodging.startDate}
+                data-end-date={lodging.endDate}
+                key={bar.key}
+                onPointerDown={(event) => startLodging(event, bar.item, "move")}
+                style={
+                  {
+                    "--calendar-lodging-offset": `${bar.lane * 2}em`,
+                    gridColumn: `${bar.startIndex + 2} / ${bar.endIndex + 3}`,
+                    gridRow: 2,
+                  } as React.CSSProperties
+                }
+              >
+                {starts ? (
+                  <button
+                    type="button"
+                    className={`${styles.dateHandle} ${styles.dateHandleStart}`}
+                    aria-label={text("changeCheckIn", {
+                      title: itemTitle(bar.item, places),
+                    })}
+                    onContextMenu={(event) => openLodgingActions(bar.item, event)}
+                    onPointerDown={(event) => startLodging(event, bar.item, "start")}
+                  />
+                ) : null}
+                <button
+                  type="button"
+                  onContextMenu={(event) => openLodgingActions(bar.item, event)}
+                  onClick={() => {
+                    if (suppressItemClick.current) {
+                      suppressItemClick.current = false;
+                      return;
+                    }
+                    setSelectedIds(new Set([bar.item.id]));
+                    onSelect(bar.item);
+                  }}
+                >
+                  <Icon icon={iconForItem(bar.item)} />
+                  <span className={styles.lodgingTitle}>{itemTitle(bar.item, places)}</span>
+                  {resizing ? (
+                    <small className={styles.lodgingDuration}>
+                      {dayCount} {text(dayCount === 1 ? "day" : "days")}
+                    </small>
+                  ) : null}
+                </button>
+                {ends ? (
+                  <button
+                    type="button"
+                    className={`${styles.dateHandle} ${styles.dateHandleEnd}`}
+                    aria-label={text("changeCheckOut", {
+                      title: itemTitle(bar.item, places),
+                    })}
+                    onContextMenu={(event) => openLodgingActions(bar.item, event)}
+                    onPointerDown={(event) => startLodging(event, bar.item, "end")}
+                  />
+                ) : null}
+              </div>
+            );
+          })}
           {lodgingTarget ? (
             <div
               className={styles.lodgingTarget}
               data-calendar-lodging-preview
-              data-start-date={lodgingTarget.startDate}
-              data-end-date={lodgingTarget.endDate}
-              style={{
-                gridColumn: `${lodgingTarget.startIndex + 2} / ${lodgingTarget.endIndex + 3}`,
-                gridRow: 2,
-              }}
+              data-calendar-lodging-lane={lodgingTarget.lane}
+              data-start-date={lodgingTarget.lodging.startDate}
+              data-end-date={lodgingTarget.lodging.endDate}
+              style={
+                {
+                  "--calendar-lodging-offset": `${lodgingTarget.lane * 2}em`,
+                  gridColumn: `${lodgingTarget.startIndex + 2} / ${lodgingTarget.endIndex + 3}`,
+                  gridRow: 2,
+                } as React.CSSProperties
+              }
               aria-hidden="true"
             >
-              <Icon icon={iconForItem(lodgingTarget.item)} />
-              <span>{itemTitle(lodgingTarget.item, places)}</span>
-              <small>
-                {lodgingTarget.dayCount} {lodgingTarget.dayCount === 1 ? "day" : "days"}
-              </small>
+              <span className={styles.lodgingTargetContent}>
+                <Icon icon={iconForItem(lodgingTarget.item)} />
+                <span>{itemTitle(lodgingTarget.item, places)}</span>
+                <small>
+                  {lodgingTargetDayCount} {text(lodgingTargetDayCount === 1 ? "day" : "days")}
+                </small>
+              </span>
             </div>
           ) : null}
+          <div className={styles.endAllDay} aria-hidden="true" />
           <div className={styles.timeGutter} data-calendar-time-gutter aria-hidden="true">
             {hourLabels.map((label, index) => (
-              <time key={label} style={{ top: `${(index / 24) * 100}%` }}>
+              <time
+                className={styles.hourLabel}
+                key={label}
+                style={{ top: `calc(${index} / 24 * 100%)` }}
+              >
                 {label}
               </time>
             ))}
+            {timeGuide && !gesture ? (
+              <time
+                className={styles.hoverTime}
+                data-calendar-hover-time
+                style={{ top: minutePercent(timeGuide.minute) }}
+              >
+                {rollingTimeForCalendarMinute(timeGuide.minute, calendarStartHour)}
+              </time>
+            ) : null}
           </div>
-          {layout.map((column) => (
-            <div
+          <CalendarHourLines onGeometryChange={updateTrackGeometry} />
+          {timeGuide && !gesture ? (
+            <div className={styles.timeGuideLayer}>
+              <div
+                className={styles.timeGuide}
+                data-calendar-time-guide
+                style={{ top: minutePercent(timeGuide.minute) }}
+                aria-hidden="true"
+              />
+            </div>
+          ) : null}
+          {layout.map((column, dayIndex) => (
+            <fieldset
               className={styles.dayTrack}
               data-calendar-day={column.day.id}
               data-calendar-track={column.day.id}
               key={`track:${column.day.id}`}
+              style={{ gridColumn: dayIndex + 2, gridRow: 3 }}
               onPointerDown={beginSelection}
+              onPointerMove={(event) => updateTimeGuide(event, column.day.id)}
+              onPointerLeave={() => clearTimeGuide(column.day.id)}
+              onContextMenu={(event) => {
+                const item =
+                  event.target instanceof Element
+                    ? event.target.closest<HTMLElement>("[data-calendar-item-id]")
+                    : null;
+                if (item) return;
+                event.preventDefault();
+                const bounds = event.currentTarget.getBoundingClientRect();
+                const minute = clamp(
+                  snapCalendarMinute(
+                    ((event.clientY - bounds.top) / bounds.height) * calendarDayMinutes,
+                  ),
+                  0,
+                  calendarDayMinutes - calendarSnapMinutes,
+                );
+                openAddActions(
+                  "empty",
+                  column.day.id,
+                  timeForCalendarMinute(minute, calendarStartHour),
+                  event.clientX,
+                  event.clientY,
+                  event.button !== 2,
+                );
+              }}
             >
-              <div className={styles.hourLines} aria-hidden="true" />
+              {column.stays.map((stay) => {
+                const endMinute =
+                  stayPreview?.key === stay.key ? stayPreview.endMinute : stay.endMinute;
+                const endPosition = deviceAlignedMinutePosition(endMinute, trackGeometry);
+                const title = itemTitle(stay.item, places);
+                return (
+                  <Fragment key={stay.key}>
+                    <div
+                      className={`${styles.stayArea}${stay.conflict ? ` ${styles.stayConflict}` : ""}`}
+                      data-calendar-stay-id={stay.item.id}
+                      data-calendar-stay-date={stay.dayId}
+                      data-calendar-stay-conflict={stay.conflict ? "true" : undefined}
+                      data-leave-time={timeForCalendarMinute(endMinute, calendarStartHour)}
+                      style={{ height: endPosition }}
+                    >
+                      <button
+                        type="button"
+                        className={styles.staySelect}
+                        onContextMenu={(event) => openLodgingActions(stay.item, event)}
+                        onClick={() => {
+                          setSelectedIds(new Set([stay.item.id]));
+                          onSelect(stay.item, stay.dayId);
+                        }}
+                      >
+                        <Icon icon={bedDoubleIcon} aria-hidden="true" />
+                        <span className={styles.stayCopy}>
+                          <span>{text("stayAt", { title })}</span>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.stayHandle}
+                        aria-label={`${text("leaveAt")} ${rollingTimeForCalendarMinute(endMinute, calendarStartHour)}`}
+                        onContextMenu={(event) => openLodgingActions(stay.item, event)}
+                        onPointerDown={(event) => startStay(event, stay)}
+                        onKeyDown={(event) => {
+                          const delta =
+                            event.key === "ArrowUp" ? -calendarSnapMinutes : calendarSnapMinutes;
+                          if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+                          event.preventDefault();
+                          const lodging = stay.item.lodging;
+                          if (!lodging) return;
+                          const nextMinute = clamp(stay.endMinute + delta, 0, calendarDayMinutes);
+                          onChangeLodging(stay.item, {
+                            ...lodging,
+                            leaveTimes: {
+                              ...lodging.leaveTimes,
+                              [stay.dayId]: timeForCalendarMinute(nextMinute, calendarStartHour),
+                            },
+                          });
+                        }}
+                      />
+                    </div>
+                    <small
+                      className={`${styles.stayLeaveTime}${stay.conflict ? ` ${styles.stayLeaveConflict}` : ""}`}
+                      data-calendar-stay-leave-id={stay.item.id}
+                      data-calendar-stay-leave-date={stay.dayId}
+                      aria-hidden="true"
+                      style={{ top: endPosition }}
+                    >
+                      {text("leaveAt")} {rollingTimeForCalendarMinute(endMinute, calendarStartHour)}
+                    </small>
+                  </Fragment>
+                );
+              })}
               {(previewSegmentsByDay.get(column.day.id) ?? []).map((segment) => (
                 <div
                   className={styles.dropPreview}
                   data-calendar-drop-preview
                   key={`preview:${segment.key}`}
                   style={{
-                    top: minuteEm(segment.startMinute),
-                    height: minuteEm(
+                    top: minutePercent(segment.startMinute),
+                    height: minutePercent(
                       Math.max(calendarMinimumMinutes, segment.endMinute - segment.startMinute),
                     ),
                     left: `calc(${(segment.lane / segment.laneCount) * 100}% + 0.25em)`,
@@ -871,8 +1359,8 @@ export function Calendar({
                     <span>{itemTitle(segment.item, places)}</span>
                   </strong>
                   <time>
-                    {timeForCalendarMinute(segment.startMinute, calendarHours)} -{" "}
-                    {timeForCalendarMinute(segment.endMinute, calendarHours)}
+                    {rollingTimeForCalendarMinute(segment.startMinute, calendarStartHour)} -{" "}
+                    {rollingTimeForCalendarMinute(segment.endMinute, calendarStartHour)}
                   </time>
                 </div>
               ))}
@@ -880,15 +1368,31 @@ export function Calendar({
                 <div
                   data-calendar-route-leg
                   data-travel-mode={gap.mode}
+                  role="img"
+                  aria-label={`${travelModeLabel(language, gap.mode)} - ${gap.conflict ? `${gap.label} - ${text("conflict")}` : gap.label}`}
                   className={`${styles.routeGap}${gap.conflict ? ` ${styles.routeConflict}` : ""}`}
                   key={gap.key}
-                  style={{ top: minuteEm(gap.startMinute), height: minuteEm(gap.durationMinutes) }}
+                  style={{
+                    top: minutePercent(gap.startMinute),
+                    height: minutePercent(Math.max(calendarMinimumMinutes, gap.durationMinutes)),
+                    left: `calc(${(gap.lane / gap.laneCount) * 100}% + 0.6em)`,
+                    width: `calc(${100 / gap.laneCount}% - 1.2em)`,
+                  }}
                 >
                   <i aria-hidden="true" />
-                  <span>
-                    <Icon icon={iconForTravelMode(gap.mode)} aria-hidden="true" />
-                    {travelModeLabel(language, gap.mode)} -{" "}
-                    {gap.conflict ? `${gap.label} - conflict` : gap.label}
+                  <span className={styles.routeInfo} data-calendar-route-info aria-hidden="true">
+                    <Icon
+                      className={styles.routeIcon}
+                      data-calendar-route-icon
+                      icon={iconForTravelMode(gap.mode)}
+                      aria-hidden="true"
+                    />
+                    <span className={styles.routeMode} data-calendar-route-mode>
+                      {travelModeLabel(language, gap.mode)}
+                    </span>
+                    <span className={styles.routeDuration} data-calendar-route-duration>
+                      {gap.conflict ? `${gap.label} - ${text("conflict")}` : gap.label}
+                    </span>
                   </span>
                 </div>
               ))}
@@ -898,13 +1402,13 @@ export function Calendar({
                     ?.notes ?? [];
                 return (
                   <article
-                    className={`${styles.block}${segment.provisional ? ` ${styles.provisional}` : ""}${selectedIds.has(segment.item.id) ? ` ${styles.selected}` : ""}${gesture?.type === "item" && gesture.members.some((member) => member.item.id === segment.item.id) ? ` ${styles.dragOrigin}` : ""}`}
+                    className={`${styles.block}${segment.provisional ? ` ${styles.provisional}` : ""}${selectedIds.has(segment.item.id) ? ` ${styles.selected}` : ""}${gesture?.type === "item" && gesture.active && gesture.members.some((member) => member.item.id === segment.item.id) ? ` ${styles.dragOrigin}` : ""}`}
                     data-calendar-item-id={segment.item.id}
                     data-calendar-selected={selectedIds.has(segment.item.id) ? "true" : "false"}
                     key={segment.key}
                     style={{
-                      top: minuteEm(segment.startMinute),
-                      height: minuteEm(
+                      top: minutePercent(segment.startMinute),
+                      height: minutePercent(
                         Math.max(calendarMinimumMinutes, segment.endMinute - segment.startMinute),
                       ),
                       left: `calc(${(segment.lane / segment.laneCount) * 100}% + 0.25em)`,
@@ -924,6 +1428,7 @@ export function Calendar({
                         segment,
                         event.clientX || bounds.left + bounds.width / 2,
                         event.clientY || bounds.top + bounds.height / 2,
+                        event.button !== 2,
                       );
                     }}
                   >
@@ -931,7 +1436,9 @@ export function Calendar({
                       <button
                         type="button"
                         className={styles.resizeStart}
-                        aria-label={`Change start of ${itemTitle(segment.item, places)}`}
+                        aria-label={text("changeStart", {
+                          title: itemTitle(segment.item, places),
+                        })}
                         onPointerDown={(event) => {
                           event.stopPropagation();
                           beginItemGesture(event, segment, "start");
@@ -944,7 +1451,15 @@ export function Calendar({
                       aria-pressed={selectedIds.has(segment.item.id)}
                       aria-label={itemTitle(segment.item, places)}
                       onClick={(event) => {
-                        if (actionMenu?.segment.item.id === segment.item.id) return;
+                        if (suppressItemClick.current) {
+                          suppressItemClick.current = false;
+                          return;
+                        }
+                        if (
+                          calendarMenu?.type === "item" &&
+                          calendarMenu.segment.item.id === segment.item.id
+                        )
+                          return;
                         if (event.ctrlKey || event.metaKey) {
                           setSelectedIds((current) => {
                             const next = new Set(current);
@@ -956,7 +1471,7 @@ export function Calendar({
                           return;
                         }
                         setSelectedIds(new Set([segment.item.id]));
-                        onSelect(segment.item);
+                        onSelect(segment.item, segment.dayId);
                       }}
                       onDragOver={(event) => event.preventDefault()}
                       onDrop={(event) =>
@@ -967,20 +1482,24 @@ export function Calendar({
                       <strong className={styles.blockTitle}>
                         <Icon icon={iconForItem(segment.item)} />
                         <span>
-                          {segment.continuesBefore ? "Continued" : itemTitle(segment.item, places)}
+                          {segment.continuesBefore
+                            ? text("continued")
+                            : itemTitle(segment.item, places)}
                         </span>
                       </strong>
                       <time>
-                        {segment.provisional
-                          ? "Untimed"
-                          : `${timeForCalendarMinute(segment.startMinute, calendarHours)} - ${timeForCalendarMinute(segment.endMinute, calendarHours)}`}
+                        {segment.provisional ? `${text("flexible")} · ` : ""}
+                        {rollingTimeForCalendarMinute(segment.startMinute, calendarStartHour)} -{" "}
+                        {rollingTimeForCalendarMinute(segment.endMinute, calendarStartHour)}
                       </time>
                     </button>
                     {!segment.continuesAfter ? (
                       <button
                         type="button"
                         className={styles.resizeEnd}
-                        aria-label={`Change end of ${itemTitle(segment.item, places)}`}
+                        aria-label={text("changeEnd", {
+                          title: itemTitle(segment.item, places),
+                        })}
                         onPointerDown={(event) => {
                           event.stopPropagation();
                           beginItemGesture(event, segment, "end");
@@ -994,14 +1513,22 @@ export function Calendar({
               {column.overflow.length ? (
                 <div className={styles.overflow}>
                   {column.overflow.map((item) => (
-                    <button type="button" key={item.id} onClick={() => onSelect(item)}>
+                    <button
+                      type="button"
+                      key={item.id}
+                      onClick={() => {
+                        setSelectedIds(new Set([item.id]));
+                        onSelect(item, column.day.id);
+                      }}
+                    >
                       {itemTitle(item, places)}
                     </button>
                   ))}
                 </div>
               ) : null}
-            </div>
+            </fieldset>
           ))}
+          <div className={styles.endTrack} aria-hidden="true" />
         </div>
       </div>
       {editor ? <div className={styles.editor}>{editor}</div> : null}
@@ -1013,7 +1540,7 @@ export function Calendar({
           aria-hidden="true"
         />
       ) : null}
-      {gesture?.type === "item" && gesture.edge === "move" && dragPointer ? (
+      {gesture?.type === "item" && gesture.active && gesture.edge === "move" && dragPointer ? (
         <div
           className={styles.dragProxy}
           data-calendar-drag-proxy
@@ -1029,18 +1556,21 @@ export function Calendar({
             <span>{itemTitle(gesture.item, places)}</span>
           </strong>
           <time>
-            {preview?.startTime ?? gesture.item.startTime ?? "08:00"} -{" "}
-            {timeForCalendarMinute(
-              calendarMinuteForTime(
-                preview?.startTime ?? gesture.item.startTime ?? "08:00",
-                calendarHours,
-              ) + ((preview?.durationMinutes ?? gesture.item.durationMinutes) || 60),
-              calendarHours,
+            {rollingTimeForCalendarMinute(itemDragStartMinute, calendarStartHour)} -{" "}
+            {rollingTimeForCalendarMinute(
+              itemDragStartMinute +
+                ((preview?.durationMinutes ??
+                  (gesture.type === "item" ? gesture.item.durationMinutes : 60)) ||
+                  60),
+              calendarStartHour,
             )}
           </time>
         </div>
       ) : null}
-      {gesture?.type === "lodging" && gesture.edge === "move" && lodgingPointer ? (
+      {gesture?.type === "lodging" &&
+      gesture.active &&
+      gesture.edge === "move" &&
+      lodgingPointer ? (
         <div
           className={styles.lodgingDragProxy}
           data-calendar-lodging-drag-proxy
@@ -1064,17 +1594,38 @@ export function Calendar({
           aria-hidden="true"
         />
       ) : null}
-      {actionMenu ? (
-        <ItemActions
-          title={itemTitle(actionMenu.segment.item, places)}
-          position={{ left: actionMenu.left, top: actionMenu.top }}
-          onAction={(action) => {
-            if (action === "clone") onCloneItem(actionMenu.segment.item);
-            else adjustItem(actionMenu.segment, action);
-          }}
-          onClose={() => setActionMenu(null)}
-        />
-      ) : null}
+      <CalendarMenus
+        menu={calendarMenu}
+        language={language}
+        commands={{
+          titleForItem: (item) => itemTitle(item, places),
+          canReorderItem,
+          item: (segment, action) => {
+            if (action === "duplicate") onDuplicateItem(segment.item);
+            else if (action === "flexible") onMakeFlexible(segment.item);
+            else if (action === "edit") onSelect(segment.item);
+            else if (action === "delete") onDeleteItem(segment.item);
+            else if (action === "move-up") onReorderItem(segment.item, -1);
+            else if (action === "move-down") onReorderItem(segment.item, 1);
+            else adjustItem(segment, action);
+          },
+          lodging: (item, action) => {
+            if (action === "duplicate") onDuplicateItem(item);
+            else if (action === "edit") onSelect(item);
+            else onDeleteItem(item);
+          },
+          add: (type, dayId, startTime, position) => addItem(type, dayId, startTime, position),
+          close: () => setCalendarMenu(null),
+        }}
+      />
+      {creationPanel && creationPosition
+        ? createPortal(
+            <div className={styles.creationPopover} style={creationPosition}>
+              {creationPanel}
+            </div>,
+            document.body,
+          )
+        : null}
       {limitMessage ? (
         <p className={styles.message} role="status">
           {limitMessage}
@@ -1082,17 +1633,6 @@ export function Calendar({
       ) : null}
     </section>
   );
-}
-
-function clippedLodgingGuide(pointer: LodgingPointer) {
-  const left = Math.max(Math.min(pointer.anchorX, pointer.x), pointer.clipLeft);
-  const right = Math.min(Math.max(pointer.anchorX, pointer.x), pointer.clipRight);
-  if (right <= left) return null;
-  return {
-    left,
-    top: pointer.guideY,
-    width: right - left,
-  };
 }
 
 function NoteStack({
@@ -1134,72 +1674,6 @@ function NoteStack({
   );
 }
 
-function ItemActions({
-  title,
-  position,
-  onAction,
-  onClose,
-}: {
-  title: string;
-  position: { left: number; top: number };
-  onAction: (action: ItemAction) => void;
-  onClose: () => void;
-}) {
-  const menu = useRef<HTMLDivElement>(null);
-  const actions = [
-    ["previous-day", arrowLeftIcon, "Previous day"],
-    ["next-day", arrowRightIcon, "Next day"],
-    ["earlier", arrowUpIcon, "15 minutes earlier"],
-    ["later", arrowDownIcon, "15 minutes later"],
-    ["longer", plusIcon, "15 minutes longer"],
-    ["shorter", minusIcon, "15 minutes shorter"],
-    ["clone", copyIcon, "Clone"],
-  ] as const;
-  useEffect(() => {
-    menu.current?.querySelector<HTMLButtonElement>("button")?.focus();
-    const closeOutside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !menu.current?.contains(event.target)) onClose();
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    const closeOnViewportChange = () => onClose();
-    document.addEventListener("pointerdown", closeOutside);
-    document.addEventListener("keydown", closeOnEscape);
-    window.addEventListener("resize", closeOnViewportChange);
-    return () => {
-      document.removeEventListener("pointerdown", closeOutside);
-      document.removeEventListener("keydown", closeOnEscape);
-      window.removeEventListener("resize", closeOnViewportChange);
-    };
-  }, [onClose]);
-  return createPortal(
-    <div
-      ref={menu}
-      className={styles.actionMenu}
-      style={position}
-      role="toolbar"
-      aria-label={`Calendar actions for ${title}`}
-    >
-      {actions.map(([action, icon, label]) => (
-        <button
-          key={action}
-          type="button"
-          aria-label={label}
-          title={label}
-          onClick={() => {
-            onAction(action);
-            onClose();
-          }}
-        >
-          <Icon icon={icon} />
-        </button>
-      ))}
-    </div>,
-    document.body,
-  );
-}
-
 function dropNote(
   event: React.DragEvent,
   dayId: string,
@@ -1209,122 +1683,4 @@ function dropNote(
   event.preventDefault();
   const noteId = event.dataTransfer.getData("application/x-pacenotes-note");
   if (noteId) onMove(noteId, dayId, afterItemId);
-}
-
-function pointerDelta(scroller: HTMLDivElement | null, event: PointerEvent, gesture: ItemGesture) {
-  const first = scroller?.querySelector<HTMLElement>("[data-calendar-day]");
-  const columnWidth = first?.getBoundingClientRect().width || 288;
-  const pixelsPerHour =
-    calendarHourEm *
-    Number.parseFloat(getComputedStyle(scroller ?? document.documentElement).fontSize);
-  return {
-    dayDelta: Math.round((event.clientX - gesture.startX) / columnWidth),
-    minuteDelta:
-      Math.round(((event.clientY - gesture.startY) / pixelsPerHour / calendarSnapMinutes) * 60) *
-      calendarSnapMinutes,
-  };
-}
-
-function previewForAbsolute(
-  itemId: string,
-  start: number,
-  end: number,
-  days: readonly TripDay[],
-  calendarHours: CalendarHours,
-): Preview | null {
-  const dayIndex = Math.floor(start / calendarDayMinutes);
-  if (dayIndex < 0) return null;
-  const firstDay = days[0];
-  const dayId = days[dayIndex]?.id ?? (firstDay ? addDays(firstDay.date, dayIndex) : null);
-  if (!dayId) return null;
-  return {
-    itemId,
-    dayId,
-    startTime: timeForCalendarMinute(start, calendarHours),
-    durationMinutes: Math.max(calendarMinimumMinutes, snapCalendarMinute(end - start)),
-  };
-}
-
-function rectangleForPoints(startX: number, startY: number, endX: number, endY: number) {
-  return {
-    left: Math.min(startX, endX),
-    top: Math.min(startY, endY),
-    width: Math.abs(endX - startX),
-    height: Math.abs(endY - startY),
-  };
-}
-
-function rectanglesIntersect(first: SelectionBox, second: DOMRect): boolean {
-  return (
-    first.left <= second.right &&
-    first.left + first.width >= second.left &&
-    first.top <= second.bottom &&
-    first.top + first.height >= second.top
-  );
-}
-
-function lodgingRangeForPointer(
-  gesture: LodgingGesture,
-  clientX: number,
-  scroller: HTMLDivElement | null,
-  days: readonly TripDay[],
-): { startDate: string; endDate: string } | null {
-  const lodging = gesture.item.lodging;
-  if (!lodging) return null;
-  const width =
-    scroller?.querySelector<HTMLElement>("[data-calendar-day]")?.getBoundingClientRect().width ||
-    288;
-  const delta = Math.round((clientX - gesture.startX) / width);
-  let startDate = lodging.startDate;
-  let endDate = lodging.endDate;
-  if (gesture.edge === "move") {
-    startDate = addDays(startDate, delta);
-    endDate = addDays(endDate, delta);
-  } else if (gesture.edge === "start") {
-    startDate = addDays(startDate, delta);
-    if (startDate >= endDate) startDate = addDays(endDate, -1);
-  } else {
-    endDate = addDays(endDate, delta);
-    if (endDate <= startDate) endDate = addDays(startDate, 1);
-  }
-  const first = days[0]?.date;
-  if (first && startDate < first) {
-    const nights = daysBetween(startDate, endDate);
-    startDate = first;
-    endDate = addDays(first, nights);
-  }
-  return { startDate, endDate };
-}
-
-function itemVersion(item: TripItem): string {
-  return `${item.dayId}:${item.startTime}:${item.durationMinutes}:${item.lodging?.startDate}:${item.lodging?.endDate}`;
-}
-
-function minuteEm(minutes: number): string {
-  return `${(minutes / 60) * calendarHourEm}em`;
-}
-
-function formatDay(date: string, language: TripLanguage): string {
-  return new Intl.DateTimeFormat(language, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  }).format(new Date(`${date}T12:00:00Z`));
-}
-
-function addDays(date: string, amount: number): string {
-  const value = new Date(`${date}T00:00:00Z`);
-  value.setUTCDate(value.getUTCDate() + amount);
-  return value.toISOString().slice(0, 10);
-}
-
-function daysBetween(start: string, end: string): number {
-  return Math.max(
-    1,
-    Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86_400_000),
-  );
-}
-
-function clamp(value: number, minimum: number, maximum: number): number {
-  return Math.min(maximum, Math.max(minimum, value));
 }

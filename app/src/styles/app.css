@@ -14,6 +14,15 @@
   body {
     min-width: 320px;
   }
+  fieldset {
+    min-inline-size: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+  legend {
+    padding: 0;
+  }
   button,
   input,
   select,
@@ -486,108 +495,13 @@
     font-weight: 750;
   }
   .hero-create {
-    position: relative;
-    min-width: 0;
-    min-height: 31rem;
-  }
-  .route-preview {
-    position: absolute;
-    inset: 0 0 4.5rem 4rem;
-    overflow: hidden;
-    border: var(--line) solid var(--border);
-    border-radius: var(--radius-m);
-    background:
-      linear-gradient(rgb(125 211 252 / 9%) 1px, transparent 1px),
-      linear-gradient(90deg, rgb(125 211 252 / 9%) 1px, transparent 1px),
-      linear-gradient(145deg, var(--accent-soft), var(--muted-surface));
-    background-size:
-      2rem 2rem,
-      2rem 2rem,
-      auto;
-    box-shadow: var(--shadow-panel);
-  }
-  .route-preview::after {
-    position: absolute;
-    width: 16rem;
-    height: 16rem;
-    border: 2.5rem solid rgb(0 123 184 / 8%);
-    border-radius: 50%;
-    content: "";
-    inset: -5rem -4rem auto auto;
-  }
-  .route-preview > svg {
-    position: absolute;
-    width: 100%;
-    height: 100%;
-    inset: 0;
-  }
-  .route-preview path {
-    fill: none;
-    stroke: var(--accent);
-    stroke-dasharray: 7 7;
-    stroke-linecap: round;
-    stroke-width: 4;
-  }
-  .preview-stop {
-    position: absolute;
-    z-index: 1;
     display: grid;
-    width: 2rem;
-    height: 2rem;
-    place-items: center;
-    border: 3px solid var(--raised);
-    border-radius: 50%;
-    background: var(--accent-fill);
-    box-shadow: 0 4px 12px rgb(0 75 109 / 24%);
-    color: var(--on-accent);
-    font-size: 0.6875rem;
-    font-weight: 800;
-  }
-  .preview-stop-1 {
-    top: 73%;
-    left: 7%;
-  }
-  .preview-stop-2 {
-    top: 27%;
-    left: 42%;
-  }
-  .preview-stop-3 {
-    top: 17%;
-    right: 5%;
-  }
-  .preview-leg {
-    position: absolute;
-    z-index: 1;
-    display: inline-flex;
+    min-width: 0;
     align-items: center;
-    gap: var(--space-2);
-    padding: 0.4rem 0.625rem;
-    border: var(--line) solid var(--border);
-    border-radius: var(--radius-s);
-    background: var(--raised);
-    box-shadow: var(--shadow);
-    color: var(--muted);
-    font-size: 0.6875rem;
-    font-weight: 700;
-  }
-  .preview-leg svg {
-    width: 0.875rem;
-    height: 0.875rem;
-    color: var(--accent);
-  }
-  .preview-leg-1 {
-    top: 49%;
-    left: 21%;
-  }
-  .preview-leg-2 {
-    right: 8%;
-    bottom: 16%;
   }
   .create-card {
-    position: absolute;
+    position: relative;
     z-index: 2;
-    bottom: 0;
-    left: 0;
     display: grid;
     width: min(100%, 29rem);
     gap: var(--space-4);
@@ -845,6 +759,11 @@
     border-bottom: var(--line) solid var(--border);
     background: var(--surface);
   }
+  .planner-view-tools {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
   .date-tabs,
   .content-tabs,
   .view-tabs {
@@ -957,31 +876,44 @@
     border-right: 1px solid var(--border);
     background: var(--surface);
   }
-  .planner-content-toolbar {
+  .planner-sticky-tools {
     position: sticky;
     z-index: 12;
     top: 0;
-    display: flex;
     margin: 0 calc(-1 * var(--panel-padding));
-    padding: var(--space-2) var(--panel-padding);
-    border-bottom: var(--line) solid var(--border);
     background: var(--surface);
   }
-  .planner-panel > [aria-label="Trip calendar"] {
-    min-height: 0;
+  .planner-content-toolbar {
+    display: flex;
+    padding: var(--space-2) var(--panel-padding);
+    border-bottom: var(--line) solid var(--border);
   }
-  .planner-panel:has(> [aria-label="Trip calendar"]) {
+  .planner-global-search {
+    padding: var(--space-3) var(--panel-padding) 0;
+  }
+  .planner-search-button {
+    width: 2.5rem;
+    min-height: 2.5rem;
+    flex: 0 0 2.5rem;
     padding: 0;
   }
-  @media (min-width: 48.0625rem) {
-    .planner-panel:has(> [aria-label="Trip calendar"]) {
-      display: grid;
-      overflow: hidden;
-      grid-template-rows: auto minmax(0, 1fr);
-    }
+  .planner-search-button svg {
+    width: 1.5rem;
+    height: 1.5rem;
   }
-  .planner-panel:has(> [aria-label="Trip calendar"]) > .planner-content-toolbar {
+  .planner-panel > [data-trip-calendar] {
+    min-height: 0;
+  }
+  .planner-panel:has(> [data-trip-calendar]) {
+    display: grid;
+    overflow: hidden;
+    padding: 0;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .planner-panel:has(> [data-trip-calendar]) > .planner-sticky-tools {
     margin: 0;
+  }
+  .planner-panel:has(> [data-trip-calendar]) > .planner-sticky-tools > .planner-content-toolbar {
     padding: var(--space-2) var(--space-3);
   }
   .panel-resizer {
@@ -1102,6 +1034,9 @@
   .day-drop-target {
     min-height: 2rem;
   }
+  .day-drop-target-compact {
+    min-height: var(--space-1);
+  }
   .day-empty svg {
     width: 1rem;
     height: 1rem;
@@ -1145,12 +1080,11 @@
   .itinerary-unit {
     min-width: 0;
   }
-  .entry-drag-space {
-    pointer-events: none;
-  }
-  .planner:has(.entry-drag-space) [data-rfd-placeholder-context-id] {
-    position: absolute;
-    visibility: hidden;
+  .planner [data-rfd-placeholder-context-id] {
+    box-sizing: border-box;
+    border: var(--line) dashed var(--accent);
+    border-radius: var(--radius-s);
+    background: var(--accent-soft);
   }
   .entry-gap {
     padding-top: var(--space-1);
@@ -1179,6 +1113,10 @@
   }
   .itinerary-entry.is-selected {
     border-color: var(--accent);
+  }
+  .itinerary-entry:has(.entry-select:focus-visible) {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
   .itinerary-entry.is-selected:has(+ .item-editor) {
     border-color: var(--border);
@@ -1252,6 +1190,9 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     cursor: grab;
+  }
+  .entry-select:focus-visible {
+    outline: none;
   }
   .entry-select::after {
     position: absolute;
@@ -1526,6 +1467,16 @@
     padding: var(--space-3);
     border: var(--line) solid var(--border);
   }
+  .trip-date-range {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
+  .settings-language-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
   .field-group legend {
     padding: 0 var(--space-1);
     color: var(--muted);
@@ -1586,6 +1537,50 @@
   .map-number-marker.is-selected {
     width: 2.4rem;
     height: 2.4rem;
+  }
+  .map-marker-stack {
+    position: relative;
+    width: calc(2rem + (var(--stack-size) - 1) * 0.5rem);
+    height: calc(2rem + (var(--stack-size) - 1) * 0.18rem);
+    cursor: pointer;
+  }
+  .map-marker-stack-pin {
+    position: absolute;
+    bottom: calc(var(--stack-index) * 0.18rem);
+    left: calc(var(--stack-index) * 0.5rem);
+    z-index: var(--stack-index);
+    display: grid;
+    width: 2rem;
+    height: 2rem;
+    place-items: center;
+    border: 3px solid var(--raised);
+    border-radius: 50% 50% 50% 0;
+    color: var(--marker-text-color, #fff);
+    background: var(--marker-color);
+    font-size: 0.6875rem;
+    font-weight: 800;
+    transform: rotate(-45deg);
+    box-shadow: var(--shadow);
+  }
+  .map-marker-stack-pin > span {
+    transform: rotate(45deg);
+  }
+  .map-marker-stack-more {
+    position: absolute;
+    top: -0.5rem;
+    right: -0.75rem;
+    z-index: 5;
+    min-width: 1.5rem;
+    padding: 0.125rem 0.3rem;
+    border: var(--line) solid var(--border-strong);
+    border-radius: 999px;
+    color: var(--ink);
+    background: var(--raised);
+    font-size: 0.6875rem;
+    font-weight: 800;
+    line-height: 1rem;
+    text-align: center;
+    box-shadow: var(--shadow);
   }
 
   .dialog-backdrop {
@@ -1741,20 +1736,16 @@
       padding-inline: var(--space-3);
     }
     .hero {
-      width: calc(100% - 2 * var(--space-3));
+      width: 100%;
       grid-template-columns: 1fr;
       padding: 3rem var(--space-3);
+      border-inline: 0;
+      border-radius: 0;
     }
     .hero-create {
       display: grid;
       min-height: auto;
       gap: var(--space-3);
-    }
-    .route-preview {
-      position: relative;
-      height: 13rem;
-      order: 1;
-      inset: auto;
     }
     .hero-copy h1 {
       font-size: clamp(2.7rem, 14vw, 4.5rem);
@@ -1817,9 +1808,6 @@
       justify-content: center;
       font-size: 0;
     }
-    .calendar-mobile-itinerary {
-      display: block;
-    }
     .planner-body,
     .view-map,
     .view-list {
@@ -1869,6 +1857,7 @@
     }
     .mobile-sheet-handle {
       position: absolute;
+      z-index: 13;
       top: 0;
       left: 0;
       display: grid;

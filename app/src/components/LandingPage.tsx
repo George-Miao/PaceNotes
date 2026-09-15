@@ -11,7 +11,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import type { GooglePlaceSelection } from "~/features/google/google";
 import { useTripTitle } from "~/features/google/use-trip-title";
-import { createTrip, deleteTrip } from "~/features/trip/trip.functions";
+import { createTrip, deleteTrip, getExistingTripIds } from "~/features/trip/trip.functions";
 import { Brand } from "./Brand";
 import { DestinationPicker } from "./DestinationPicker";
 
@@ -31,10 +31,28 @@ export function LandingPage() {
     new Date(today.getTime() + 4 * 86_400_000).toISOString().slice(0, 10),
   );
   const [destination, setDestination] = useState<GooglePlaceSelection | null>(null);
-  const [recent, setRecent] = useState<RecentTrip[]>([]);
+  const [recent, setRecent] = useState<RecentTrip[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  useEffect(() => setRecent(readRecent()), []);
+  useEffect(() => {
+    const stored = readRecent();
+    let active = true;
+    void getExistingTripIds({ data: { ids: stored.map((trip) => trip.id) } })
+      .then(({ ids }) => {
+        if (!active) return;
+        const existingIds = new Set(ids);
+        const next = stored.filter((trip) => existingIds.has(trip.id));
+        if (next.length !== stored.length)
+          localStorage.setItem("pacenotes-recent-trips", JSON.stringify(next));
+        setRecent(next);
+      })
+      .catch(() => {
+        if (active) setRecent(stored);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
   const selectDestination = useCallback(
     (place: GooglePlaceSelection | null) => setDestination(place),
     [],
@@ -61,7 +79,7 @@ export function LandingPage() {
     }
   };
   const forget = (id: string) => {
-    const next = recent.filter((trip) => trip.id !== id);
+    const next = (recent ?? []).filter((trip) => trip.id !== id);
     localStorage.setItem("pacenotes-recent-trips", JSON.stringify(next));
     setRecent(next);
   };
@@ -103,27 +121,6 @@ export function LandingPage() {
           </a>
         </div>
         <div className="hero-create">
-          <div
-            className="route-preview"
-            role="img"
-            aria-label="Sample route with three planned stops"
-          >
-            <svg aria-hidden="true" viewBox="0 0 620 360" preserveAspectRatio="none">
-              <title>Trip route preview</title>
-              <path d="M55 280C145 252 168 93 282 119c104 24 107 154 202 125 53-16 66-84 91-156" />
-            </svg>
-            <span className="preview-stop preview-stop-1">1</span>
-            <span className="preview-stop preview-stop-2">2</span>
-            <span className="preview-stop preview-stop-3">3</span>
-            <div className="preview-leg preview-leg-1">
-              <Icon icon={routeIcon} />
-              <span>18 min</span>
-            </div>
-            <div className="preview-leg preview-leg-2">
-              <Icon icon={mapIcon} />
-              <span>Next stop</span>
-            </div>
-          </div>
           <form id="create" className="create-card" onSubmit={submit}>
             <div className="section-heading">
               <h2>Create a trip</h2>
@@ -198,7 +195,7 @@ export function LandingPage() {
           <h2 id="recent-title">Recent trips</h2>
           <span>Stored in this browser</span>
         </div>
-        {recent.length ? (
+        {recent === null ? null : recent.length ? (
           <div className="recent-list">
             {recent.map((trip) => (
               <RecentTripCard key={trip.id} trip={trip} onForget={forget} onDelete={remove} />
@@ -277,8 +274,33 @@ function RecentTripCard({
 
 function readRecent(): RecentTrip[] {
   try {
-    return JSON.parse(localStorage.getItem("pacenotes-recent-trips") ?? "[]");
+    const stored: unknown = JSON.parse(localStorage.getItem("pacenotes-recent-trips") ?? "[]");
+    return Array.isArray(stored) ? stored.filter(isRecentTrip) : [];
   } catch {
     return [];
+  }
+}
+
+function isRecentTrip(value: unknown): value is RecentTrip {
+  if (!value || typeof value !== "object") return false;
+  const trip = value as Partial<RecentTrip>;
+  return (
+    typeof trip.id === "string" &&
+    /^[A-Za-z0-9_-]{20,32}$/.test(trip.id) &&
+    typeof trip.title === "string" &&
+    typeof trip.href === "string" &&
+    isTripHref(trip.href, trip.id) &&
+    typeof trip.openedAt === "string" &&
+    Number.isFinite(Date.parse(trip.openedAt)) &&
+    (trip.destinationPlaceId === undefined || typeof trip.destinationPlaceId === "string")
+  );
+}
+
+function isTripHref(href: string, id: string): boolean {
+  try {
+    const url = new URL(href, location.origin);
+    return url.origin === location.origin && url.pathname === `/trips/${id}`;
+  } catch {
+    return false;
   }
 }

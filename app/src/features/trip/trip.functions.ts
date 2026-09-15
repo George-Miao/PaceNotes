@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServerFn } from "@tanstack/react-start";
 import { getRequestHeader } from "@tanstack/react-start/server";
-import { and, count, eq, gte, lt } from "drizzle-orm";
+import { and, count, eq, gte, inArray, lt } from "drizzle-orm";
 import * as Y from "yjs";
 import { z } from "zod";
 import { db } from "../../db/client";
@@ -10,6 +10,9 @@ import { initializeTripDocument } from "../collaboration/document";
 import { createInitialSnapshot, newTripSchema } from "./model";
 
 const tripIdSchema = z.object({ id: z.string().regex(/^[A-Za-z0-9_-]{20,32}$/) });
+const tripIdsSchema = z.object({
+  ids: z.array(tripIdSchema.shape.id).max(12),
+});
 
 export const createTrip = createServerFn({ method: "POST" })
   .validator(newTripSchema)
@@ -65,8 +68,18 @@ export const getTripMetadata = createServerFn({ method: "GET" })
       .from(trips)
       .where(eq(trips.id, data.id))
       .limit(1);
-    if (trip?.state !== "active") throw new Error("Trip not found");
+    if (trip?.state !== "active") return null;
     return trip;
+  });
+export const getExistingTripIds = createServerFn({ method: "GET" })
+  .validator(tripIdsSchema)
+  .handler(async ({ data }) => {
+    if (data.ids.length === 0) return { ids: [] };
+    const existing = await db
+      .select({ id: trips.id })
+      .from(trips)
+      .where(and(inArray(trips.id, data.ids), eq(trips.state, "active")));
+    return { ids: existing.map((trip) => trip.id) };
   });
 
 export const deleteTrip = createServerFn({ method: "POST" })

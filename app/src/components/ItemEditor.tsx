@@ -10,8 +10,11 @@ import {
   arrivalTimeFor,
   durationBetween,
   type Lodging,
+  lodgingForDates,
+  lodgingLeaveTime,
   type Reservation,
   type Transport,
+  type TransportMode,
   type TripDay,
   type TripItem,
   transportModes,
@@ -26,9 +29,18 @@ const markdownIcon = {
   body: '<path fill="currentColor" d="M22.27 19.385H1.73A1.73 1.73 0 0 1 0 17.655V6.345a1.73 1.73 0 0 1 1.73-1.73h20.54A1.73 1.73 0 0 1 24 6.345v11.308a1.73 1.73 0 0 1-1.73 1.731zM5.769 15.923v-4.5l2.308 2.885l2.307-2.885v4.5h2.308V8.078h-2.308l-2.307 2.885l-2.308-2.885H3.46v7.847zM21.232 12h-2.309V8.077h-2.307V12h-2.308l3.461 4.039z"/>',
 } as const;
 
+const transportPrimaryTypes = {
+  plane: ["airport", "airstrip", "heliport", "international_airport"],
+  train: ["train_station", "transit_station", "subway_station"],
+  bus: ["bus_station", "bus_stop", "transit_station"],
+  ferry: ["ferry_terminal"],
+  custom: undefined,
+} as const satisfies Record<TransportMode, readonly string[] | undefined>;
+
 export function ItemEditor({
   item,
   days,
+  lodgingDate,
   defaultTitle,
   places,
   onSave,
@@ -37,6 +49,7 @@ export function ItemEditor({
 }: {
   item: TripItem;
   days: TripDay[];
+  lodgingDate: string | null;
   defaultTitle: string;
   places: ReadonlyMap<string, GooglePlaceView>;
   onSave: (patch: Partial<TripItem>) => void;
@@ -350,6 +363,7 @@ export function ItemEditor({
               label={text("from")}
               value={transport.from}
               places={editorPlaces}
+              includedPrimaryTypes={transportPrimaryTypes[transport.mode]}
               optional
               onChange={(from) => setDraft({ ...draft, transport: { ...transport, from } })}
             />
@@ -357,6 +371,7 @@ export function ItemEditor({
               label={text("to")}
               value={transport.to}
               places={editorPlaces}
+              includedPrimaryTypes={transportPrimaryTypes[transport.mode]}
               optional
               onChange={(to) => setDraft({ ...draft, transport: { ...transport, to } })}
             />
@@ -434,6 +449,7 @@ export function ItemEditor({
           <LodgingFields
             value={draft.lodging}
             days={days}
+            editDate={lodgingDate}
             onChange={(lodging) =>
               setDraft({
                 ...draft,
@@ -555,22 +571,43 @@ function ReservationFields({
 function LodgingFields({
   value,
   days,
+  editDate,
   onChange,
 }: {
   value: Lodging | null;
   days: TripDay[];
+  editDate: string | null;
   onChange: (value: Lodging) => void;
 }) {
   const text = useTripText();
-  const lodging = value ?? { startDate: days[0]?.date ?? "", endDate: days.at(-1)?.date ?? "" };
+  const lodging = value ?? lodgingForDates(days[0]?.date ?? "", days.at(-1)?.date ?? "");
   return (
     <div className={`${styles.stayFields} field-wide`}>
+      {editDate ? (
+        <label className="field field-wide">
+          <span>{text("leaveAt")}</span>
+          <input
+            type="time"
+            required
+            value={lodgingLeaveTime(lodging, editDate)}
+            onChange={(event) => {
+              if (!event.target.value) return;
+              onChange({
+                ...lodging,
+                leaveTimes: { ...lodging.leaveTimes, [editDate]: event.target.value },
+              });
+            }}
+          />
+        </label>
+      ) : null}
       <label className="field">
         <span>{text("checkInDate")}</span>
         <input
           type="date"
           value={lodging.startDate}
-          onChange={(event) => onChange({ ...lodging, startDate: event.target.value })}
+          onChange={(event) =>
+            onChange(lodgingForDates(event.target.value, lodging.endDate, lodging.leaveTimes))
+          }
         />
       </label>
       <label className="field">
@@ -578,7 +615,9 @@ function LodgingFields({
         <input
           type="date"
           value={lodging.endDate}
-          onChange={(event) => onChange({ ...lodging, endDate: event.target.value })}
+          onChange={(event) =>
+            onChange(lodgingForDates(lodging.startDate, event.target.value, lodging.leaveTimes))
+          }
         />
       </label>
     </div>

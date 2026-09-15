@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import type { MapStop, RouteLeg } from "~/features/routing/route-legs";
 import { buildDayRouteExport, googleMapsRouteUrl } from "./route-export";
-import type { MapStop, RouteLeg } from "./route-legs";
 
 const stops: MapStop[] = [
   stop("a", "place-a", 35.1, 139.1, "DRIVING"),
@@ -74,6 +74,7 @@ function stop(
     index: 1,
     latitude,
     longitude,
+    countryCode: null,
     color: "#007bb8",
     textColor: "#fff",
     travelMode,
@@ -96,6 +97,7 @@ function leg(
     duration: "10 min",
     durationMinutes: 10,
     distanceMeters: 1000,
+    geometryQuality: "detailed",
     path: [],
     state: "ready",
   };

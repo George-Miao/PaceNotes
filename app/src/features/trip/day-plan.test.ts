@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildDayPlans, routeContinuations } from "./day-plan";
-import { itemForCreate } from "./model";
+import { itemForCreate, lodgingForDates } from "./model";
 
 const days = ["2027-01-01", "2027-01-02", "2027-01-03", "2027-01-04"].map((date) => ({
   id: date,
@@ -12,12 +12,12 @@ describe("continuous day plans", () => {
     const first = itemForCreate("lodging", days[0]?.id ?? null, {
       id: "first",
       place: { placeId: "hotel-a" },
-      lodging: { startDate: "2027-01-01", endDate: "2027-01-03" },
+      lodging: lodgingForDates("2027-01-01", "2027-01-03"),
     });
     const second = itemForCreate("lodging", "2027-01-03", {
       id: "second",
       place: { placeId: "hotel-b" },
-      lodging: { startDate: "2027-01-03", endDate: "2027-01-04" },
+      lodging: lodgingForDates("2027-01-03", "2027-01-04"),
     });
     const note = itemForCreate("note", "2027-01-03", { id: "visit" });
     const plans = buildDayPlans([first, second, note], days);

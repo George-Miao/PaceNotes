@@ -20,7 +20,7 @@
 - Trip pages must use `noindex` and `no-referrer` policies.
 - Places to visit and unscheduled items stay in the planning inbox until an editor assigns a day.
 - Item times use the trip IANA time zone. Reject daylight-saving gaps. Ask the editor to resolve duplicated times.
-- Deleting a day moves items on that day to the inbox and shifts later planning days one day earlier.
+- Only the first or last day can be deleted. Its items move to the inbox. Items on other days keep their day assignments.
 - Local undo covers this editor's current session. It must not undo another editor's work or a hard trip deletion.
 
 ## Data and provider rules
@@ -28,10 +28,11 @@
 - Yjs is the source of truth for live trip content. Do not copy the trip into another client state store.
 - PostgreSQL is the durable store. A Docker volume is not a backup.
 - Hocuspocus runs inside the Nitro web process on `/sync`. TanStack server functions remain request-response interfaces.
-- Google Maps Platform supplies place search, transient place fields, the map, and route legs.
-- Store only Google Place IDs. Resolve names, addresses, coordinates, reviews, and photos in memory and keep them on allowed Google surfaces. Never copy Google place content into Yjs or PostgreSQL.
+- Google Maps Platform supplies place search, transient place fields, the map, and default route legs.
+- When `MOTIS_URL` is configured, transient coordinates and country codes may be sent to MOTIS only for public transport routes with both endpoints in Japan. The operator must have the required provider and data rights.
+- Store only Google Place IDs. Resolve names, addresses, coordinates, country codes, reviews, and photos in memory. Never copy Google place content into Yjs or PostgreSQL.
 - Restrict the Google browser key by exact origin and interface. Never commit a key.
-- Logs must not include full trip URLs, query text, notes, provider parameters, or secret values.
+- Logs must not include full trip URLs, query text, coordinates, notes, provider parameters, or secret values.
 
 ## Interface and design rules
 

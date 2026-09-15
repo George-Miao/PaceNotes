@@ -1,6 +1,6 @@
 import { Icon } from "@iconify/react";
 import xIcon from "@iconify-icons/lucide/x";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTripText } from "~/features/trip/language";
 import styles from "./MapPlaceDetails.module.css";
 import { PlaceDetails } from "./PlaceDetails";
@@ -16,13 +16,14 @@ export function MapPlaceDetails({
   placeId: string;
   placement: { itemId: string; dayNumber: number } | null;
   autoFocus: boolean;
-  onAddToTrip: (placeId: string) => void;
+  onAddToTrip: (placeId: string) => Promise<void>;
   onRemoveFromDay: (itemId: string) => void;
   onClose: () => void;
 }) {
   const text = useTripText();
   const closeRef = useRef<HTMLButtonElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
     if (!autoFocus) return;
@@ -67,7 +68,17 @@ export function MapPlaceDetails({
             <button
               type="button"
               className={`primary-button ${styles.add}`}
-              onClick={() => onAddToTrip(placeId)}
+              disabled={adding}
+              aria-busy={adding}
+              onClick={async () => {
+                if (adding) return;
+                setAdding(true);
+                try {
+                  await onAddToTrip(placeId);
+                } finally {
+                  setAdding(false);
+                }
+              }}
             >
               {text("addToTrip")}
             </button>

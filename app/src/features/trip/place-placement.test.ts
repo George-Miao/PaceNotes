@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { itemForCreate, type TravelMode, type TripItem } from "./model";
-import { findBestPlaceInsertion, type PlacementTravelTime } from "./place-placement";
+import {
+  defaultTravelModeForPlacement,
+  findBestPlaceInsertion,
+  type PlacementTravelTime,
+} from "./place-placement";
 
 const day = "2027-01-01";
 const mode: TravelMode = "WALKING";
@@ -29,6 +33,23 @@ function insertion(
 ): number {
   return findBestPlaceInsertion({ items, item: candidate, travelTimes, date, timeZone });
 }
+const earthRadiusMeters = 6_371_008.8;
+const origin = { latitude: 0, longitude: 0 };
+const pointAtDistance = (meters: number) => ({
+  latitude: 0,
+  longitude: (meters / earthRadiusMeters) * (180 / Math.PI),
+});
+
+describe("placement travel mode", () => {
+  it("uses walking only below 700 meters", () => {
+    expect(defaultTravelModeForPlacement(origin, pointAtDistance(699), "DRIVING")).toBe("WALKING");
+    expect(defaultTravelModeForPlacement(origin, pointAtDistance(700), "DRIVING")).toBe("DRIVING");
+  });
+
+  it("uses the configured default without a prior place", () => {
+    expect(defaultTravelModeForPlacement(undefined, origin, "TRANSIT")).toBe("TRANSIT");
+  });
+});
 
 describe("smart place placement", () => {
   it("inserts where the place adds the least route time", () => {

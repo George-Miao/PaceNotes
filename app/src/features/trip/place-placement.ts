@@ -16,6 +16,54 @@ export type PlacePlacementInput = {
   date: string;
   timeZone: string;
 };
+const earthRadiusMeters = 6_371_008.8;
+const shortWalkingDistanceMeters = 700;
+export type PlaceDayCandidate = {
+  dayId: string;
+  latitude: number;
+  longitude: number;
+};
+
+export function nearestPlaceDay(
+  target: { latitude: number; longitude: number },
+  candidates: readonly PlaceDayCandidate[],
+): string | null {
+  let nearestDay: string | null = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  for (const candidate of candidates) {
+    const distance = placeDistanceMeters(target, candidate);
+    if (distance >= nearestDistance) continue;
+    nearestDay = candidate.dayId;
+    nearestDistance = distance;
+  }
+  return nearestDay;
+}
+
+export function defaultTravelModeForPlacement(
+  from: { latitude: number; longitude: number } | undefined,
+  to: { latitude: number; longitude: number },
+  configuredDefault: TravelMode,
+): TravelMode {
+  if (!from) return configuredDefault;
+  return placeDistanceMeters(from, to) < shortWalkingDistanceMeters ? "WALKING" : configuredDefault;
+}
+function placeDistanceMeters(
+  from: { latitude: number; longitude: number },
+  to: { latitude: number; longitude: number },
+): number {
+  const fromLatitude = radians(from.latitude);
+  const toLatitude = radians(to.latitude);
+  const latitudeDelta = toLatitude - fromLatitude;
+  const longitudeDelta = radians(to.longitude - from.longitude);
+  const latitudeSine = Math.sin(latitudeDelta / 2);
+  const longitudeSine = Math.sin(longitudeDelta / 2);
+  const haversine =
+    latitudeSine * latitudeSine +
+    Math.cos(fromLatitude) * Math.cos(toLatitude) * longitudeSine * longitudeSine;
+  return (
+    2 * earthRadiusMeters * Math.atan2(Math.sqrt(haversine), Math.sqrt(Math.max(0, 1 - haversine)))
+  );
+}
 
 /**
  * Returns the visible-day index that best preserves the day's schedule, then
@@ -215,6 +263,10 @@ function nextDate(date: string): string {
 
 function legKey(fromId: string, toId: string, mode: TravelMode): string {
   return `${fromId}\u0000${toId}\u0000${mode}`;
+}
+
+function radians(degrees: number): number {
+  return (degrees * Math.PI) / 180;
 }
 
 function parseTime(time: string): number {

@@ -1,7 +1,9 @@
 import * as Y from "yjs";
 import {
-  calendarHoursSchema,
+  calendarStartHourSchema,
+  defaultCalendarStartHour,
   distanceUnitSchema,
+  lodgingForDates,
   placeReferenceSchema,
   type TripItem,
   type TripSettings,
@@ -28,9 +30,12 @@ export function initializeTripDocument(document: Y.Doc, snapshot: TripSnapshot):
     metadata.set("timeZone", snapshot.timeZone);
     metadata.set("destination", snapshot.destination);
     metadata.set("defaultTravelMode", snapshot.defaultTravelMode);
-    metadata.set("language", snapshot.language);
+    metadata.set("tripLanguage", snapshot.tripLanguage);
+    metadata.delete("language");
+    metadata.delete("uiLanguage");
     metadata.set("distanceUnit", snapshot.distanceUnit);
-    metadata.set("calendarHours", snapshot.calendarHours);
+    metadata.set("calendarStartHour", snapshot.calendarStartHour);
+    metadata.delete("calendarHours");
 
     const days = document.getArray<{ id: string; date: string }>(daysKey);
     if (days.length > 0) days.delete(0, days.length);
@@ -54,10 +59,11 @@ export function readTripDocument(document: Y.Doc): TripSnapshot {
     if (parsed.success) items[key] = parsed.data;
   });
   const destination = placeReferenceSchema.safeParse(metadata.get("destination"));
-  const language = tripLanguageSchema.safeParse(metadata.get("language"));
+  const legacyLanguage = tripLanguageSchema.safeParse(metadata.get("language"));
+  const tripLanguage = tripLanguageSchema.nullable().safeParse(metadata.get("tripLanguage"));
   const distanceUnit = distanceUnitSchema.safeParse(metadata.get("distanceUnit"));
   const defaultTravelMode = travelModeSchema.safeParse(metadata.get("defaultTravelMode"));
-  const calendarHours = calendarHoursSchema.safeParse(metadata.get("calendarHours"));
+  const calendarStartHour = calendarStartHourSchema.safeParse(metadata.get("calendarStartHour"));
 
   return {
     id: String(metadata.get("id") ?? ""),
@@ -66,10 +72,16 @@ export function readTripDocument(document: Y.Doc): TripSnapshot {
     endDate: String(metadata.get("endDate") ?? ""),
     timeZone: String(metadata.get("timeZone") ?? "UTC"),
     destination: destination.success ? destination.data : { placeId: "" },
-    language: language.success ? language.data : "en",
+    tripLanguage: tripLanguage.success
+      ? tripLanguage.data
+      : legacyLanguage.success
+        ? legacyLanguage.data
+        : null,
     distanceUnit: distanceUnit.success ? distanceUnit.data : "metric",
     defaultTravelMode: defaultTravelMode.success ? defaultTravelMode.data : "DRIVING",
-    calendarHours: calendarHours.success ? calendarHours.data : 24,
+    calendarStartHour: calendarStartHour.success
+      ? calendarStartHour.data
+      : defaultCalendarStartHour,
     days: document.getArray<{ id: string; date: string }>(daysKey).toArray(),
     order: document.getArray<string>(orderKey).toArray(),
     items,
@@ -86,13 +98,59 @@ export function setTripField(
 
 export function setTripSettings(document: Y.Doc, settings: TripSettings): void {
   const parsed = tripSettingsSchema.parse(settings);
+  const nextDays = tripDates(parsed.startDate, parsed.endDate).map((date) => ({
+    id: date,
+    date,
+  }));
+  const items = document.getMap<Y.Map<unknown>>(itemsKey);
+  const nextItems = Array.from(items.values()).map((item) => {
+    const current = tripItemSchema.parse(item.toJSON());
+    if (
+      current.type === "reservation" &&
+      current.dayId &&
+      (current.dayId < parsed.startDate || current.dayId > parsed.endDate)
+    ) {
+      throw new Error("Move or delete reservations before changing the trip dates");
+    }
+    return { item, next: itemForTripRange(current, parsed.startDate, parsed.endDate) };
+  });
   document.transact(() => {
     const metadata = document.getMap(metadataKey);
-    metadata.set("language", parsed.language);
+    metadata.set("startDate", parsed.startDate);
+    metadata.set("endDate", parsed.endDate);
+    metadata.set("tripLanguage", parsed.tripLanguage);
+    metadata.delete("language");
+    metadata.delete("uiLanguage");
     metadata.set("distanceUnit", parsed.distanceUnit);
     metadata.set("defaultTravelMode", parsed.defaultTravelMode);
-    metadata.set("calendarHours", parsed.calendarHours);
+    metadata.set("calendarStartHour", parsed.calendarStartHour);
+    metadata.delete("calendarHours");
+    const days = document.getArray<{ id: string; date: string }>(daysKey);
+    if (days.length > 0) days.delete(0, days.length);
+    days.insert(0, nextDays);
+    for (const { item, next } of nextItems) {
+      for (const [key, value] of Object.entries(next)) item.set(key, value);
+    }
   }, "trip-settings");
+}
+
+export function addTripDay(document: Y.Doc, edge: "before" | "after"): string | null {
+  const metadata = document.getMap<unknown>(metadataKey);
+  const startDate = String(metadata.get("startDate") ?? "");
+  const endDate = String(metadata.get("endDate") ?? "");
+  if (tripDates(startDate, endDate).length >= 30) return null;
+  const date = edge === "before" ? shiftDate(startDate, -1) : shiftDate(endDate, 1);
+  document.transact(() => {
+    const days = document.getArray<{ id: string; date: string }>(daysKey);
+    if (edge === "before") {
+      metadata.set("startDate", date);
+      days.insert(0, [{ id: date, date }]);
+    } else {
+      metadata.set("endDate", date);
+      days.insert(days.length, [{ id: date, date }]);
+    }
+  }, "add-day");
+  return date;
 }
 
 function requireReservationSchedule(item: TripItem): TripItem {
@@ -103,15 +161,33 @@ function requireReservationSchedule(item: TripItem): TripItem {
 }
 
 export function addTripItem(document: Y.Doc, item: TripItem, destinationIndex?: number): void {
+  addTripItemWithNextTravelMode(document, item, null, destinationIndex);
+}
+
+export function addTripItemWithNextTravelMode(
+  document: Y.Doc,
+  item: TripItem,
+  next: { id: string; travelMode: TripItem["travelMode"] } | null,
+  destinationIndex?: number,
+): void {
   const parsed = requireReservationSchedule(tripItemSchema.parse(item));
+  const items = document.getMap<Y.Map<unknown>>(itemsKey);
+  const nextMap = next ? items.get(next.id) : undefined;
+  const parsedNext =
+    next && nextMap
+      ? requireReservationSchedule(
+          tripItemSchema.parse({ ...nextMap.toJSON(), travelMode: next.travelMode, id: next.id }),
+        )
+      : null;
   document.transact(() => {
-    document.getMap<Y.Map<unknown>>(itemsKey).set(parsed.id, itemToMap(parsed));
+    items.set(parsed.id, itemToMap(parsed));
     const order = document.getArray<string>(orderKey);
     const index =
       destinationIndex === undefined
         ? order.length
         : Math.max(0, Math.min(destinationIndex, order.length));
     order.insert(index, [parsed.id]);
+    if (nextMap && parsedNext) nextMap.set("travelMode", parsedNext.travelMode);
   }, "add-item");
 }
 
@@ -167,16 +243,24 @@ export function moveTripItem(
   dayId: string | null,
   startTime: string | null,
   ids: string[],
+  travelMode: TripItem["travelMode"] | undefined = undefined,
 ): void {
   const item = document.getMap<Y.Map<unknown>>(itemsKey).get(id);
   if (!item) return;
   const next = requireReservationSchedule(
-    tripItemSchema.parse({ ...item.toJSON(), id, dayId, startTime }),
+    tripItemSchema.parse({
+      ...item.toJSON(),
+      id,
+      dayId,
+      startTime,
+      ...(travelMode ? { travelMode } : {}),
+    }),
   );
   const order = document.getArray<string>(orderKey);
   document.transact(() => {
     item.set("dayId", next.dayId);
     item.set("startTime", next.startTime);
+    if (travelMode) item.set("travelMode", next.travelMode);
     if (order.length > 0) order.delete(0, order.length);
     if (ids.length > 0) order.insert(0, ids);
   }, "reorder-item");
@@ -271,18 +355,87 @@ export function applyCalendarItemChanges(
 }
 
 export function normalizeTripDocument(document: Y.Doc): void {
-  const notes = Array.from(document.getMap<Y.Map<unknown>>(itemsKey).values()).filter(
+  const metadata = document.getMap<unknown>(metadataKey);
+  const storedCalendarStartHour = calendarStartHourSchema.safeParse(
+    metadata.get("calendarStartHour"),
+  );
+  const legacyCalendarHours = metadata.get("calendarHours");
+  const calendarStartHour = storedCalendarStartHour.success
+    ? storedCalendarStartHour.data
+    : legacyCalendarHours === 24
+      ? 0
+      : legacyCalendarHours === 30
+        ? 6
+        : defaultCalendarStartHour;
+  const migrateCalendarStartHour =
+    !storedCalendarStartHour.success || metadata.has("calendarHours");
+  const legacyLanguage = tripLanguageSchema.safeParse(metadata.get("language"));
+  const storedTripLanguage = tripLanguageSchema.nullable().safeParse(metadata.get("tripLanguage"));
+  const migrateLanguage =
+    !storedTripLanguage.success || metadata.has("language") || metadata.has("uiLanguage");
+  const tripLanguage = storedTripLanguage.success
+    ? storedTripLanguage.data
+    : legacyLanguage.success
+      ? legacyLanguage.data
+      : null;
+  const items = Array.from(document.getMap<Y.Map<unknown>>(itemsKey).values());
+  const notes = items.filter(
     (item) =>
       item.get("type") === "note" &&
       (item.get("startTime") !== null || item.get("durationMinutes") !== 0),
   );
-  if (notes.length === 0) return;
+  const lodgings = items.flatMap((item) => {
+    if (item.get("type") !== "lodging") return [];
+    const raw = item.get("lodging");
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+    const value = raw as Record<string, unknown>;
+    if (typeof value.startDate !== "string" || typeof value.endDate !== "string") return [];
+    const previous =
+      value.leaveTimes && typeof value.leaveTimes === "object" && !Array.isArray(value.leaveTimes)
+        ? Object.fromEntries(
+            Object.entries(value.leaveTimes).flatMap(([date, time]) =>
+              typeof time === "string" ? [[date, time]] : [],
+            ),
+          )
+        : {};
+    const lodging = lodgingForDates(value.startDate, value.endDate, previous);
+    return JSON.stringify(raw) === JSON.stringify(lodging) ? [] : [{ item, lodging }];
+  });
+  if (!migrateCalendarStartHour && !migrateLanguage && notes.length === 0 && lodgings.length === 0)
+    return;
   document.transact(() => {
+    if (migrateCalendarStartHour) {
+      metadata.set("calendarStartHour", calendarStartHour);
+      metadata.delete("calendarHours");
+    }
+    if (migrateLanguage) {
+      metadata.set("tripLanguage", tripLanguage);
+      metadata.delete("language");
+      metadata.delete("uiLanguage");
+    }
     for (const note of notes) {
       note.set("startTime", null);
       note.set("durationMinutes", 0);
     }
+    for (const { item, lodging } of lodgings) item.set("lodging", lodging);
   }, "normalize-document");
+}
+
+function itemForTripRange(item: TripItem, startDate: string, endDate: string): TripItem {
+  if (item.type === "lodging" && item.lodging) {
+    const lodgingStart = item.lodging.startDate < startDate ? startDate : item.lodging.startDate;
+    const lodgingEnd = item.lodging.endDate > endDate ? endDate : item.lodging.endDate;
+    if (lodgingStart >= lodgingEnd) return { ...item, dayId: null };
+    return {
+      ...item,
+      dayId: lodgingStart,
+      lodging: lodgingForDates(lodgingStart, lodgingEnd, item.lodging.leaveTimes),
+    };
+  }
+  if (item.dayId && (item.dayId < startDate || item.dayId > endDate)) {
+    return { ...item, dayId: null };
+  }
+  return clampCalendarItem(item, endDate);
 }
 
 function clampCalendarItem(item: TripItem, endDate: string): TripItem {
@@ -293,7 +446,7 @@ function clampCalendarItem(item: TripItem, endDate: string): TripItem {
     return {
       ...item,
       dayId: lodgingStart,
-      lodging: { startDate: lodgingStart, endDate: lodgingEnd },
+      lodging: lodgingForDates(lodgingStart, lodgingEnd, item.lodging.leaveTimes),
     };
   }
   if (!item.dayId || !item.startTime) return item;
@@ -314,6 +467,9 @@ export function deleteTripDay(document: Y.Doc, dayId: string): void {
     const current = days.toArray();
     const deletedIndex = current.findIndex((day) => day.id === dayId);
     if (deletedIndex < 0 || current.length === 1) return;
+    if (deletedIndex !== 0 && deletedIndex !== current.length - 1) {
+      throw new Error("Only the first or last trip day can be deleted");
+    }
     const items = document.getMap<Y.Map<unknown>>(itemsKey);
     const containsReservation = Array.from(items.values()).some(
       (item) => item.get("type") === "reservation" && item.get("dayId") === dayId,
@@ -322,27 +478,15 @@ export function deleteTripDay(document: Y.Doc, dayId: string): void {
       throw new Error("Move or delete reservations before deleting this day");
     }
 
-    const shiftedIds = new Map<string, string>();
-    const remaining = current.flatMap((day, index) => {
-      if (index === deletedIndex) return [];
-      if (index < deletedIndex) return [day];
-      const shifted = shiftDate(day.date, -1);
-      shiftedIds.set(day.id, shifted);
-      return [{ id: shifted, date: shifted }];
-    });
-    days.delete(0, days.length);
-    days.insert(0, remaining);
+    days.delete(deletedIndex, 1);
+    const remaining = days.toArray();
 
     items.forEach((item) => {
-      const itemDay = item.get("dayId");
-      if (itemDay === dayId) item.set("dayId", null);
-      else if (typeof itemDay === "string") {
-        const shiftedDay = shiftedIds.get(itemDay);
-        if (shiftedDay) item.set("dayId", shiftedDay);
-      }
+      if (item.get("dayId") === dayId) item.set("dayId", null);
     });
 
     const metadata = document.getMap(metadataKey);
+    metadata.set("startDate", remaining[0]?.date ?? "");
     metadata.set("endDate", remaining.at(-1)?.date ?? "");
   }, "delete-day");
 }

@@ -10,10 +10,18 @@ import { languageTag, useTripLanguage, useTripText } from "~/features/trip/langu
 export type GooglePlacePickerProps = {
   label: string;
   bias?: { latitude: number; longitude: number } | undefined;
+  autoFocus?: boolean;
+  includedPrimaryTypes?: readonly string[] | undefined;
   onSelect: (place: GooglePlaceSelection) => void;
 };
 
-export function GooglePlacePicker({ label, bias, onSelect }: GooglePlacePickerProps) {
+export function GooglePlacePicker({
+  label,
+  bias,
+  includedPrimaryTypes,
+  autoFocus = false,
+  onSelect,
+}: GooglePlacePickerProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const language = useTripLanguage();
   const text = useTripText();
@@ -23,6 +31,7 @@ export function GooglePlacePicker({ label, bias, onSelect }: GooglePlacePickerPr
   useEffect(() => {
     let disposed = false;
     let element: google.maps.places.PlaceAutocompleteElement | undefined;
+    let focusFrame: number | undefined;
 
     const setup = async () => {
       try {
@@ -33,6 +42,9 @@ export function GooglePlacePicker({ label, bias, onSelect }: GooglePlacePickerPr
         element.requestedLanguage = languageTag(language);
         element.setAttribute("aria-label", label);
         if (bias) element.locationBias = { lat: bias.latitude, lng: bias.longitude };
+        if (includedPrimaryTypes) {
+          element.includedPrimaryTypes = [...includedPrimaryTypes];
+        }
         const handleSelect = async (event: Event) => {
           try {
             const place = (event as PlaceSelectionEvent).placePrediction.toPlace();
@@ -46,6 +58,9 @@ export function GooglePlacePicker({ label, bias, onSelect }: GooglePlacePickerPr
         };
         element.addEventListener("gmp-select", handleSelect);
         hostRef.current.replaceChildren(element);
+        if (autoFocus) {
+          focusFrame = window.requestAnimationFrame(() => element?.focus({ preventScroll: true }));
+        }
       } catch (cause) {
         if (!disposed) {
           setError(cause instanceof Error ? cause.message : text("googlePlacesUnavailable"));
@@ -55,9 +70,10 @@ export function GooglePlacePicker({ label, bias, onSelect }: GooglePlacePickerPr
     void setup();
     return () => {
       disposed = true;
+      if (focusFrame !== undefined) window.cancelAnimationFrame(focusFrame);
       element?.remove();
     };
-  }, [bias, label, language, text]);
+  }, [autoFocus, bias, includedPrimaryTypes, label, language, text]);
 
   return (
     <section className="place-picker" aria-label={label}>

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { createInitialSnapshot, itemForCreate } from "../trip/model";
+import { createInitialSnapshot, itemForCreate, lodgingForDates } from "../trip/model";
 import {
+  addTripDay,
   addTripItem,
   applyCalendarItemChange,
   applyCalendarItemChanges,
@@ -37,34 +38,99 @@ describe("collaboration document", () => {
   it("uses default settings for documents without settings metadata", () => {
     expect(readTripDocument(new Y.Doc())).toMatchObject({
       destination: { placeId: "" },
-      language: "en",
+      tripLanguage: null,
       distanceUnit: "metric",
       defaultTravelMode: "DRIVING",
-      calendarHours: 24,
+      calendarStartHour: 6,
     });
+  });
+  it.each([
+    [undefined, 6],
+    [24, 0],
+    [30, 6],
+  ] as const)("normalizes legacy calendar hours %s to start hour %s", (legacyHours, startHour) => {
+    const document = new Y.Doc();
+    const metadata = document.getMap<unknown>("metadata");
+    if (legacyHours !== undefined) metadata.set("calendarHours", legacyHours);
+
+    normalizeTripDocument(document);
+
+    expect(readTripDocument(document).calendarStartHour).toBe(startHour);
+    expect(metadata.get("calendarStartHour")).toBe(startHour);
+    expect(metadata.has("calendarHours")).toBe(false);
+  });
+
+  it("migrates the shared legacy language to a trip language override", () => {
+    const document = new Y.Doc();
+    const metadata = document.getMap<unknown>("metadata");
+    metadata.set("language", "ja");
+
+    normalizeTripDocument(document);
+
+    expect(readTripDocument(document).tripLanguage).toBe("ja");
+    expect(metadata.has("language")).toBe(false);
+    expect(metadata.has("uiLanguage")).toBe(false);
   });
 
   it("updates all trip settings in one transaction", () => {
     const document = seedDocument();
+    addTripItem(
+      document,
+      itemForCreate("note", "2027-01-01", { id: "outside-range", title: "Outside range" }),
+    );
     let transactions = 0;
     document.on("afterTransaction", (transaction) => {
       if (transaction.origin === "trip-settings") transactions += 1;
     });
 
     setTripSettings(document, {
-      language: "fr",
+      startDate: "2027-01-02",
+      endDate: "2027-01-04",
+      tripLanguage: "fr",
       distanceUnit: "imperial",
       defaultTravelMode: "WALKING",
-      calendarHours: 30,
+      calendarStartHour: 17,
     });
 
     expect(transactions).toBe(1);
     expect(readTripDocument(document)).toMatchObject({
-      language: "fr",
+      startDate: "2027-01-02",
+      endDate: "2027-01-04",
+      days: [
+        { id: "2027-01-02", date: "2027-01-02" },
+        { id: "2027-01-03", date: "2027-01-03" },
+        { id: "2027-01-04", date: "2027-01-04" },
+      ],
+      items: {
+        "outside-range": { dayId: null },
+      },
+      tripLanguage: "fr",
       distanceUnit: "imperial",
       defaultTravelMode: "WALKING",
-      calendarHours: 30,
+      calendarStartHour: 17,
     });
+  });
+
+  it("adds one trip day at either edge", () => {
+    const document = seedDocument();
+
+    expect(addTripDay(document, "before")).toBe("2026-12-31");
+    expect(addTripDay(document, "after")).toBe("2027-01-06");
+
+    const snapshot = readTripDocument(document);
+    expect(snapshot).toMatchObject({
+      startDate: "2026-12-31",
+      endDate: "2027-01-06",
+    });
+    expect(snapshot.days.map((day) => day.date)).toEqual([
+      "2026-12-31",
+      "2027-01-01",
+      "2027-01-02",
+      "2027-01-03",
+      "2027-01-04",
+      "2027-01-05",
+      "2027-01-06",
+    ]);
   });
 
   it("converges after ten editors add items at the same time", () => {
@@ -153,6 +219,12 @@ describe("collaboration document", () => {
     expect(() => moveTripItem(document, reservation.id, null, null, [reservation.id])).toThrow(
       "Choose a date and time",
     );
+    expect(() =>
+      applyCalendarItemChange(document, {
+        id: reservation.id,
+        patch: { startTime: null, durationMinutes: 0 },
+      }),
+    ).toThrow("Choose a date and time");
     expect(readTripDocument(document).items.reservation).toMatchObject({
       dayId: "2027-01-01",
       startTime: "19:30",
@@ -164,43 +236,60 @@ describe("collaboration document", () => {
     document.destroy();
   });
 
-  it("deletes a middle day, shifts later planning days, and preserves lodging dates", () => {
+  it("rejects deletion of a middle day", () => {
     const document = seedDocument();
-    addTripItem(document, itemForCreate("note", "2027-01-03", { id: "deleted-day" }));
-    addTripItem(
-      document,
-      itemForCreate("reservation", "2027-01-04", {
-        id: "later",
-        place: { placeId: "station" },
-        startTime: "12:00",
-        reservation: { provider: "Rail", confirmation: "A1" },
-      }),
-    );
-    addTripItem(
-      document,
-      itemForCreate("lodging", "2027-01-04", {
-        id: "stay",
-        place: { placeId: "hotel" },
-        lodging: { startDate: "2027-01-01", endDate: "2027-01-05" },
-      }),
-    );
+    addTripItem(document, itemForCreate("note", "2027-01-03", { id: "middle" }));
+    addTripItem(document, itemForCreate("note", "2027-01-04", { id: "later" }));
 
-    deleteTripDay(document, "2027-01-03");
+    expect(() => deleteTripDay(document, "2027-01-03")).toThrow(
+      "Only the first or last trip day can be deleted",
+    );
     const snapshot = readTripDocument(document);
     expect(snapshot.days.map((day) => day.date)).toEqual([
       "2027-01-01",
       "2027-01-02",
       "2027-01-03",
       "2027-01-04",
+      "2027-01-05",
     ]);
-    expect(snapshot.endDate).toBe("2027-01-04");
-    expect(snapshot.items["deleted-day"]?.dayId).toBeNull();
-    expect(snapshot.items.later?.dayId).toBe("2027-01-03");
-    expect(snapshot.items.stay?.lodging).toEqual({
-      startDate: "2027-01-01",
-      endDate: "2027-01-05",
-    });
+    expect(snapshot.items.middle?.dayId).toBe("2027-01-03");
+    expect(snapshot.items.later?.dayId).toBe("2027-01-04");
+    expect(snapshot.endDate).toBe("2027-01-05");
+    document.destroy();
   });
+
+  it.each([
+    {
+      deletedDay: "2027-01-01",
+      otherDay: "2027-01-02",
+      remainingDates: ["2027-01-02", "2027-01-03", "2027-01-04", "2027-01-05"],
+      startDate: "2027-01-02",
+      endDate: "2027-01-05",
+    },
+    {
+      deletedDay: "2027-01-05",
+      otherDay: "2027-01-04",
+      remainingDates: ["2027-01-01", "2027-01-02", "2027-01-03", "2027-01-04"],
+      startDate: "2027-01-01",
+      endDate: "2027-01-04",
+    },
+  ])(
+    "deletes boundary day $deletedDay without moving items on other days",
+    ({ deletedDay, otherDay, remainingDates, startDate, endDate }) => {
+      const document = seedDocument();
+      addTripItem(document, itemForCreate("note", deletedDay, { id: "deleted-day" }));
+      addTripItem(document, itemForCreate("note", otherDay, { id: "other-day" }));
+
+      deleteTripDay(document, deletedDay);
+      const snapshot = readTripDocument(document);
+      expect(snapshot.days.map((day) => day.date)).toEqual(remainingDates);
+      expect(snapshot.items["deleted-day"]?.dayId).toBeNull();
+      expect(snapshot.items["other-day"]?.dayId).toBe(otherDay);
+      expect(snapshot.startDate).toBe(startDate);
+      expect(snapshot.endDate).toBe(endDate);
+      document.destroy();
+    },
+  );
 
   it("applies calendar scheduling and trip extension in one transaction", () => {
     const document = seedDocument();
@@ -236,6 +325,15 @@ describe("collaboration document", () => {
           durationMinutes: 180,
         },
       },
+    });
+    applyCalendarItemChange(document, {
+      id: "calendar-item",
+      patch: { startTime: null, durationMinutes: 0 },
+    });
+    expect(readTripDocument(document).items["calendar-item"]).toMatchObject({
+      dayId: "2027-01-07",
+      startTime: null,
+      durationMinutes: 0,
     });
 
     const clamped = applyCalendarItemChange(document, {
@@ -331,6 +429,28 @@ describe("collaboration document", () => {
     document.destroy();
   });
 
+  it("migrates daily leave times into legacy lodging records", () => {
+    const document = seedDocument();
+    addTripItem(
+      document,
+      itemForCreate("lodging", "2027-01-01", {
+        id: "legacy-stay",
+        place: { placeId: "hotel" },
+        lodging: lodgingForDates("2027-01-01", "2027-01-03"),
+      }),
+    );
+    const item = document.getMap<Y.Map<unknown>>("items").get("legacy-stay");
+    item?.set("lodging", { startDate: "2027-01-01", endDate: "2027-01-03" });
+
+    normalizeTripDocument(document);
+
+    expect(item?.get("lodging")).toEqual(lodgingForDates("2027-01-01", "2027-01-03"));
+    expect(readTripDocument(document).items["legacy-stay"]?.lodging).toEqual(
+      lodgingForDates("2027-01-01", "2027-01-03"),
+    );
+    document.destroy();
+  });
+
   it("clamps a lodging change to the 30-day trip limit", () => {
     const document = seedDocument();
     addTripItem(
@@ -339,10 +459,7 @@ describe("collaboration document", () => {
         id: "calendar-stay",
         title: "Calendar stay",
         place: { placeId: "calendar-hotel" },
-        lodging: {
-          startDate: "2027-01-02",
-          endDate: "2027-01-05",
-        },
+        lodging: lodgingForDates("2027-01-02", "2027-01-05"),
       }),
     );
 
@@ -351,10 +468,7 @@ describe("collaboration document", () => {
       patch: {
         dayId: "2027-02-15",
         startTime: null,
-        lodging: {
-          startDate: "2027-02-15",
-          endDate: "2027-02-18",
-        },
+        lodging: lodgingForDates("2027-02-15", "2027-02-18"),
       },
       extendThrough: "2027-02-18",
     });

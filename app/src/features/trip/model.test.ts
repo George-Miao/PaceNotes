@@ -3,12 +3,16 @@ import {
   arrivalTimeFor,
   createInitialSnapshot,
   durationBetween,
+  effectiveTripLanguage,
   itemForCreate,
+  lodgingForDates,
+  lodgingLeaveTime,
   newTripSchema,
   reorder,
   resolveLocalTime,
   tripDates,
   tripItemSchema,
+  tripSettingsSchema,
 } from "./model";
 
 const destination = {
@@ -32,11 +36,34 @@ describe("trip model", () => {
     ]);
     expect(snapshot.timeZone).toBe("Asia/Tokyo");
     expect(snapshot).toMatchObject({
-      language: "en",
+      tripLanguage: null,
       distanceUnit: "metric",
       defaultTravelMode: "DRIVING",
-      calendarHours: 24,
+      calendarStartHour: 6,
     });
+  });
+  it("accepts calendar start hours from 00 through 23", () => {
+    const settings = {
+      startDate: "2027-01-01",
+      endDate: "2027-01-05",
+      tripLanguage: null,
+      distanceUnit: "metric",
+      defaultTravelMode: "DRIVING",
+    } as const;
+
+    expect(tripSettingsSchema.safeParse({ ...settings, calendarStartHour: 0 }).success).toBe(true);
+    expect(tripSettingsSchema.safeParse({ ...settings, calendarStartHour: 23 }).success).toBe(true);
+    expect(tripSettingsSchema.safeParse({ ...settings, calendarStartHour: -1 }).success).toBe(
+      false,
+    );
+    expect(tripSettingsSchema.safeParse({ ...settings, calendarStartHour: 24 }).success).toBe(
+      false,
+    );
+  });
+
+  it("uses the UI language until the trip language is overridden", () => {
+    expect(effectiveTripLanguage("ja", null)).toBe("ja");
+    expect(effectiveTripLanguage("ja", "fr")).toBe("fr");
   });
 
   it("keeps only the Google Place ID in the validated trip", () => {
@@ -148,6 +175,23 @@ describe("trip model", () => {
       title: "Keep this note",
       transport: null,
     });
+  });
+
+  it("creates one stored leave time for each lodging morning", () => {
+    const lodging = lodgingForDates("2027-01-01", "2027-01-03", {
+      "2027-01-02": "09:15",
+    });
+
+    expect(lodging).toEqual({
+      startDate: "2027-01-01",
+      endDate: "2027-01-03",
+      leaveTimes: {
+        "2027-01-02": "09:15",
+        "2027-01-03": "08:00",
+      },
+    });
+    expect(lodgingLeaveTime(lodging, "2027-01-02")).toBe("09:15");
+    expect(() => lodgingLeaveTime(lodging, "2027-01-04")).toThrow("Missing lodging leave time");
   });
 
   it("rejects a trip longer than 30 days", () => {

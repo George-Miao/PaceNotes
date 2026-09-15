@@ -120,6 +120,7 @@ export function PlaceSearch({
       ) : null}
       <div inert={placing}>
         <GooglePlacePicker
+          autoFocus
           label={text("searchGooglePlaces")}
           bias={bias}
           onSelect={(place) => {

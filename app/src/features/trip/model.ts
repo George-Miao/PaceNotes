@@ -4,9 +4,11 @@ import { z } from "zod";
 export const itemTypes = ["place", "note", "reservation", "lodging", "transport"] as const;
 export const travelModes = ["DRIVING", "TRANSIT", "WALKING"] as const;
 export const transportModes = ["plane", "train", "bus", "ferry", "custom"] as const;
-export const tripLanguages = ["en", "de", "es", "fr", "it", "ja", "zh-CN", "zh-TW"] as const;
+export const tripLanguages = ["en", "zh-CN", "zh-TW", "ja", "de", "es", "fr", "it"] as const;
 export const distanceUnits = ["metric", "imperial"] as const;
-export const calendarHourOptions = [24, 30] as const;
+export const calendarStartHourOptions = [
+  0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+] as const;
 export const travelModeLabels = {
   DRIVING: "Car",
   TRANSIT: "Public Transport",
@@ -24,12 +26,15 @@ export type ItemType = (typeof itemTypes)[number];
 export type TravelMode = (typeof travelModes)[number];
 export type TripLanguage = (typeof tripLanguages)[number];
 export type DistanceUnit = (typeof distanceUnits)[number];
-export type CalendarHours = (typeof calendarHourOptions)[number];
+export type CalendarStartHour = (typeof calendarStartHourOptions)[number];
+export const defaultCalendarStartHour: CalendarStartHour = 6;
 export type TripSettings = {
-  language: TripLanguage;
+  startDate: string;
+  endDate: string;
+  tripLanguage: TripLanguage | null;
   distanceUnit: DistanceUnit;
   defaultTravelMode: TravelMode;
-  calendarHours: CalendarHours;
+  calendarStartHour: CalendarStartHour;
 };
 
 export type PlaceReference = {
@@ -44,6 +49,7 @@ export type Reservation = {
 export type Lodging = {
   startDate: string;
   endDate: string;
+  leaveTimes: Record<string, string>;
 };
 
 export type TripItem = {
@@ -73,10 +79,10 @@ export type TripSnapshot = {
   endDate: string;
   timeZone: string;
   destination: PlaceReference;
-  language: TripLanguage;
+  tripLanguage: TripLanguage | null;
   distanceUnit: DistanceUnit;
   defaultTravelMode: TravelMode;
-  calendarHours: CalendarHours;
+  calendarStartHour: CalendarStartHour;
   days: TripDay[];
   order: string[];
   items: Record<string, TripItem>;
@@ -91,20 +97,48 @@ export type NewTripInput = {
 };
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-const localTime = z
-  .string()
-  .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
-  .nullable();
+const localClockTime = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+const localTime = localClockTime.nullable();
 export const tripLanguageSchema = z.enum(tripLanguages);
 export const distanceUnitSchema = z.enum(distanceUnits);
 export const travelModeSchema = z.enum(travelModes);
-export const calendarHoursSchema = z.union([z.literal(24), z.literal(30)]);
-export const tripSettingsSchema = z.object({
-  language: tripLanguageSchema,
-  distanceUnit: distanceUnitSchema,
-  defaultTravelMode: travelModeSchema,
-  calendarHours: calendarHoursSchema,
-});
+export const calendarStartHourSchema = z
+  .number()
+  .int()
+  .min(0)
+  .max(23)
+  .transform((hour) => hour as CalendarStartHour);
+function validateTripDateRange(
+  value: { startDate: string; endDate: string },
+  context: z.RefinementCtx,
+): void {
+  const days = tripDates(value.startDate, value.endDate);
+  if (days.length === 0) {
+    context.addIssue({
+      code: "custom",
+      path: ["endDate"],
+      message: "End date must not be before start date",
+    });
+  }
+  if (days.length > 30) {
+    context.addIssue({
+      code: "custom",
+      path: ["endDate"],
+      message: "A trip can contain at most 30 days",
+    });
+  }
+}
+
+export const tripSettingsSchema = z
+  .object({
+    startDate: isoDate,
+    endDate: isoDate,
+    tripLanguage: tripLanguageSchema.nullable(),
+    distanceUnit: distanceUnitSchema,
+    defaultTravelMode: travelModeSchema,
+    calendarStartHour: calendarStartHourSchema,
+  })
+  .superRefine(validateTripDateRange);
 
 export const placeReferenceSchema = z.object({
   placeId: z.string().min(1).max(255),
@@ -118,20 +152,21 @@ export const newTripSchema = z
     destination: placeReferenceSchema,
     timeZone: z.string().min(1).max(100),
   })
-  .superRefine((value, context) => {
-    const days = tripDates(value.startDate, value.endDate);
-    if (days.length === 0) {
+  .superRefine(validateTripDateRange);
+
+const lodgingSchema = z
+  .object({
+    startDate: isoDate,
+    endDate: isoDate,
+    leaveTimes: z.record(isoDate, localClockTime),
+  })
+  .superRefine((lodging, context) => {
+    for (const date of tripDates(lodging.startDate, lodging.endDate).slice(1)) {
+      if (lodging.leaveTimes[date]) continue;
       context.addIssue({
         code: "custom",
-        path: ["endDate"],
-        message: "End date must not be before start date",
-      });
-    }
-    if (days.length > 30) {
-      context.addIssue({
-        code: "custom",
-        path: ["endDate"],
-        message: "A trip can contain at most 30 days",
+        path: ["leaveTimes", date],
+        message: `Missing lodging leave time for ${date}`,
       });
     }
   });
@@ -152,7 +187,7 @@ export const tripItemSchema = z
         confirmation: z.string().max(200),
       })
       .nullable(),
-    lodging: z.object({ startDate: isoDate, endDate: isoDate }).nullable(),
+    lodging: lodgingSchema.nullable(),
     transport: z
       .object({
         from: placeReferenceSchema.nullable(),
@@ -176,6 +211,32 @@ export const tripItemSchema = z
     item.type === "note" ? { ...item, startTime: null, durationMinutes: 0 } : item,
   );
 
+export const defaultLodgingLeaveTime = "08:00";
+
+export function lodgingForDates(
+  startDate: string,
+  endDate: string,
+  previous: Readonly<Record<string, string>> = {},
+): Lodging {
+  return {
+    startDate,
+    endDate,
+    leaveTimes: Object.fromEntries(
+      tripDates(startDate, endDate)
+        .slice(1)
+        .map((date) => {
+          const parsed = localClockTime.safeParse(previous[date]);
+          return [date, parsed.success ? parsed.data : defaultLodgingLeaveTime] as const;
+        }),
+    ),
+  };
+}
+
+export function lodgingLeaveTime(lodging: Lodging, date: string): string {
+  const leaveTime = lodging.leaveTimes[date];
+  if (!leaveTime) throw new Error(`Missing lodging leave time for ${date}`);
+  return leaveTime;
+}
 export function tripDates(startDate: string, endDate: string): string[] {
   let current: Temporal.PlainDate;
   let end: Temporal.PlainDate;
@@ -195,6 +256,13 @@ export function tripDates(startDate: string, endDate: string): string[] {
   return dates;
 }
 
+export function effectiveTripLanguage(
+  uiLanguage: TripLanguage,
+  tripLanguage: TripLanguage | null,
+): TripLanguage {
+  return tripLanguage ?? uiLanguage;
+}
+
 export function createInitialSnapshot(id: string, input: NewTripInput): TripSnapshot {
   const parsed = newTripSchema.parse(input);
   const days = tripDates(parsed.startDate, parsed.endDate).map((date) => ({ id: date, date }));
@@ -205,10 +273,10 @@ export function createInitialSnapshot(id: string, input: NewTripInput): TripSnap
     endDate: parsed.endDate,
     timeZone: parsed.timeZone,
     destination: parsed.destination,
-    language: "en",
+    tripLanguage: null,
     distanceUnit: "metric",
     defaultTravelMode: "DRIVING",
-    calendarHours: 24,
+    calendarStartHour: defaultCalendarStartHour,
     days,
     order: [],
     items: {},

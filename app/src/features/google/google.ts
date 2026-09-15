@@ -57,6 +57,7 @@ export type GooglePlaceView = {
   displayName: string | null;
   latitude: number;
   longitude: number;
+  countryCode: string | null;
 };
 
 export async function readGooglePlaceSelection(
@@ -77,13 +78,18 @@ export async function resolveGooglePlace(
 ): Promise<GooglePlaceView> {
   const { Place } = await loadPlacesLibrary(language);
   const place = new Place({ id: placeId, requestedLanguage: languageTag(language) });
-  await place.fetchFields({ fields: ["id", "location", "displayName"] });
+  await place.fetchFields({ fields: ["id", "location", "displayName", "addressComponents"] });
   if (!place.location) throw new Error("Google did not return a place location");
+  const countryCode =
+    place.addressComponents
+      ?.find((component) => component.types.includes("country"))
+      ?.shortText?.toUpperCase() ?? null;
   return {
     placeId,
     displayName: place.displayName ?? null,
     latitude: place.location.lat(),
     longitude: place.location.lng(),
+    countryCode: countryCode?.match(/^[A-Z]{2}$/) ? countryCode : null,
   };
 }
 

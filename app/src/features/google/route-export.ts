@@ -1,5 +1,5 @@
+import type { MapStop, RouteLeg } from "~/features/routing/route-legs";
 import type { TravelMode } from "~/features/trip/model";
-import type { MapStop, RouteLeg } from "./route-legs";
 
 export type DayRouteExportReason =
   | "not-enough-places"

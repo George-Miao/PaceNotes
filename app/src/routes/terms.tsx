@@ -13,8 +13,10 @@ function Terms() {
       </p>
       <h2>External services</h2>
       <p>
-        Google Maps Platform supplies map, place, photo, review, time-zone, and route content. Use
-        is also subject to the Google Maps Platform Terms of Service and Google Privacy Policy.
+        Google Maps Platform supplies map, place, photo, review, time-zone, and default route
+        content. Use is also subject to the Google Maps Platform Terms of Service and Google Privacy
+        Policy. An operator can use MOTIS and open route data for eligible Japan public transport
+        routes. The operator is responsible for the applicable data licenses and attribution.
       </p>
       <h2>No warranty</h2>
       <p>

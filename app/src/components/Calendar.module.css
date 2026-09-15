@@ -7,6 +7,11 @@
   background: var(--surface);
 }
 
+:global(html[data-calendar-dragging]),
+:global(html[data-calendar-dragging] *) {
+  cursor: grabbing;
+}
+
 .scroller {
   width: 100%;
   height: auto;
@@ -30,14 +35,26 @@
 .calendar {
   --calendar-column-width: 18em;
   --calendar-header-height: 3rem;
+  --calendar-track-height: max(96em, 106.666667vh);
+  --calendar-end-space: 4em;
+  --calendar-bottom-space: 4em;
+  position: relative;
   display: grid;
-  width: max(100%, calc(4.5em + var(--calendar-day-count) * var(--calendar-column-width)));
+  width: max(
+    100%,
+    calc(
+      4.5em +
+      var(--calendar-day-count) *
+      var(--calendar-column-width) +
+      var(--calendar-end-space)
+    )
+  );
   min-width: 100%;
-  grid-template-columns: 4.5em repeat(
-      var(--calendar-day-count),
-      minmax(var(--calendar-column-width), 1fr)
-    );
-  grid-template-rows: auto auto auto;
+  grid-template-columns:
+    4.5em
+    repeat(var(--calendar-day-count), minmax(var(--calendar-column-width), 1fr))
+    var(--calendar-end-space);
+  grid-template-rows: auto auto auto var(--calendar-bottom-space);
 }
 
 .corner,
@@ -47,6 +64,33 @@
   position: sticky;
   z-index: 8;
   background: var(--raised);
+}
+
+.endHeader,
+.endAllDay {
+  position: sticky;
+  z-index: 8;
+  grid-column: -2;
+  background: var(--raised);
+}
+
+.endHeader {
+  top: 0;
+  grid-row: 1;
+  border-bottom: var(--line) solid var(--border);
+}
+
+.endAllDay {
+  top: var(--calendar-header-height);
+  grid-row: 2;
+  border-bottom: var(--line) solid var(--border);
+}
+
+.endTrack {
+  height: var(--calendar-track-height);
+  grid-column: -2;
+  grid-row: 3;
+  background: var(--surface);
 }
 
 .corner {
@@ -74,14 +118,44 @@
 }
 
 .dayHeader time {
-  font-size: 0.75em;
+  font-size: 0.8em;
   font-weight: 800;
   white-space: nowrap;
+}
+.dayHeading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5em;
+}
+
+.missingLodging {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.1875rem;
+  padding: 0.0625rem 0.3125rem;
+  overflow: hidden;
+  border: var(--line) solid color-mix(in srgb, var(--warning) 38%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warning) 9%, transparent);
+  color: var(--warning);
+  font-size: 0.75rem;
+  font-weight: 620;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.missingLodging svg {
+  flex: none;
+  font-size: 0.8125rem;
 }
 
 .allDayLabel {
   top: var(--calendar-header-height);
-  z-index: 9;
+  left: 0;
+  z-index: 13;
   display: flex;
   align-items: flex-start;
   justify-content: flex-end;
@@ -97,23 +171,35 @@
 .allDayCell {
   top: var(--calendar-header-height);
   display: grid;
-  min-height: 3em;
+  min-height: max(3em, var(--calendar-lodging-height));
+  min-inline-size: 0;
   align-content: start;
   gap: 0.25em;
   grid-row: 2;
+  margin: 0;
   padding: 0.375em;
   border-right: var(--line) solid var(--border);
   border-bottom: var(--line) solid var(--border);
 }
 
 .lodging {
-  position: relative;
+  position: sticky;
+  top: calc(var(--calendar-header-height) + 0.375em + var(--calendar-lodging-offset));
+  z-index: 10;
   display: block;
   min-width: 0;
+  height: 1.75em;
+  align-self: start;
+  margin: calc(var(--calendar-lodging-offset) + 0.375em) 0.375em 0.375em;
   touch-action: none;
   border: var(--line) solid var(--border-strong);
   border-radius: var(--radius-s);
   background: var(--muted-surface);
+  cursor: pointer;
+}
+
+.lodgingResizing {
+  z-index: 12;
 }
 
 .lodgingOrigin {
@@ -122,26 +208,33 @@
 
 .lodgingTarget,
 .lodgingDragProxy {
+  min-width: 0;
+  overflow: hidden;
+  border: var(--line) dashed var(--accent);
+  border-radius: var(--radius-s);
+  color: var(--ink);
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.lodgingDragProxy,
+.lodgingTargetContent {
   display: flex;
   min-width: 0;
   align-items: center;
   gap: 0.35em;
   overflow: hidden;
   padding: 0.375em 0.5em;
-  border: var(--line) dashed var(--accent);
-  border-radius: var(--radius-s);
-  color: var(--ink);
-  font-size: 0.6875em;
-  font-weight: 700;
-  pointer-events: none;
+  font-size: 0.75em;
 }
 
 .lodgingTarget {
+  display: block;
   position: sticky;
-  top: var(--calendar-header-height);
+  top: calc(var(--calendar-header-height) + 0.375em + var(--calendar-lodging-offset));
   z-index: 12;
   align-self: start;
-  margin: 0.375em;
+  margin: calc(var(--calendar-lodging-offset) + 0.375em) 0.375em 0.375em;
   background: color-mix(in srgb, var(--accent) 20%, var(--raised));
   opacity: 0.55;
 }
@@ -179,7 +272,7 @@
 
 .lodgingResizeGuide {
   position: fixed;
-  z-index: 100;
+  z-index: 11;
   height: 0;
   border-top: 0.15em solid var(--accent);
   pointer-events: none;
@@ -215,10 +308,11 @@
   background: transparent;
   color: var(--ink);
   font: inherit;
-  font-size: 0.6875em;
+  font-size: 0.75em;
   font-weight: 700;
   text-align: left;
-  cursor: grab;
+  cursor: inherit;
+  height: 100%;
 }
 
 .lodgingTitle {
@@ -226,6 +320,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.lodgingDuration {
+  flex: none;
+  margin-inline-start: auto;
+  color: var(--muted);
+  font: inherit;
 }
 
 .lodging svg {
@@ -263,10 +364,10 @@
 }
 
 .timeGutter {
-  position: relative;
+  position: sticky;
   left: 0;
   z-index: 5;
-  height: 96em;
+  height: var(--calendar-track-height);
   grid-column: 1;
   grid-row: 3;
   border-right: var(--line) solid var(--border);
@@ -277,34 +378,197 @@
   position: absolute;
   right: 0.625em;
   color: var(--muted);
-  font-size: 0.625em;
+  font-size: 0.6875em;
   line-height: 1;
   transform: translateY(-50%);
 }
 
+.hourLabel:first-of-type {
+  visibility: hidden;
+}
+
 .dayTrack {
   position: relative;
-  height: 96em;
+  height: var(--calendar-track-height);
+  min-inline-size: 0;
   grid-row: 3;
+  padding: 0;
+  margin: 0;
   border-right: var(--line) solid var(--border);
   background: var(--surface);
 }
 
 .hourLines {
   position: absolute;
+  z-index: 1;
   inset: 0;
-  background-image: repeating-linear-gradient(
-    to bottom,
-    var(--border) 0 var(--line),
-    transparent var(--line) 1em,
-    color-mix(in srgb, var(--border) 55%, transparent) 1em calc(1em + var(--line)),
-    transparent calc(1em + var(--line)) 2em,
-    color-mix(in srgb, var(--border) 55%, transparent) 2em calc(2em + var(--line)),
-    transparent calc(2em + var(--line)) 3em,
-    color-mix(in srgb, var(--border) 55%, transparent) 3em calc(3em + var(--line)),
-    transparent calc(3em + var(--line)) 4em
-  );
+  display: block;
+  width: 100%;
+  height: var(--calendar-track-height);
+  grid-column: 2 / -2;
+  grid-row: 3;
+  color: var(--border);
+  image-rendering: pixelated;
   pointer-events: none;
+}
+
+.timeGuideLayer {
+  position: relative;
+  z-index: 4;
+  height: var(--calendar-track-height);
+  grid-column: 1 / -2;
+  grid-row: 3;
+  pointer-events: none;
+}
+
+.timeGuide {
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: 0;
+  border-top: var(--line) solid var(--accent-ink);
+}
+
+.timeGutter .hoverTime {
+  --calendar-hover-arrow-width: 0.4375rem;
+  z-index: 2;
+  right: calc(var(--calendar-hover-arrow-width) - var(--line));
+  padding: 0.35em 0.65em;
+  border: var(--line) solid #111418;
+  border-radius: 0;
+  background: #22272d;
+  color: #fff;
+  font-size: 0.9375em;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.timeGutter .hoverTime::before,
+.timeGutter .hoverTime::after {
+  position: absolute;
+  top: 50%;
+  left: 100%;
+  width: 0;
+  height: 0;
+  border-top: 0.45em solid transparent;
+  border-bottom: 0.45em solid transparent;
+  border-left: var(--calendar-hover-arrow-width) solid #111418;
+  content: "";
+  transform: translateY(-50%);
+}
+
+.timeGutter .hoverTime::after {
+  left: calc(100% - var(--line));
+  border-top-width: 0.35em;
+  border-bottom-width: 0.35em;
+  border-left: 0.45em solid #22272d;
+}
+
+.stayArea {
+  --stay-stripe-color: color-mix(in srgb, var(--border-strong) 45%, transparent);
+
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 0;
+  left: 0;
+  min-height: 0.75em;
+  background-color: color-mix(in srgb, var(--surface) 90%, var(--border));
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0 0.45em,
+    var(--stay-stripe-color) 0.45em calc(0.45em + var(--line)),
+    transparent calc(0.45em + var(--line)) 0.9em
+  );
+  border-bottom: var(--route-stroke, calc(2 * var(--line))) solid var(--border-strong);
+  color: var(--muted);
+}
+
+.stayConflict {
+  --stay-stripe-color: color-mix(in srgb, currentcolor 45%, transparent);
+
+  background-color: color-mix(in srgb, currentcolor 12%, var(--surface));
+  border-bottom-color: var(--danger);
+  color: var(--danger);
+}
+
+.staySelect {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35em;
+  padding: 0.5em;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 0.8em;
+  cursor: pointer;
+}
+
+.staySelect svg {
+  flex: none;
+  width: 1em;
+  height: 1em;
+}
+
+.stayCopy {
+  display: grid;
+  min-width: 0;
+  gap: 0.1em;
+  text-align: left;
+}
+
+.stayCopy > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stayLeaveTime {
+  position: absolute;
+  left: 50%;
+  z-index: 3;
+  width: max-content;
+  max-width: calc(100% - 1em);
+  padding: 0.1em 0.35em;
+  overflow: hidden;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.6875em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translate(-50%, calc(-100% - 0.35em));
+}
+.stayLeaveConflict {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.stayHandle {
+  position: absolute;
+  right: 0;
+  bottom: -0.5em;
+  left: 0;
+  z-index: 5;
+  height: 1em;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: ns-resize;
+  touch-action: none;
+}
+.stayArea:not(.stayConflict):has(.stayHandle:hover),
+.stayArea:not(.stayConflict):has(.stayHandle:focus-visible) {
+  border-bottom-color: var(--accent);
 }
 
 .block {
@@ -321,7 +585,7 @@
   border-radius: var(--radius-s);
   background: var(--raised);
   box-shadow: var(--shadow);
-  cursor: grab;
+  cursor: default;
   touch-action: none;
 }
 
@@ -333,6 +597,7 @@
 }
 
 .dragOrigin {
+  cursor: grab;
   opacity: 0.2;
 }
 
@@ -376,7 +641,7 @@
 .dropPreview time,
 .dragProxy time {
   color: var(--muted);
-  font-size: 0.6em;
+  font-size: 0.65em;
 }
 
 .selectionBox {
@@ -388,6 +653,8 @@
 }
 
 .blockSelect {
+  position: absolute;
+  inset: 0;
   display: grid;
   width: 100%;
   height: 100%;
@@ -401,8 +668,12 @@
   color: inherit;
   font: inherit;
   text-align: left;
-  cursor: grab;
+  cursor: pointer;
   touch-action: none;
+}
+.dragOrigin .blockSelect,
+.lodgingOrigin > button:not(.dateHandle) {
+  cursor: grabbing;
 }
 
 .blockSelect:focus-visible,
@@ -446,7 +717,7 @@
 
 .block time {
   color: var(--muted);
-  font-size: 0.6em;
+  font-size: 0.65em;
 }
 
 .provisional {
@@ -528,7 +799,7 @@
   background: var(--raised);
   box-shadow: var(--shadow-panel);
   color: var(--ink);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 500;
   line-height: 1.35;
   opacity: 0;
@@ -553,10 +824,8 @@
   position: fixed;
   z-index: 1000;
   display: grid;
-  width: max-content;
-  grid-auto-columns: 2.25em;
-  grid-auto-flow: column;
-  gap: 0.25em;
+  width: min(17em, calc(100vw - 0.5em));
+  gap: 0.125em;
   padding: 0.25em;
   border: var(--line) solid var(--border-strong);
   border-radius: var(--radius-s);
@@ -564,12 +833,17 @@
   box-shadow: var(--shadow-panel);
 }
 
-.actionMenu button {
+.actionDirections {
   display: grid;
-  width: 2.25em;
-  height: 2.25em;
-  place-items: center;
-  padding: 0;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.125em;
+  padding-bottom: 0.25em;
+  border-bottom: var(--line) solid var(--border);
+  margin-bottom: 0.125em;
+}
+
+.actionMenu button {
+  min-height: 2.25em;
   border: 0;
   border-radius: var(--radius-s);
   background: transparent;
@@ -582,29 +856,66 @@
   background: var(--hover-surface);
 }
 
+.directionAction {
+  display: grid;
+  padding: 0;
+  place-items: center;
+}
+
+.menuAction {
+  display: grid;
+  grid-template-columns: 1.25em minmax(0, 1fr);
+  align-items: center;
+  gap: 0.625em;
+  padding: 0.375em 0.625em;
+  text-align: left;
+}
+
 .actionMenu button svg {
   width: 1em;
   height: 1em;
 }
 
+.actionMenu .dangerAction {
+  color: var(--danger);
+}
+
+.actionMenu .dangerAction:hover,
+.actionMenu .dangerAction:focus-visible {
+  background: var(--danger-soft);
+}
+
+.creationPopover {
+  position: fixed;
+  z-index: 1200;
+  width: min(24em, calc(100vw - 0.5em));
+  max-height: calc(100dvh - 0.5em);
+  overflow: visible;
+}
+
+.creationPopover :global(.place-search) {
+  margin: 0;
+}
+
 .routeGap {
   position: absolute;
   z-index: 1;
-  left: 0.75em;
   display: grid;
   min-height: 1em;
-  grid-template-columns: 1em minmax(0, 1fr);
+  grid-template-columns: 0.5em minmax(0, 1fr);
   align-items: center;
-  gap: 0.35em;
+  gap: 0.2em;
   pointer-events: none;
+  container: route-gap / inline-size;
 }
 
 .routeGap i {
   position: relative;
-  width: 0.15em;
+  width: var(--route-stroke, calc(2 * var(--line)));
   height: 100%;
-  justify-self: center;
-  background: var(--border-strong);
+  justify-self: start;
+  margin-left: 0.2em;
+  background: var(--route-line, var(--border-strong));
 }
 
 .routeGap i::after {
@@ -612,37 +923,70 @@
   bottom: 0;
   left: 50%;
   width: 0.7em;
-  height: 0.15em;
-  background: var(--border-strong);
+  height: var(--route-stroke, calc(2 * var(--line)));
+  background: var(--route-line, var(--border-strong));
   content: "";
   transform: translateX(-50%);
 }
 
-.routeGap span {
+.routeInfo {
   display: flex;
+  width: max-content;
+  max-width: 100%;
+  justify-self: start;
+  min-width: 0;
   align-items: center;
   gap: 0.3em;
+  overflow: hidden;
   padding: 0.15em 0.35em;
   border-radius: var(--radius-s);
   background: var(--surface);
   color: var(--muted);
-  font-size: 0.6em;
+  font-size: 0.65em;
   white-space: nowrap;
 }
 
-.routeGap span svg {
+.routeIcon {
+  flex: none;
   width: 1em;
   height: 1em;
 }
 
-.routeConflict span {
+.routeMode,
+.routeDuration {
+  flex: none;
+}
+
+@container route-gap (max-width: 10rem) {
+  .routeDuration {
+    display: none;
+  }
+}
+
+@container route-gap (max-width: 6rem) {
+  .routeMode {
+    display: none;
+  }
+}
+
+@container route-gap (max-width: 3rem) {
+  .routeInfo {
+    display: none;
+  }
+}
+
+.routeConflict {
+  --route-line: var(--danger);
+}
+
+.routeConflict .routeInfo {
   color: var(--danger);
   font-weight: 700;
 }
 
 .overflow {
   position: absolute;
-  top: 96em;
+  top: var(--calendar-track-height);
   display: grid;
   width: 100%;
   gap: 0.25em;
@@ -674,11 +1018,5 @@
   background: var(--raised);
   box-shadow: var(--shadow-panel);
   color: var(--danger);
-  font-size: 0.6875em;
-}
-
-@media (max-width: 48rem) {
-  .root {
-    display: none;
-  }
+  font-size: 0.75em;
 }

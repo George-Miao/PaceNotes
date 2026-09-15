@@ -1,35 +1,24 @@
-import {
-  DragDropContext,
-  Draggable,
-  type DraggingStyle,
-  Droppable,
-  type DropResult,
-} from "@hello-pangea/dnd";
+import { DragDropContext, Draggable, Droppable, type DropResult } from "@hello-pangea/dnd";
 import { Icon } from "@iconify/react";
 import chevronDownIcon from "@iconify-icons/lucide/chevron-down";
 import chevronUpIcon from "@iconify-icons/lucide/chevron-up";
 import routeIcon from "@iconify-icons/lucide/route";
 import trashIcon from "@iconify-icons/lucide/trash-2";
-import {
-  type CSSProperties,
-  Fragment,
-  Profiler,
-  type ProfilerOnRenderCallback,
-  type ReactNode,
-} from "react";
+import { type CSSProperties, Profiler, type ProfilerOnRenderCallback, type ReactNode } from "react";
 import type { GooglePlaceView } from "~/features/google/google";
 import { itemTitle } from "~/features/google/item-title";
 import { googleMapsRouteUrl } from "~/features/google/route-export";
-import type { RouteLeg } from "~/features/google/route-legs";
+import type { RouteLeg } from "~/features/routing/route-legs";
 import { routeContinuations } from "~/features/trip/day-plan";
 import {
   createTripText,
   travelModeLabel,
-  useTripLanguage,
   useTripText,
+  useUiLanguage,
 } from "~/features/trip/language";
 import {
   type DistanceUnit,
+  lodgingLeaveTime,
   type TravelMode,
   type TripItem,
   type TripLanguage,
@@ -48,11 +37,14 @@ export type ItineraryDrop = {
 export function ItineraryDragArea({
   children,
   onDrop,
+  onDragStateChange,
 }: {
   children: ReactNode;
   onDrop: (drop: ItineraryDrop) => void;
+  onDragStateChange: (dragging: boolean) => void;
 }) {
   const handleDragEnd = (result: DropResult) => {
+    onDragStateChange(false);
     if (!result.destination) return;
     if (
       result.source.droppableId === result.destination.droppableId &&
@@ -67,7 +59,11 @@ export function ItineraryDragArea({
       destinationIndex: result.destination.index,
     });
   };
-  const content = <DragDropContext onDragEnd={handleDragEnd}>{children}</DragDropContext>;
+  const content = (
+    <DragDropContext onBeforeCapture={() => onDragStateChange(true)} onDragEnd={handleDragEnd}>
+      {children}
+    </DragDropContext>
+  );
   const profiler = (
     globalThis as typeof globalThis & {
       __pacenotesTestItineraryProfiler?: {
@@ -87,6 +83,7 @@ export function ItineraryList({
   items,
   droppableId,
   boundary,
+  boundaryDate,
   endpointMode = null,
   order,
   places,
@@ -105,6 +102,7 @@ export function ItineraryList({
   droppableId: string;
   order?: readonly string[];
   boundary?: "start" | "end";
+  boundaryDate?: string;
   endpointMode?: "transport" | "loose" | null;
   places: ReadonlyMap<string, GooglePlaceView>;
   legs: RouteLeg[];
@@ -118,7 +116,7 @@ export function ItineraryList({
   renderAfter?: (item: TripItem) => ReactNode;
   empty?: ReactNode;
 }) {
-  const language = useTripLanguage();
+  const language = useUiLanguage();
   const text = useTripText();
   const endpoint =
     boundary && endpointMode ? (
@@ -166,104 +164,93 @@ export function ItineraryList({
                     disableInteractiveElementBlocking
                   >
                     {(drag, state) => (
-                      <Fragment>
-                        <article
-                          ref={drag.innerRef}
-                          {...drag.draggableProps}
-                          {...(!boundary ? drag.dragHandleProps : {})}
-                          style={{
-                            ...drag.draggableProps.style,
-                            ...(state.isDropAnimating
-                              ? { transitionDuration: "0.01s" }
-                              : undefined),
-                          }}
-                          className={`itinerary-entry${boundary ? " lodging-boundary" : ""}${selectedId === item.id ? " is-selected" : ""}${state.isDragging ? " is-dragging" : ""}`}
-                        >
-                          <span className="entry-type-icon" aria-hidden="true">
-                            <Icon icon={iconForItem(item)} />
-                          </span>
-                          {boundary ? (
-                            <time className="entry-boundary">
-                              {boundary === "start" ? text("start") : text("end")}
-                            </time>
-                          ) : null}
-                          <div className="entry-copy">
-                            <button
-                              type="button"
-                              className="entry-select"
-                              onClick={() => onSelect(item.id)}
-                            >
-                              {title}
-                            </button>
-                            {item.details ? <small>{firstLine(item.details)}</small> : null}
-                            {item.transport ? (
-                              <small>{transportDescription(item, places, language)}</small>
-                            ) : null}
-                            {warnings.get(item.id)?.length ? (
-                              <small className="schedule-warning">
-                                {warnings.get(item.id)?.join(" ")}
-                              </small>
-                            ) : null}
-                          </div>
-                          {item.reservation?.confirmation ? (
-                            <span className="status-pill">
-                              <i aria-hidden="true" />
-                              {text("confirmed")}
-                            </span>
-                          ) : null}
-                          {!boundary ? <time>{item.startTime ?? ""}</time> : null}
-                          <div className="entry-actions">
-                            {!boundary ? (
-                              <>
-                                <button
-                                  type="button"
-                                  className="icon-button"
-                                  aria-label={text("moveUp", { title })}
-                                  disabled={index === 0}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    onMove?.(item.id, -1);
-                                  }}
-                                >
-                                  <Icon icon={chevronUpIcon} />
-                                </button>
-                                <button
-                                  type="button"
-                                  className="icon-button"
-                                  aria-label={text("moveDown", { title })}
-                                  disabled={index === items.length - 1}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    onMove?.(item.id, 1);
-                                  }}
-                                >
-                                  <Icon icon={chevronDownIcon} />
-                                </button>
-                              </>
-                            ) : null}
-                            <button
-                              type="button"
-                              className="icon-button danger-icon"
-                              aria-label={text("deleteItem", { title })}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                onDelete(item);
-                              }}
-                            >
-                              <Icon icon={trashIcon} />
-                            </button>
-                          </div>
-                        </article>
-                        {state.isDragging ? (
-                          <div
-                            className="entry-drag-space"
-                            style={{
-                              height: (drag.draggableProps.style as DraggingStyle).height,
-                            }}
-                            aria-hidden="true"
-                          />
+                      <article
+                        ref={drag.innerRef}
+                        {...drag.draggableProps}
+                        {...(!boundary ? drag.dragHandleProps : {})}
+                        style={{
+                          ...drag.draggableProps.style,
+                          ...(state.isDropAnimating ? { transitionDuration: "0.01s" } : undefined),
+                        }}
+                        className={`itinerary-entry${boundary ? " lodging-boundary" : ""}${selectedId === item.id ? " is-selected" : ""}${state.isDragging ? " is-dragging" : ""}`}
+                      >
+                        <span className="entry-type-icon" aria-hidden="true">
+                          <Icon icon={iconForItem(item)} />
+                        </span>
+                        {boundary ? (
+                          <time className="entry-boundary">
+                            {boundary === "start" && item.lodging && boundaryDate
+                              ? `${text("leaveAt")} ${lodgingLeaveTime(item.lodging, boundaryDate)}`
+                              : text(boundary === "start" ? "start" : "end")}
+                          </time>
                         ) : null}
-                      </Fragment>
+                        <div className="entry-copy">
+                          <button
+                            type="button"
+                            className="entry-select"
+                            onClick={() => onSelect(item.id)}
+                          >
+                            {title}
+                          </button>
+                          {item.details ? <small>{firstLine(item.details)}</small> : null}
+                          {item.transport ? (
+                            <small>{transportDescription(item, places, language)}</small>
+                          ) : null}
+                          {warnings.get(item.id)?.length ? (
+                            <small className="schedule-warning">
+                              {warnings.get(item.id)?.join(" ")}
+                            </small>
+                          ) : null}
+                        </div>
+                        {item.reservation?.confirmation ? (
+                          <span className="status-pill">
+                            <i aria-hidden="true" />
+                            {text("confirmed")}
+                          </span>
+                        ) : null}
+                        {!boundary ? <time>{item.startTime ?? ""}</time> : null}
+                        <div className="entry-actions">
+                          {!boundary ? (
+                            <>
+                              <button
+                                type="button"
+                                className="icon-button"
+                                aria-label={text("moveUp", { title })}
+                                disabled={index === 0}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  onMove?.(item.id, -1);
+                                }}
+                              >
+                                <Icon icon={chevronUpIcon} />
+                              </button>
+                              <button
+                                type="button"
+                                className="icon-button"
+                                aria-label={text("moveDown", { title })}
+                                disabled={index === items.length - 1}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  onMove?.(item.id, 1);
+                                }}
+                              >
+                                <Icon icon={chevronDownIcon} />
+                              </button>
+                            </>
+                          ) : null}
+                          <button
+                            type="button"
+                            className="icon-button danger-icon"
+                            aria-label={text("deleteItem", { title })}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onDelete(item);
+                            }}
+                          >
+                            <Icon icon={trashIcon} />
+                          </button>
+                        </div>
+                      </article>
                     )}
                   </Draggable>
                   {renderAfter?.(item)}
@@ -289,7 +276,7 @@ function TransportLeg({
   distanceUnit: DistanceUnit;
   onTravelMode: (mode: TravelMode) => void;
 }) {
-  const language = useTripLanguage();
+  const language = useUiLanguage();
   const text = useTripText();
   const routeUrl = googleMapsRouteUrl([leg.from, leg.to], leg.mode);
   return (

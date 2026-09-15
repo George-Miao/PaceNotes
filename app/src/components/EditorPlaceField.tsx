@@ -15,6 +15,7 @@ export function EditorPlaceField({
   places,
   optional = false,
   compact = false,
+  includedPrimaryTypes,
   onChange,
 }: {
   label: string;
@@ -22,6 +23,7 @@ export function EditorPlaceField({
   places: ReadonlyMap<string, GooglePlaceView>;
   optional?: boolean;
   compact?: boolean;
+  includedPrimaryTypes?: readonly string[] | undefined;
   onChange: (value: PlaceReference | null) => void;
 }) {
   const text = useTripText();
@@ -49,6 +51,7 @@ export function EditorPlaceField({
           <div className={styles.compactPlacePanel}>
             <GooglePlacePicker
               label={label}
+              includedPrimaryTypes={includedPrimaryTypes}
               onSelect={(place) => {
                 onChange(place.reference);
                 finishCompactChange();
@@ -91,6 +94,7 @@ export function EditorPlaceField({
       ) : (
         <GooglePlacePicker
           label={label}
+          includedPrimaryTypes={includedPrimaryTypes}
           onSelect={(place) => {
             onChange(place.reference);
             setChanging(false);

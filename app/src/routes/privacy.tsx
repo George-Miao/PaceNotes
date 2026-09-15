@@ -11,9 +11,9 @@ function Privacy() {
     >
       <h2>Trip data</h2>
       <p>
-        The server stores trip content, live collaboration data, Google place identity snapshots,
-        and route settings. Editors can permanently delete a trip. A browser that already received
-        data can keep its own copy.
+        The server stores trip content, live collaboration data, Google Place IDs, and route
+        settings. Editors can permanently delete a trip. A browser that already received data can
+        keep its own copy.
       </p>
       <h2>Browser data</h2>
       <p>
@@ -26,10 +26,16 @@ function Privacy() {
         Google. The operator must publish its own Google privacy notices and configure restricted
         keys.
       </p>
+      <h2>Optional MOTIS routing</h2>
+      <p>
+        When the operator enables MOTIS, the PaceNotes server can send transient coordinates to
+        MOTIS for a public transport route with both endpoints in Japan. PaceNotes does not store
+        these coordinates in Yjs or PostgreSQL. Google handles the route when MOTIS cannot.
+      </p>
       <h2>Logs</h2>
       <p>
-        Production logs do not contain trip URLs, Google query text, notes, or provider request
-        parameters.
+        Production logs do not contain full trip URLs, Google query text, notes, coordinates, or
+        provider request parameters.
       </p>
     </StaticPage>
   );

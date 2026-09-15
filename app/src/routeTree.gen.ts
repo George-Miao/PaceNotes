@@ -14,6 +14,7 @@ import { Route as LicenseRouteImport } from './routes/license'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as HealthLiveRouteImport } from './routes/health/live'
+import { Route as HealthProvidersRouteImport } from './routes/health/providers'
 import { Route as HealthReadyRouteImport } from './routes/health/ready'
 import { Route as TripsTripIdRouteImport } from './routes/trips.$tripId'
 
@@ -42,6 +43,11 @@ const HealthLiveRoute = HealthLiveRouteImport.update({
   path: '/health/live',
   getParentRoute: () => rootRouteImport,
 } as any)
+const HealthProvidersRoute = HealthProvidersRouteImport.update({
+  id: '/health/providers',
+  path: '/health/providers',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const HealthReadyRoute = HealthReadyRouteImport.update({
   id: '/health/ready',
   path: '/health/ready',
@@ -59,6 +65,7 @@ export interface FileRoutesByFullPath {
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
   '/health/live': typeof HealthLiveRoute
+  '/health/providers': typeof HealthProvidersRoute
   '/health/ready': typeof HealthReadyRoute
   '/trips/$tripId': typeof TripsTripIdRoute
 }
@@ -68,6 +75,7 @@ export interface FileRoutesByTo {
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
   '/health/live': typeof HealthLiveRoute
+  '/health/providers': typeof HealthProvidersRoute
   '/health/ready': typeof HealthReadyRoute
   '/trips/$tripId': typeof TripsTripIdRoute
 }
@@ -78,6 +86,7 @@ export interface FileRoutesById {
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
   '/health/live': typeof HealthLiveRoute
+  '/health/providers': typeof HealthProvidersRoute
   '/health/ready': typeof HealthReadyRoute
   '/trips/$tripId': typeof TripsTripIdRoute
 }
@@ -89,6 +98,7 @@ export interface FileRouteTypes {
     | '/privacy'
     | '/terms'
     | '/health/live'
+    | '/health/providers'
     | '/health/ready'
     | '/trips/$tripId'
   fileRoutesByTo: FileRoutesByTo
@@ -98,6 +108,7 @@ export interface FileRouteTypes {
     | '/privacy'
     | '/terms'
     | '/health/live'
+    | '/health/providers'
     | '/health/ready'
     | '/trips/$tripId'
   id:
@@ -107,6 +118,7 @@ export interface FileRouteTypes {
     | '/privacy'
     | '/terms'
     | '/health/live'
+    | '/health/providers'
     | '/health/ready'
     | '/trips/$tripId'
   fileRoutesById: FileRoutesById
@@ -117,6 +129,7 @@ export interface RootRouteChildren {
   PrivacyRoute: typeof PrivacyRoute
   TermsRoute: typeof TermsRoute
   HealthLiveRoute: typeof HealthLiveRoute
+  HealthProvidersRoute: typeof HealthProvidersRoute
   HealthReadyRoute: typeof HealthReadyRoute
   TripsTripIdRoute: typeof TripsTripIdRoute
 }
@@ -158,6 +171,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof HealthLiveRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/health/providers': {
+      id: '/health/providers'
+      path: '/health/providers'
+      fullPath: '/health/providers'
+      preLoaderRoute: typeof HealthProvidersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/health/ready': {
       id: '/health/ready'
       path: '/health/ready'
@@ -181,6 +201,7 @@ const rootRouteChildren: RootRouteChildren = {
   PrivacyRoute: PrivacyRoute,
   TermsRoute: TermsRoute,
   HealthLiveRoute: HealthLiveRoute,
+  HealthProvidersRoute: HealthProvidersRoute,
   HealthReadyRoute: HealthReadyRoute,
   TripsTripIdRoute: TripsTripIdRoute,
 }

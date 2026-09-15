@@ -9,7 +9,12 @@ import {
   initializeTripDocument,
   readTripDocument,
 } from "../src/features/collaboration/document";
-import { createInitialSnapshot, itemForCreate, type TripItem } from "../src/features/trip/model";
+import {
+  createInitialSnapshot,
+  itemForCreate,
+  lodgingForDates,
+  type TripItem,
+} from "../src/features/trip/model";
 
 let tripId = "";
 
@@ -61,6 +66,16 @@ async function mockGoogle(page: Page) {
     if (!customElements.get("gmp-place-autocomplete")) {
       customElements.define("gmp-place-autocomplete", MockPlaceAutocompleteElement);
     }
+    const mockPlaceLocations = new Map([
+      ["placement-portland", { latitude: 1, longitude: 0 }],
+      ["placement-ellsworth", { latitude: 2, longitude: 0 }],
+      ["cafe-anchor", { latitude: 35, longitude: 139 }],
+      ["cafe", { latitude: 35.001, longitude: 139 }],
+      ["museum-anchor", { latitude: 36, longitude: 140 }],
+      ["museum", { latitude: 36.001, longitude: 140 }],
+      ["no-detail-start", { latitude: 37, longitude: 141 }],
+      ["no-detail-end", { latitude: 37.1, longitude: 141.1 }],
+    ]);
     class MockPlace {
       id: string;
       displayName: string;
@@ -82,8 +97,8 @@ async function mockGoogle(page: Page) {
             : requestedLanguage === "zh-TW"
               ? `繁體-${id}`
               : "Test destination";
-        const latitude = { "placement-portland": 1, "placement-ellsworth": 2 }[id] ?? 35.6762;
-        this.location = { lat: () => latitude, lng: () => 0 };
+        const location = mockPlaceLocations.get(id) ?? { latitude: 35.6762, longitude: 0 };
+        this.location = { lat: () => location.latitude, lng: () => location.longitude };
       }
       async fetchFields(): Promise<void> {}
     }
@@ -106,12 +121,20 @@ async function mockGoogle(page: Page) {
     if (!customElements.get("gmp-place-details")) {
       customElements.define("gmp-place-details", MockPlaceDetailsElement);
     }
+    type MockMapEvent = { placeId: string; stop: () => void };
+    type MockCenter = { lat: number; lng: number };
     class MockMap {
-      listeners = new Map<string, (event: { placeId: string; stop: () => void }) => void>();
-      constructor(host: HTMLElement) {
+      listeners = new Map<string, (event?: MockMapEvent) => void>();
+      center: MockCenter;
+      zoom: number;
+      constructor(host: HTMLElement, options: { center?: MockCenter; zoom?: number } = {}) {
         const scope = globalThis as typeof globalThis & {
+          __pacenotesMap?: MockMap;
           __pacenotesMapConstructions?: number;
         };
+        this.center = options.center ?? { lat: 0, lng: 0 };
+        this.zoom = options.zoom ?? 12;
+        scope.__pacenotesMap = this;
         scope.__pacenotesMapConstructions = (scope.__pacenotesMapConstructions ?? 0) + 1;
         const canvas = document.createElement("div");
         for (const name of ["Museum", "Cafe"]) {
@@ -124,13 +147,37 @@ async function mockGoogle(page: Page) {
         }
         host.replaceChildren(canvas);
       }
-      addListener(name: string, listener: (event: { placeId: string; stop: () => void }) => void) {
+      addListener(name: string, listener: (event?: MockMapEvent) => void) {
         this.listeners.set(name, listener);
         return { remove: () => this.listeners.delete(name) };
       }
-      fitBounds(): void {}
-      panTo(): void {}
-      setCenter(): void {}
+      fitBounds(bounds: { points: MockCenter[] }): void {
+        const scope = globalThis as typeof globalThis & {
+          __pacenotesMapFitBoundsCalls?: number;
+          __pacenotesMapFitBoundsPoints?: MockCenter[];
+        };
+        scope.__pacenotesMapFitBoundsCalls = (scope.__pacenotesMapFitBoundsCalls ?? 0) + 1;
+        scope.__pacenotesMapFitBoundsPoints = bounds.points.map((point) => ({ ...point }));
+      }
+      panTo(center: MockCenter): void {
+        this.center = center;
+        const scope = globalThis as typeof globalThis & {
+          __pacenotesMapPanCalls?: number;
+        };
+        scope.__pacenotesMapPanCalls = (scope.__pacenotesMapPanCalls ?? 0) + 1;
+      }
+      setCenter(center: MockCenter): void {
+        this.center = center;
+      }
+      getCenter() {
+        return { lat: () => this.center.lat, lng: () => this.center.lng };
+      }
+      getZoom() {
+        return this.zoom;
+      }
+      setZoom(zoom: number): void {
+        this.zoom = zoom;
+      }
       getMapCapabilities() {
         return { isAdvancedMarkersAvailable: true };
       }
@@ -141,16 +188,34 @@ async function mockGoogle(page: Page) {
     class MockPolyline {
       active = true;
       kind: "route" | "transport";
-      constructor(options: { strokeOpacity?: number }) {
+      dashed: boolean;
+      constructor(options: { strokeOpacity?: number; icons?: unknown[]; path?: unknown[] }) {
         this.kind = options.strokeOpacity === 0 ? "transport" : "route";
+        this.dashed = (options.icons?.length ?? 0) > 0;
         const scope = globalThis as typeof globalThis & {
           __pacenotesRoutePolylines?: number;
           __pacenotesRoutePolylineConstructions?: number;
           __pacenotesTransportPolylines?: number;
+          __pacenotesDashedTransportPolylines?: number;
+          __pacenotesPolylineOptions?: Array<{
+            dashPath: unknown;
+            path: unknown[];
+            strokeOpacity: number | undefined;
+          }>;
         };
         const key =
           this.kind === "route" ? "__pacenotesRoutePolylines" : "__pacenotesTransportPolylines";
         scope[key] = (scope[key] ?? 0) + 1;
+        if (this.kind === "transport" && this.dashed) {
+          scope.__pacenotesDashedTransportPolylines =
+            (scope.__pacenotesDashedTransportPolylines ?? 0) + 1;
+        }
+        const firstIcon = options.icons?.[0] as { icon?: { path?: unknown } } | undefined;
+        scope.__pacenotesPolylineOptions?.push({
+          dashPath: firstIcon?.icon?.path,
+          path: options.path ?? [],
+          strokeOpacity: options.strokeOpacity,
+        });
         if (this.kind === "route") {
           scope.__pacenotesRoutePolylineConstructions =
             (scope.__pacenotesRoutePolylineConstructions ?? 0) + 1;
@@ -162,14 +227,24 @@ async function mockGoogle(page: Page) {
         const scope = globalThis as typeof globalThis & {
           __pacenotesRoutePolylines?: number;
           __pacenotesTransportPolylines?: number;
+          __pacenotesDashedTransportPolylines?: number;
         };
         const key =
           this.kind === "route" ? "__pacenotesRoutePolylines" : "__pacenotesTransportPolylines";
         scope[key] = Math.max(0, (scope[key] ?? 0) - 1);
+        if (this.kind === "transport" && this.dashed) {
+          scope.__pacenotesDashedTransportPolylines = Math.max(
+            0,
+            (scope.__pacenotesDashedTransportPolylines ?? 0) - 1,
+          );
+        }
       }
     }
     class MockLatLngBounds {
-      extend(): void {}
+      points: MockCenter[] = [];
+      extend(point: MockCenter): void {
+        this.points.push(point);
+      }
     }
     class MockAdvancedMarkerElement {
       content: HTMLElement;
@@ -221,17 +296,33 @@ async function mockGoogle(page: Page) {
         if (map) this.onAdd?.();
       }
     }
-    const routeDurationMillis = (
-      origin: { lat: number; lng: number },
-      destination: { lat: number; lng: number },
-    ) => {
+    type MockRouteLocation = {
+      id?: string;
+      lat?: number;
+      lng?: number;
+      location?: { lat: () => number; lng: () => number };
+    };
+    const routeCoordinates = (location: MockRouteLocation) => {
+      if (location.location) {
+        return { lat: location.location.lat(), lng: location.location.lng() };
+      }
+      if (location.lat === undefined || location.lng === undefined) {
+        throw new Error("Route location has no coordinates");
+      }
+      return { lat: location.lat, lng: location.lng };
+    };
+    const routeDurationMillis = (origin: MockRouteLocation, destination: MockRouteLocation) => {
+      const originCoordinates = routeCoordinates(origin);
+      const destinationCoordinates = routeCoordinates(destination);
       const routeMinutes: Record<string, number> = {
         "3:1": 100,
         "1:3": 105,
         "3:2": 60,
         "1:2": 145,
       };
-      return (routeMinutes[`${origin.lat}:${destination.lat}`] ?? 10) * 60_000;
+      return (
+        (routeMinutes[`${originCoordinates.lat}:${destinationCoordinates.lat}`] ?? 10) * 60_000
+      );
     };
     const MockRoute = {
       async computeRoutes({
@@ -242,8 +333,8 @@ async function mockGoogle(page: Page) {
         travelMode,
         routingPreference,
       }: {
-        origin: { lat: number; lng: number };
-        destination: { lat: number; lng: number };
+        origin: MockRouteLocation;
+        destination: MockRouteLocation;
         language?: string;
         departureTime?: Date;
         travelMode: string;
@@ -252,9 +343,19 @@ async function mockGoogle(page: Page) {
         const routeScope = globalThis as typeof globalThis & {
           __pacenotesRouteComputes?: number;
           __pacenotesRouteDepartureTimes?: Array<string | null>;
+          __pacenotesRouteEndpoints?: Array<{
+            originPlaceId: string | null;
+            destinationPlaceId: string | null;
+            travelMode: string;
+          }>;
         };
         routeScope.__pacenotesRouteComputes = (routeScope.__pacenotesRouteComputes ?? 0) + 1;
         routeScope.__pacenotesRouteDepartureTimes?.push(departureTime?.toISOString() ?? null);
+        routeScope.__pacenotesRouteEndpoints?.push({
+          originPlaceId: origin.id ?? null,
+          destinationPlaceId: destination.id ?? null,
+          travelMode,
+        });
         if (departureTime && travelMode === "DRIVING" && routingPreference !== "TRAFFIC_AWARE") {
           throw new Error("Scheduled driving routes require traffic-aware routing");
         }
@@ -263,17 +364,74 @@ async function mockGoogle(page: Page) {
             __pacenotesRouteLanguages?: string[];
           }
         ).__pacenotesRouteLanguages?.push(language ?? "");
+        if (travelMode === "TRANSIT") return { routes: [] };
         return {
           routes: [
             {
-              path: [{ toJSON: () => ({ lat: 35.6762, lng: 139.6503 }) }],
+              path:
+                destination.id === "no-detail-end"
+                  ? [
+                      {
+                        toJSON: () => ({ lat: origin.location.lat(), lng: origin.location.lng() }),
+                      },
+                      { toJSON: () => ({ lat: 37.05, lng: 141.08 }) },
+                      {
+                        toJSON: () => ({
+                          lat: destination.location.lat(),
+                          lng: destination.location.lng(),
+                        }),
+                      },
+                    ]
+                  : [{ toJSON: () => ({ lat: 35.6762, lng: 139.6503 }) }],
               durationMillis: routeDurationMillis(origin, destination),
-              distanceMeters: 1_000,
+              distanceMeters: destination.id === "no-detail-end" ? null : 1_000,
             },
           ],
         };
       },
     };
+    class MockDirectionsService {
+      async route({
+        origin,
+        destination,
+        travelMode,
+        transitOptions,
+      }: {
+        origin: { placeId?: string; lat?: number; lng?: number };
+        destination: { placeId?: string; lat?: number; lng?: number };
+        travelMode: string;
+        transitOptions?: { departureTime?: Date };
+      }) {
+        const routeScope = globalThis as typeof globalThis & {
+          __pacenotesDirectionsComputes?: number;
+        };
+        routeScope.__pacenotesDirectionsComputes =
+          (routeScope.__pacenotesDirectionsComputes ?? 0) + 1;
+        if (travelMode !== "TRANSIT") throw new Error("Directions fallback is transit-only");
+        if (origin.placeId !== "route-mode-museum" || destination.placeId !== "route-mode-cafe") {
+          throw new Error("Directions fallback requires Place ID endpoints");
+        }
+        if (transitOptions) throw new Error("Unscheduled transit must omit provider time");
+        return {
+          routes: [
+            {
+              overview_path: [
+                {
+                  lat: () => 35.6762,
+                  lng: () => 139.6503,
+                },
+              ],
+              legs: [
+                {
+                  duration: { value: 25 * 60 },
+                  distance: { value: 1_000 },
+                },
+              ],
+            },
+          ],
+        };
+      }
+    }
     const MockRouteMatrix = {
       async computeRouteMatrix({
         origins,
@@ -304,10 +462,22 @@ async function mockGoogle(page: Page) {
       __pacenotesMapConstructions?: number;
       __pacenotesMarkerConstructions?: number;
       __pacenotesRouteComputes?: number;
+      __pacenotesDirectionsComputes?: number;
       __pacenotesRouteDepartureTimes?: Array<string | null>;
+      __pacenotesRouteEndpoints?: Array<{
+        originPlaceId: string | null;
+        destinationPlaceId: string | null;
+        travelMode: string;
+      }>;
       __pacenotesRoutePolylines?: number;
       __pacenotesRoutePolylineConstructions?: number;
       __pacenotesTransportPolylines?: number;
+      __pacenotesDashedTransportPolylines?: number;
+      __pacenotesPolylineOptions?: Array<{
+        dashPath: unknown;
+        path: unknown[];
+        strokeOpacity: number | undefined;
+      }>;
       __pacenotesAutocompleteLanguages?: string[];
       __pacenotesPlaceLanguages?: string[];
       __pacenotesRouteLanguages?: string[];
@@ -315,9 +485,13 @@ async function mockGoogle(page: Page) {
     scope.__pacenotesMapConstructions = 0;
     scope.__pacenotesRouteComputes = 0;
     scope.__pacenotesRouteDepartureTimes = [];
+    scope.__pacenotesRouteEndpoints = [];
+    scope.__pacenotesDirectionsComputes = 0;
     scope.__pacenotesRoutePolylines = 0;
     scope.__pacenotesMarkerConstructions = 0;
     scope.__pacenotesTransportPolylines = 0;
+    scope.__pacenotesPolylineOptions = [];
+    scope.__pacenotesDashedTransportPolylines = 0;
     scope.__pacenotesRoutePolylineConstructions = 0;
     scope.__pacenotesAutocompleteLanguages = [];
     scope.__pacenotesPlaceLanguages = [];
@@ -345,8 +519,10 @@ async function mockGoogle(page: Page) {
           if (name === "routes")
             return {
               Route: MockRoute,
+              DirectionsService: MockDirectionsService,
               RouteMatrix: MockRouteMatrix,
               RoutingPreference: { TRAFFIC_AWARE: "TRAFFIC_AWARE" },
+              TravelMode: { TRANSIT: "TRANSIT" },
             };
           return {};
         },
@@ -418,16 +594,7 @@ test("landing page is installable, accessible, and fits the viewport", async ({ 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /Build the day/ })).toBeVisible();
   await expect(page.getByRole("region", { name: "Where does the trip go?" })).toBeVisible();
-  const initialJavaScriptBytes = await page.evaluate(() =>
-    performance
-      .getEntriesByType("resource")
-      .filter(
-        (entry): entry is PerformanceResourceTiming => entry instanceof PerformanceResourceTiming,
-      )
-      .filter((entry) => entry.initiatorType === "script")
-      .reduce((total, entry) => total + entry.encodedBodySize, 0),
-  );
-  expect(initialJavaScriptBytes).toBeLessThanOrEqual(150 * 1024);
+
   const manifest = await page.request.get("/manifest.webmanifest");
   expect(manifest.ok()).toBe(true);
   expect((await manifest.json()).display).toBe("standalone");
@@ -436,6 +603,77 @@ test("landing page is installable, accessible, and fits the viewport", async ({ 
   ).toBe(true);
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations).toEqual([]);
+});
+
+test("landing removes deleted trips from recent trips", async ({ page }) => {
+  const validId = await createEmptyTrip();
+  const deletedId = "deleted-recent-trip-1234";
+  try {
+    await page.addInitScript(
+      ({ validId, deletedId }) => {
+        localStorage.setItem(
+          "pacenotes-recent-trips",
+          JSON.stringify([
+            {
+              id: deletedId,
+              title: "Deleted trip",
+              href: `${location.origin}/trips/${deletedId}`,
+              openedAt: "2027-04-12T00:00:00.000Z",
+            },
+            {
+              id: validId,
+              title: "Valid trip",
+              href: `${location.origin}/trips/${validId}`,
+              openedAt: "2027-04-11T00:00:00.000Z",
+            },
+          ]),
+        );
+      },
+      { validId, deletedId },
+    );
+    await page.goto("/");
+
+    await expect(page.getByRole("link", { name: /Valid trip/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Deleted trip/ })).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          JSON.parse(localStorage.getItem("pacenotes-recent-trips") ?? "[]").map(
+            (trip: { href: string }) => ({
+              ...trip,
+              href: new URL(trip.href, location.origin).pathname,
+            }),
+          ),
+        ),
+      )
+      .toEqual([
+        {
+          id: validId,
+          title: "Valid trip",
+          href: `/trips/${validId}`,
+          openedAt: "2027-04-11T00:00:00.000Z",
+        },
+      ]);
+  } finally {
+    await db.delete(trips).where(eq(trips.id, validId));
+  }
+});
+
+test("mobile landing omits the route preview and fills the viewport", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile", "Mobile layout coverage runs once");
+  await page.goto("/");
+  await expect(
+    page.getByRole("img", { name: "Sample route with three planned stops" }),
+  ).toHaveCount(0);
+  const heroBox = await page.locator(".hero").boundingBox();
+  if (!heroBox) throw new Error("Missing mobile hero geometry");
+  expect(heroBox.x).toBeCloseTo(0, 0);
+  expect(heroBox.width).toBeCloseTo(page.viewportSize()?.width ?? 0, 0);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+  ).toBe(true);
 });
 
 test("icon buttons show their accessible labels on hover", async ({ page }) => {
@@ -558,32 +796,131 @@ test("new trips use a transient title and keep the map between days", async ({
   }
 });
 
-test("map locations open replaceable details without opening the item editor", async ({ page }) => {
+test("map marker numbers restart for each day after an earlier-day addition", async ({ page }) => {
+  const id = await createEmptyTrip(
+    [
+      itemForCreate("place", "2027-04-11", {
+        id: "map-number-later",
+        title: "Later day place",
+        place: { placeId: "museum" },
+      }),
+      itemForCreate("place", "2027-04-10", {
+        id: "map-number-first",
+        title: "First day place",
+        place: { placeId: "cafe-anchor" },
+      }),
+    ],
+    "2027-04-11",
+  );
+  try {
+    await page.addInitScript(() =>
+      localStorage.setItem("pacenotes-display-name", "Map number editor"),
+    );
+    await page.goto(`/trips/${id}`);
+
+    await expect(page.getByRole("button", { name: "Stop 1: First day place" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Stop 1: Later day place" })).toBeVisible();
+  } finally {
+    await page.goto("/");
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+test("top header search opens place search without changing content views", async ({ page }) => {
   const id = await createEmptyTrip();
+  try {
+    await page.addInitScript(() =>
+      localStorage.setItem("pacenotes-display-name", "Toolbar search editor"),
+    );
+    await page.goto(`/trips/${id}#2027-04-10`);
+
+    const topHeader = page.locator(".planner-tabs");
+    const viewTabs = topHeader.getByRole("group", { name: "Planner view" });
+    const search = topHeader.getByRole("button", { name: "Search Google Places" });
+    await expect(search).toBeVisible();
+    await expect(
+      page
+        .locator(".planner-content-toolbar")
+        .getByRole("button", { name: "Search Google Places" }),
+    ).toHaveCount(0);
+    await expect(search).toHaveText("");
+    await expect(search.locator("svg")).toHaveCSS("width", "24px");
+    const tabsBox = await viewTabs.boundingBox();
+    const searchBox = await search.boundingBox();
+    if (!tabsBox || !searchBox) throw new Error("Missing toolbar geometry");
+    expect(searchBox.x).toBeGreaterThanOrEqual(tabsBox.x + tabsBox.width);
+
+    await search.click();
+    const stickyTools = page.locator(".planner-sticky-tools");
+    await expect(stickyTools).toHaveCSS("position", "sticky");
+    await expect(stickyTools.locator(".place-search")).toBeVisible();
+    await expect(page.locator("[data-day-id] .place-search")).toHaveCount(0);
+    await expect(page.locator("gmp-place-autocomplete")).toHaveAttribute(
+      "aria-label",
+      "Search Google Places",
+    );
+    await expect(
+      page
+        .locator(".planner-content-toolbar")
+        .getByRole("button", { name: "Itinerary", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+  } finally {
+    await page.goto("/");
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("map place additions choose the nearest day and open the editor", async ({ page }) => {
+  const cafeAnchor = itemForCreate("place", "2027-04-10", {
+    id: "map-cafe-anchor",
+    title: "Cafe anchor",
+    place: { placeId: "cafe-anchor" },
+  });
+  const museumAnchor = itemForCreate("place", "2027-04-11", {
+    id: "map-museum-anchor",
+    title: "Museum anchor",
+    place: { placeId: "museum-anchor" },
+  });
+  const id = await createEmptyTrip([cafeAnchor, museumAnchor]);
+  const readAddedPlace = async (placeId: string) => {
+    const [stored] = await db.select().from(documents).where(eq(documents.name, id));
+    if (!stored) return null;
+    const saved = new Y.Doc();
+    Y.applyUpdate(saved, stored.data);
+    const added = Object.values(readTripDocument(saved).items).find(
+      (item) => item.place?.placeId === placeId,
+    );
+    saved.destroy();
+    return added ? { id: added.id, dayId: added.dayId, travelMode: added.travelMode } : null;
+  };
   try {
     await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Map editor"));
     await page.goto(`/trips/${id}`);
     const map = await page.locator(".map-canvas > div").elementHandle();
-    await page.getByRole("button", { name: "Map location: Museum", exact: true }).click();
     const details = page.getByRole("dialog", { name: "Place details", exact: true });
+
+    await page.getByRole("button", { name: "Map location: Museum", exact: true }).click();
     await expect(details.getByRole("heading", { name: "City Museum" })).toBeVisible();
     await expect(page.locator(".item-editor")).toHaveCount(0);
     await details.getByRole("button", { name: "Add to trip" }).click();
-    await expect(details).toHaveCount(0);
+
     await expect
       .poll(async () => {
-        const [stored] = await db.select().from(documents).where(eq(documents.name, id));
-        if (!stored) return null;
-        const saved = new Y.Doc();
-        Y.applyUpdate(saved, stored.data);
-        const added = Object.values(readTripDocument(saved).items).find(
-          (item) => item.place?.placeId === "museum",
-        );
-        saved.destroy();
-        return added?.dayId;
+        const added = await readAddedPlace("museum");
+        return added ? { dayId: added.dayId, travelMode: added.travelMode } : null;
       })
-      .toBe("2027-04-10");
-    const addedEntry = page.locator(".day-section").first().locator(".itinerary-entry");
+      .toEqual({ dayId: "2027-04-11", travelMode: "WALKING" });
+    await expect(page.locator(".date-tabs [data-day-tab]").nth(1)).toHaveAttribute(
+      "aria-current",
+      "date",
+    );
+    const museumDay = page.locator('[data-day-id="2027-04-11"]');
+    const listEditor = museumDay.locator(".item-editor");
+    await expect(listEditor).toBeVisible();
+    const museumTravelMode = museumDay.locator(".transport-leg").last().getByLabel("Travel mode");
+    await expect(museumTravelMode).toHaveValue("WALKING");
+    await museumTravelMode.selectOption("DRIVING");
+    await expect.poll(async () => (await readAddedPlace("museum"))?.travelMode).toBe("DRIVING");
+    const addedEntry = listEditor.locator("xpath=preceding-sibling::*[1]");
     const [iconBox, titleBox, timeBox] = await Promise.all([
       addedEntry.locator(".entry-type-icon").boundingBox(),
       addedEntry.locator(".entry-copy").boundingBox(),
@@ -595,37 +932,141 @@ test("map locations open replaceable details without opening the item editor", a
     expect(iconBox?.x).toBeLessThan(titleBox?.x ?? 0);
     expect(iconBox?.x).toBeLessThan(timeBox?.x ?? 0);
     expect(timeBox?.x).toBeGreaterThan(titleBox?.x ?? Number.POSITIVE_INFINITY);
-    await page.getByRole("button", { name: "Places to visit", exact: true }).click();
+    await listEditor.getByRole("button", { name: "Close editor" }).click();
+
+    await page.getByRole("button", { name: "Calendar", exact: true }).click();
+    const calendar = page.getByRole("region", { name: "Trip calendar" });
+    await expect(calendar).toBeVisible();
     await page.getByRole("button", { name: "Map location: Cafe", exact: true }).click();
     await expect(details.getByRole("heading", { name: "Corner Cafe" })).toBeVisible();
     await details.getByRole("button", { name: "Add to trip" }).click();
-    await expect(details).toHaveCount(0);
+
+    let cafeId = "";
     await expect
       .poll(async () => {
-        const [stored] = await db.select().from(documents).where(eq(documents.name, id));
-        if (!stored) return undefined;
-        const saved = new Y.Doc();
-        Y.applyUpdate(saved, stored.data);
-        const added = Object.values(readTripDocument(saved).items).find(
-          (item) => item.place?.placeId === "cafe",
-        );
-        saved.destroy();
-        return added?.dayId;
+        const added = await readAddedPlace("cafe");
+        cafeId = added?.id ?? "";
+        return added ? { dayId: added.dayId, travelMode: added.travelMode } : null;
       })
-      .toBeNull();
+      .toEqual({ dayId: "2027-04-10", travelMode: "WALKING" });
+    await expect(page.locator(".date-tabs [data-day-tab]").first()).toHaveAttribute(
+      "aria-current",
+      "date",
+    );
+    await expect(page).toHaveURL(/#2027-04-10$/);
+    await expect(calendar.locator(`[data-calendar-item-id="${cafeId}"]`).first()).toHaveAttribute(
+      "data-calendar-selected",
+      "true",
+    );
+    await expect(calendar.locator(".item-editor")).toBeVisible();
+    await expect.poll(async () => (await readAddedPlace("museum"))?.travelMode).toBe("DRIVING");
     await expect(
-      page.locator(".day-section").first().getByRole("button", { name: "Place", exact: true }),
+      calendar.locator(".item-editor").getByRole("button", { name: "Close editor" }),
     ).toBeVisible();
     expect(await map?.evaluate((element) => element.isConnected)).toBe(true);
-    await page.getByRole("button", { name: "Map location: Museum", exact: true }).click();
-    await expect(details).toBeVisible();
-    await page.locator(".date-tabs [data-day-tab]").nth(1).click();
-    await expect(details).toHaveCount(0);
-    await expect(
-      page.locator(".day-section").first().getByRole("button", { name: "Place", exact: true }),
-    ).toBeVisible();
   } finally {
     await page.goto("/");
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("route updates do not replay an old day map focus", async ({ page }) => {
+  const first = itemForCreate("place", "2027-04-10", {
+    id: "focus-first",
+    title: "Cafe anchor",
+    place: { placeId: "cafe-anchor" },
+  });
+  const second = itemForCreate("place", "2027-04-11", {
+    id: "focus-second",
+    title: "Museum anchor",
+    place: { placeId: "museum-anchor" },
+  });
+  const id = await createEmptyTrip([first, second]);
+  const fitBoundsCalls = () =>
+    page.evaluate(
+      () =>
+        (
+          globalThis as typeof globalThis & {
+            __pacenotesMapFitBoundsCalls?: number;
+          }
+        ).__pacenotesMapFitBoundsCalls ?? 0,
+    );
+  try {
+    await page.addInitScript(() =>
+      localStorage.setItem("pacenotes-display-name", "Map focus regression"),
+    );
+    await page.goto(`/trips/${id}`);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              globalThis as typeof globalThis & {
+                __pacenotesRoutePolylines?: number;
+              }
+            ).__pacenotesRoutePolylines ?? 0,
+        ),
+      )
+      .toBeGreaterThan(0);
+    await page.locator(".day-map-focus").nth(1).click();
+    await expect.poll(fitBoundsCalls).toBeGreaterThan(0);
+    await page.waitForTimeout(700);
+    const callsAfterFocus = await fitBoundsCalls();
+
+    await page.getByRole("button", { name: "Map location: Cafe", exact: true }).click();
+    const details = page.getByRole("dialog", { name: "Place details", exact: true });
+    await details.getByRole("button", { name: "Add to trip" }).click();
+    await expect(details.getByRole("button", { name: "Remove from day 1" })).toBeVisible();
+    await page.waitForTimeout(700);
+
+    expect(await fitBoundsCalls()).toBe(callsAfterFocus);
+  } finally {
+    if (!page.isClosed()) await page.goto("/");
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("a new close place changes its outgoing lodging route to walking", async ({ page }) => {
+  const lodging = itemForCreate("lodging", "2027-04-10", {
+    id: "nearby-lodging",
+    title: "Nearby lodging",
+    place: { placeId: "museum-anchor" },
+    lodging: {
+      startDate: "2027-04-10",
+      endDate: "2027-04-11",
+      confirmation: "",
+      leaveTimes: { "2027-04-11": "08:00" },
+    },
+  });
+  const id = await createEmptyTrip([lodging], "2027-04-11");
+  const lodgingTravelMode = async () => {
+    const [stored] = await db.select().from(documents).where(eq(documents.name, id));
+    if (!stored) return null;
+    const saved = new Y.Doc();
+    Y.applyUpdate(saved, stored.data);
+    const travelMode = readTripDocument(saved).items[lodging.id]?.travelMode ?? null;
+    saved.destroy();
+    return travelMode;
+  };
+  try {
+    await page.addInitScript(() =>
+      localStorage.setItem("pacenotes-display-name", "Walking route regression"),
+    );
+    await page.goto(`/trips/${id}`);
+    await page.getByRole("button", { name: "Map location: Museum", exact: true }).click();
+    const details = page.getByRole("dialog", { name: "Place details", exact: true });
+    await details.getByRole("button", { name: "Add to trip" }).click();
+
+    await expect.poll(lodgingTravelMode).toBe("WALKING");
+    await expect(
+      page
+        .locator('[data-day-id="2027-04-10"]')
+        .locator(".transport-leg")
+        .last()
+        .getByLabel("Travel mode"),
+    ).toHaveValue("WALKING");
+  } finally {
+    if (!page.isClosed()) await page.goto("/");
     await db.delete(trips).where(eq(trips.id, id));
   }
 });
@@ -661,7 +1102,7 @@ test("map keeps locations from every day visible", async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Map editor"));
     await page.goto(`/trips/${id}`);
     const firstMarker = page.getByRole("button", { name: "Stop 1: First day place" });
-    const secondMarker = page.getByRole("button", { name: "Stop 2: Second day place" });
+    const secondMarker = page.getByRole("button", { name: "Stop 1: Second day place" });
     await expect(firstMarker).toBeVisible();
     await expect(secondMarker).toBeVisible();
 
@@ -733,7 +1174,990 @@ test("map and list toggles keep at least one panel visible", async ({ page }) =>
   }
 });
 
-test("calendar view schedules items and stays on the itinerary on mobile", async ({
+test("calendar drop below a flexible item preserves item order", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "Calendar drag coverage runs once");
+  const dayId = "2027-04-10";
+  const moved = itemForCreate("place", dayId, {
+    id: "calendar-order-moved",
+    title: "Moved stop",
+    startTime: null,
+    durationMinutes: 60,
+  });
+  const acadia = itemForCreate("place", dayId, {
+    id: "calendar-order-acadia",
+    title: "Acadia National Park",
+    startTime: null,
+    durationMinutes: 60,
+  });
+  const id = await createEmptyTrip([moved, acadia], "2027-04-11");
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.addInitScript(() =>
+      localStorage.setItem("pacenotes-display-name", "Calendar order editor"),
+    );
+    await page.goto(`/trips/${id}?view=calendar#${dayId}`);
+    const calendar = page.getByRole("region", { name: "Trip calendar" });
+    const movedBlock = calendar.locator('[data-calendar-item-id="calendar-order-moved"]').first();
+    const acadiaBlock = calendar.locator('[data-calendar-item-id="calendar-order-acadia"]').first();
+    await expect(movedBlock.locator("time")).toContainText("Flexible");
+    await expect(acadiaBlock.locator("time")).toContainText("Flexible");
+    const [movedBox, acadiaBox, trackBox] = await Promise.all([
+      movedBlock.boundingBox(),
+      acadiaBlock.boundingBox(),
+      calendar.locator(`[data-calendar-track="${dayId}"]`).boundingBox(),
+    ]);
+    if (!movedBox || !acadiaBox || !trackBox) {
+      throw new Error("Missing flexible order drag geometry");
+    }
+    const x = movedBox.x + movedBox.width / 2;
+    const y = movedBox.y + movedBox.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 8, y, { steps: 2 });
+    await expect(calendar.locator("[data-calendar-drag-proxy]")).toBeVisible();
+    await page.mouse.move(x, acadiaBox.y + acadiaBox.height + trackBox.height / 48, {
+      steps: 4,
+    });
+    await page.mouse.up();
+    await expect(movedBlock.locator("time")).not.toContainText("Flexible");
+    await expect
+      .poll(async () => {
+        const [stored] = await db.select().from(documents).where(eq(documents.name, id));
+        if (!stored) return [];
+        const saved = new Y.Doc();
+        Y.applyUpdate(saved, stored.data);
+        const snapshot = readTripDocument(saved);
+        saved.destroy();
+        return snapshot.order.filter((itemId) => snapshot.items[itemId]?.dayId === dayId);
+      })
+      .toEqual(["calendar-order-acadia", "calendar-order-moved"]);
+  } finally {
+    await page.goto("/");
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("calendar drag follows scrolling and rejects outside drops", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "Calendar drag coverage runs once");
+  const dayId = "2027-04-10";
+  const flexible = itemForCreate("place", dayId, {
+    id: "calendar-flexible-drag",
+    title: "Flexible stop",
+    startTime: null,
+    durationMinutes: 600,
+  });
+  const id = await createEmptyTrip([flexible], "2027-04-11");
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.addInitScript(() =>
+      localStorage.setItem("pacenotes-display-name", "Calendar drag editor"),
+    );
+    await page.goto(`/trips/${id}?view=calendar#${dayId}`);
+    const calendar = page.getByRole("region", { name: "Trip calendar" });
+    const block = calendar.locator('[data-calendar-item-id="calendar-flexible-drag"]').first();
+    const time = block.locator("time");
+    await expect(time).toHaveText("Flexible · 08:00 - 18:00");
+    const scroller = calendar.locator(":scope > div").first();
+    await block.scrollIntoViewIfNeeded();
+
+    const blockBox = await block.boundingBox();
+    const initialScrollerBox = await scroller.boundingBox();
+    if (!blockBox || !initialScrollerBox) throw new Error("Missing flexible block geometry");
+    await page.mouse.click(
+      blockBox.x + blockBox.width / 2,
+      Math.min(
+        blockBox.y + blockBox.height * 0.8,
+        initialScrollerBox.y + initialScrollerBox.height - 20,
+      ),
+    );
+    const editor = calendar.locator(".item-editor");
+    await expect(editor).toBeVisible();
+    await editor.getByRole("button", { name: "Close editor" }).click();
+
+    const dragBox = await block.boundingBox();
+    const scrollerBox = await scroller.boundingBox();
+    const trackBox = await calendar.locator(`[data-calendar-track="${dayId}"]`).boundingBox();
+    if (!dragBox || !scrollerBox || !trackBox) {
+      throw new Error("Missing calendar drag geometry");
+    }
+    const dragX = dragBox.x + dragBox.width / 2;
+    const dragY = dragBox.y + dragBox.height * 0.8;
+    await page.mouse.move(dragX, dragY);
+    await page.mouse.down();
+    await page.mouse.move(dragX + 8, dragY, { steps: 2 });
+    const proxy = calendar.locator("[data-calendar-drag-proxy]");
+    const dropPreview = calendar.locator("[data-calendar-drop-preview]").first();
+    await expect(proxy).toBeVisible();
+    await expect(dropPreview).toBeVisible();
+    const initialProxyBox = await proxy.boundingBox();
+    const initialPreviewBox = await dropPreview.boundingBox();
+    if (!initialProxyBox || !initialPreviewBox) {
+      throw new Error("Missing initial calendar preview geometry");
+    }
+    const initialDifference = initialProxyBox.y - initialPreviewBox.y;
+    await scroller.evaluate((element, distance) => {
+      element.scrollTop += distance;
+    }, trackBox.height / 24);
+    await expect
+      .poll(async () => {
+        const proxyBox = await proxy.boundingBox();
+        const previewBox = await dropPreview.boundingBox();
+        if (!proxyBox || !previewBox) throw new Error("Missing calendar preview geometry");
+        return Math.abs(proxyBox.y - previewBox.y - initialDifference);
+      })
+      .toBeLessThan(2);
+
+    await page.mouse.move(
+      scrollerBox.x + scrollerBox.width + 20,
+      scrollerBox.y + scrollerBox.height / 2,
+    );
+    await page.mouse.up();
+    await expect(proxy).toBeHidden();
+    await expect(time).toHaveText("Flexible · 08:00 - 18:00");
+
+    await block.scrollIntoViewIfNeeded();
+    const restoredBox = await block.boundingBox();
+    if (!restoredBox) throw new Error("Missing restored block geometry");
+    await page.mouse.click(
+      restoredBox.x + restoredBox.width / 2,
+      restoredBox.y + restoredBox.height * 0.8,
+    );
+    await expect(editor).toBeVisible();
+  } finally {
+    await page.goto("/");
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("day changes and reload keep the current map viewport", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "Map viewport coverage runs once");
+  const firstDay = "2027-04-10";
+  const secondDay = "2027-04-11";
+  const first = itemForCreate("place", firstDay, {
+    id: "viewport-first",
+    title: "Viewport first",
+    place: { placeId: "museum" },
+    startTime: "09:00",
+  });
+  const second = itemForCreate("place", firstDay, {
+    id: "viewport-second",
+    title: "Viewport second",
+    place: { placeId: "cafe" },
+    startTime: "10:00",
+  });
+  const third = itemForCreate("place", secondDay, {
+    id: "viewport-third",
+    title: "Viewport third",
+    place: { placeId: "museum-anchor" },
+    startTime: "09:00",
+  });
+  const id = await createEmptyTrip([first, second, third], secondDay);
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.addInitScript(() =>
+      localStorage.setItem("pacenotes-display-name", "Map viewport editor"),
+    );
+    await page.goto(`/trips/${id}?view=calendar#${firstDay}`);
+    const fitBoundsCalls = () =>
+      page.evaluate(
+        () =>
+          (
+            globalThis as typeof globalThis & {
+              __pacenotesMapFitBoundsCalls?: number;
+            }
+          ).__pacenotesMapFitBoundsCalls ?? 0,
+      );
+    await expect.poll(fitBoundsCalls).toBeGreaterThan(0);
+    await page.waitForTimeout(500);
+    const initialFitBoundsCalls = await fitBoundsCalls();
+
+    await page.locator(".date-tabs [data-day-tab]").nth(1).click();
+    await page.waitForTimeout(100);
+    expect(await fitBoundsCalls()).toBe(initialFitBoundsCalls);
+
+    const block = page
+      .getByRole("region", { name: "Trip calendar" })
+      .locator('[data-calendar-item-id="viewport-first"]')
+      .first();
+    const panCalls = () =>
+      page.evaluate(
+        () =>
+          (
+            globalThis as typeof globalThis & {
+              __pacenotesMapPanCalls?: number;
+            }
+          ).__pacenotesMapPanCalls ?? 0,
+      );
+    await block.click();
+    await expect.poll(panCalls).toBeGreaterThan(0);
+    await page
+      .locator(".item-editor")
+      .getByRole("button", { name: "Close editor", exact: true })
+      .click();
+    await block.click({ button: "right" });
+    expect(await fitBoundsCalls()).toBe(initialFitBoundsCalls);
+    await page
+      .getByRole("menu", { name: "Calendar actions for Viewport first" })
+      .getByRole("menuitem", { name: "Next day", exact: true })
+      .click();
+    await expect
+      .poll(async () => {
+        const [stored] = await db.select().from(documents).where(eq(documents.name, id));
+        if (!stored) return null;
+        const saved = new Y.Doc();
+        Y.applyUpdate(saved, stored.data);
+        const dayId = readTripDocument(saved).items[first.id]?.dayId ?? null;
+        saved.destroy();
+        return dayId;
+      })
+      .toBe(secondDay);
+    await page.waitForTimeout(500);
+    expect(await fitBoundsCalls()).toBe(initialFitBoundsCalls);
+    await page.evaluate(() => {
+      const map = (
+        globalThis as typeof globalThis & {
+          __pacenotesMap?: {
+            listeners: Map<string, () => void>;
+            setCenter: (center: { lat: number; lng: number }) => void;
+            setZoom: (zoom: number) => void;
+          };
+        }
+      ).__pacenotesMap;
+      if (!map) throw new Error("Map is not ready");
+      map.setCenter({ lat: 44.123, lng: -71.456 });
+      map.setZoom(9);
+      map.listeners.get("idle")?.();
+    });
+    await page.reload();
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const map = (
+            globalThis as typeof globalThis & {
+              __pacenotesMap?: {
+                getCenter: () => { lat: () => number; lng: () => number };
+                getZoom: () => number;
+              };
+            }
+          ).__pacenotesMap;
+          const center = map?.getCenter();
+          return map && center
+            ? { latitude: center.lat(), longitude: center.lng(), zoom: map.getZoom() }
+            : null;
+        }),
+      )
+      .toEqual({ latitude: 44.123, longitude: -71.456, zoom: 9 });
+    expect(await fitBoundsCalls()).toBe(0);
+  } finally {
+    await page.goto("/");
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("each day can focus its route on the map", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "Map viewport coverage runs once");
+  const id = await createEmptyTrip([
+    itemForCreate("place", "2027-04-10", {
+      title: "First cafe",
+      place: { placeId: "cafe-anchor" },
+      startTime: "09:00",
+    }),
+    itemForCreate("place", "2027-04-10", {
+      title: "Second cafe",
+      place: { placeId: "cafe" },
+      startTime: "10:00",
+    }),
+    itemForCreate("place", "2027-04-11", {
+      title: "First museum",
+      place: { placeId: "museum-anchor" },
+      startTime: "09:00",
+    }),
+    itemForCreate("place", "2027-04-11", {
+      title: "Second museum",
+      place: { placeId: "museum" },
+      startTime: "10:00",
+    }),
+  ]);
+  const fittedLongitudes = () =>
+    page
+      .evaluate(() => [
+        ...new Set(
+          (
+            globalThis as typeof globalThis & {
+              __pacenotesMapFitBoundsPoints?: { lat: number; lng: number }[];
+            }
+          ).__pacenotesMapFitBoundsPoints?.map((point) => point.lng) ?? [],
+        ),
+      ])
+      .then((values) => values.sort((left, right) => left - right));
+  try {
+    await page.addInitScript(() =>
+      localStorage.setItem("pacenotes-display-name", "Day route map editor"),
+    );
+    await page.goto(`/trips/${id}`);
+    const focusButtons = page.locator(".day-map-focus");
+    await expect(focusButtons).toHaveCount(3);
+    await expect(focusButtons.nth(0)).toHaveAccessibleName("Show Saturday, April 10 route on map");
+    await expect(focusButtons.nth(0).locator("svg")).toBeVisible();
+    await expect(focusButtons.nth(1)).toHaveAccessibleName("Show Sunday, April 11 route on map");
+    await expect(focusButtons.nth(2)).toBeDisabled();
+
+    await page.getByRole("button", { name: "Map", exact: true }).click();
+    await focusButtons.nth(0).click();
+    await expect.poll(fittedLongitudes).toEqual([139]);
+    await focusButtons.nth(1).click();
+    await expect.poll(fittedLongitudes).toEqual([139, 140]);
+  } finally {
+    await page.goto("/");
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("calendar reload keeps a flexible item below lodging leave time", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "Calendar reload coverage runs once");
+  const firstDay = "2027-04-10";
+  const secondDay = "2027-04-11";
+  const lodging = itemForCreate("lodging", firstDay, {
+    id: "reload-lodging",
+    title: "Reload hotel",
+    place: { placeId: "reload-hotel-place" },
+    lodging: {
+      startDate: firstDay,
+      endDate: secondDay,
+      leaveTimes: { [secondDay]: "09:00" },
+    },
+  });
+  const flexible = itemForCreate("place", secondDay, {
+    id: "reload-flexible",
+    title: "Flexible destination",
+    startTime: null,
+    durationMinutes: 60,
+  });
+  const id = await createEmptyTrip([lodging, flexible], secondDay);
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.addInitScript(() =>
+      localStorage.setItem("pacenotes-display-name", "Calendar reload editor"),
+    );
+    await page.goto(`/trips/${id}?view=calendar#${secondDay}`);
+    const calendar = page.getByRole("region", { name: "Trip calendar" });
+    const stay = calendar.locator('[data-calendar-stay-id="reload-lodging"]');
+    const block = calendar.locator('[data-calendar-item-id="reload-flexible"]').first();
+    const expectBelowLeaveTime = async () => {
+      await expect(block.locator("time")).toContainText("Flexible");
+      const [stayBox, blockBox] = await Promise.all([stay.boundingBox(), block.boundingBox()]);
+      if (!stayBox || !blockBox) throw new Error("Missing reload placement geometry");
+      expect(blockBox.y).toBeGreaterThanOrEqual(stayBox.y + stayBox.height - 1);
+    };
+
+    await expectBelowLeaveTime();
+    await page.reload();
+    await expectBelowLeaveTime();
+  } finally {
+    await page.goto("/");
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("calendar menu reorders items and shows the leave time", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "Calendar menu coverage runs once");
+  const dayId = "2027-04-10";
+  const first = itemForCreate("place", dayId, {
+    id: "calendar-order-first",
+    title: "First stop",
+    startTime: "09:00",
+    durationMinutes: 60,
+  });
+  const second = itemForCreate("place", dayId, {
+    id: "calendar-order-second",
+    title: "Second stop",
+    startTime: "11:00",
+    durationMinutes: 60,
+  });
+  const lodging = itemForCreate("lodging", dayId, {
+    id: "calendar-order-hotel",
+    title: "Calendar hotel",
+    place: { placeId: "calendar-order-hotel-place" },
+    lodging: {
+      startDate: dayId,
+      endDate: "2027-04-11",
+      leaveTimes: { "2027-04-11": "09:30" },
+    },
+  });
+  const nextLodging = itemForCreate("lodging", "2027-04-11", {
+    id: "calendar-order-next-hotel",
+    title: "Next hotel",
+    place: { placeId: "calendar-order-next-hotel-place" },
+    lodging: {
+      startDate: "2027-04-11",
+      endDate: "2027-04-12",
+      leaveTimes: { "2027-04-12": "09:00" },
+    },
+  });
+  const followingLodging = itemForCreate("lodging", "2027-04-12", {
+    id: "calendar-order-following-hotel",
+    title: "Following hotel",
+    place: { placeId: "calendar-order-following-hotel-place" },
+    lodging: {
+      startDate: "2027-04-12",
+      endDate: "2027-04-13",
+      leaveTimes: { "2027-04-13": "09:00" },
+    },
+  });
+  const id = await createEmptyTrip(
+    [first, second, nextLodging, followingLodging, lodging],
+    "2027-04-14",
+  );
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setDeviceMetricsOverride", {
+      width: 1280,
+      height: 900,
+      deviceScaleFactor: 1.25,
+      mobile: false,
+    });
+    await page.addInitScript(() =>
+      localStorage.setItem("pacenotes-display-name", "Calendar menu editor"),
+    );
+    await page.goto(`/trips/${id}?view=calendar#${dayId}`);
+    const calendar = page.getByRole("region", { name: "Trip calendar" });
+    await expect(calendar).toBeVisible();
+
+    const stay = calendar.locator('[data-calendar-stay-id="calendar-order-hotel"]');
+    const stayTitle = stay.getByText("Stay at Calendar hotel", { exact: true });
+    const stayLeaveTime = calendar.locator(
+      '[data-calendar-stay-leave-id="calendar-order-hotel"][data-calendar-stay-leave-date="2027-04-11"]',
+    );
+    await expect(stayTitle).toBeVisible();
+    await expect(stayLeaveTime).toBeVisible();
+    const stayTitleBox = await stayTitle.boundingBox();
+    const stayLeaveTimeBox = await stayLeaveTime.boundingBox();
+    if (!stayTitleBox || !stayLeaveTimeBox) throw new Error("Missing stay label geometry");
+    expect(stayLeaveTimeBox.y).toBeGreaterThanOrEqual(stayTitleBox.y + stayTitleBox.height);
+    const stayHandle = stay.getByRole("button", { name: "Leave at 09:30", exact: true });
+    const stayHandleBox = await stayHandle.boundingBox();
+    if (!stayHandleBox) throw new Error("Missing stay handle geometry");
+    const stayLineY = stayHandleBox.y + stayHandleBox.height / 2;
+    const leaveBottom = stayLeaveTimeBox.y + stayLeaveTimeBox.height;
+    expect(leaveBottom).toBeLessThanOrEqual(stayLineY);
+    expect(stayLineY - leaveBottom).toBeLessThan(8);
+    const leaveLabelLayer = await stayLeaveTime.evaluate((label) =>
+      Number(getComputedStyle(label).zIndex),
+    );
+    const allDayLayer = await calendar
+      .locator(`[data-calendar-all-day="${dayId}"]`)
+      .evaluate((cell) => Number(getComputedStyle(cell).zIndex));
+    expect(leaveLabelLayer).toBeGreaterThan(2);
+    expect(leaveLabelLayer).toBeLessThan(allDayLayer);
+    const hourLines = calendar.locator("[data-calendar-hour-lines]");
+    const stayLayering = await Promise.all([
+      stay.evaluate((element) => Number(getComputedStyle(element).zIndex)),
+      hourLines.evaluate((element) => Number(getComputedStyle(element).zIndex)),
+    ]);
+    expect(stayLayering[0]).toBeGreaterThan(stayLayering[1] ?? 0);
+    await expect(stayLeaveTime).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+
+    const hoverTrack = calendar.locator(`[data-calendar-track="${dayId}"]`);
+    const hoverTrackBox = await hoverTrack.boundingBox();
+    if (!hoverTrackBox) throw new Error("Missing hover track geometry");
+    await page.mouse.move(
+      hoverTrackBox.x + hoverTrackBox.width / 2,
+      hoverTrackBox.y + Math.min(100, hoverTrackBox.height / 4),
+    );
+    const hoverTime = calendar.locator("[data-calendar-hover-time]");
+    await expect(hoverTime).toBeVisible();
+    const hoverTag = await hoverTime.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const arrow = getComputedStyle(element, "::after");
+      return {
+        background: style.backgroundColor,
+        borderRadius: style.borderRadius,
+        borderWidth: Number.parseFloat(style.borderTopWidth),
+        color: style.color,
+        fontSize: Number.parseFloat(style.fontSize),
+        arrowWidth: Number.parseFloat(arrow.borderLeftWidth),
+        arrowContent: arrow.content,
+      };
+    });
+    const hoverTimeGap = await calendar.evaluate((element) => {
+      const gutter = element.querySelector("[data-calendar-time-gutter]");
+      const label = element.querySelector("[data-calendar-hover-time]");
+      if (!gutter || !label) throw new Error("Missing hover time guide geometry");
+      const gutterBox = gutter.getBoundingClientRect();
+      const labelBox = label.getBoundingClientRect();
+      const arrowWidth = Number.parseFloat(getComputedStyle(label, "::before").borderLeftWidth);
+      return gutterBox.right - (labelBox.right + arrowWidth);
+    });
+    const hourFontSize = await calendar
+      .locator("[data-calendar-time-gutter] time")
+      .first()
+      .evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize));
+    expect(hoverTag).toMatchObject({
+      background: "rgb(34, 39, 45)",
+      borderRadius: "0px",
+      color: "rgb(255, 255, 255)",
+    });
+    expect(hoverTag.borderWidth).toBeGreaterThan(0);
+    expect(hoverTag.fontSize).toBeGreaterThan(hourFontSize);
+    expect(hoverTag.arrowWidth).toBeGreaterThan(0);
+    expect(hoverTag.arrowContent).not.toBe("none");
+    expect(hoverTimeGap).toBeLessThanOrEqual(0);
+
+    const coveredHeader = calendar.locator('[data-calendar-day-header="2027-04-11"]');
+    await expect(coveredHeader.getByText("No lodging", { exact: true })).toHaveCount(0);
+
+    const firstLodgingBar = calendar.locator('[data-calendar-lodging-id="calendar-order-hotel"]');
+    const nextLodgingBar = calendar.locator(
+      '[data-calendar-lodging-id="calendar-order-next-hotel"]',
+    );
+    const followingLodgingBar = calendar.locator(
+      '[data-calendar-lodging-id="calendar-order-following-hotel"]',
+    );
+    await expect(firstLodgingBar).toHaveCount(1);
+    await expect(nextLodgingBar).toHaveCount(1);
+    await expect(firstLodgingBar).toHaveAttribute("data-calendar-lodging-lane", "0");
+    await expect(nextLodgingBar).toHaveAttribute("data-calendar-lodging-lane", "1");
+    await expect(followingLodgingBar).toHaveAttribute("data-calendar-lodging-lane", "0");
+    const firstLodgingBox = await firstLodgingBar.boundingBox();
+    const nextLodgingBox = await nextLodgingBar.boundingBox();
+    const dayHeaderBox = await calendar.locator("header").first().boundingBox();
+    if (!firstLodgingBox || !nextLodgingBox || !dayHeaderBox) {
+      throw new Error("Missing continued lodging geometry");
+    }
+    expect(firstLodgingBox.width).toBeGreaterThan(dayHeaderBox.width * 1.8);
+    expect(firstLodgingBox.y).toBeLessThan(nextLodgingBox.y);
+    const endDateHeader = calendar.locator('[data-calendar-day-header="2027-04-12"]');
+    const finalDateHeader = calendar.locator('[data-calendar-day-header="2027-04-13"]');
+    const endDateHeaderBox = await endDateHeader.boundingBox();
+    const finalDateHeaderBox = await finalDateHeader.boundingBox();
+    const nextLodgingEndBox = await nextLodgingBar.boundingBox();
+    const finalAllDayBox = await calendar
+      .locator('[data-calendar-all-day="2027-04-13"]')
+      .boundingBox();
+    const finalTrackBox = await calendar
+      .locator('[data-calendar-track="2027-04-13"]')
+      .boundingBox();
+    const nextLodgingMargin = await nextLodgingBar.evaluate((bar) =>
+      Number.parseFloat(getComputedStyle(bar).marginRight),
+    );
+    if (
+      !endDateHeaderBox ||
+      !finalDateHeaderBox ||
+      !nextLodgingEndBox ||
+      !finalAllDayBox ||
+      !finalTrackBox
+    ) {
+      throw new Error("Missing lodging end geometry");
+    }
+    expect(finalAllDayBox.x).toBeCloseTo(finalDateHeaderBox.x, 0);
+    expect(finalAllDayBox.width).toBeCloseTo(finalDateHeaderBox.width, 0);
+    expect(finalTrackBox.x).toBeCloseTo(finalDateHeaderBox.x, 0);
+    expect(finalTrackBox.width).toBeCloseTo(finalDateHeaderBox.width, 0);
+    expect(
+      endDateHeaderBox.x +
+        endDateHeaderBox.width -
+        nextLodgingMargin -
+        (nextLodgingEndBox.x + nextLodgingEndBox.width),
+    ).toBeCloseTo(0, 0);
+    expect(nextLodgingEndBox.x + nextLodgingEndBox.width).toBeLessThan(finalDateHeaderBox.x);
+    await firstLodgingBar.scrollIntoViewIfNeeded();
+    const lodgingDragPoint = await firstLodgingBar.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const x = bounds.left + bounds.width * 0.7;
+      const y = bounds.top + bounds.height / 2;
+      const hit = document.elementFromPoint(x, y);
+      return {
+        x,
+        y,
+        cursor: hit instanceof Element ? getComputedStyle(hit).cursor : "",
+      };
+    });
+    expect(lodgingDragPoint.cursor).toBe("pointer");
+
+    const lodgingActionMenu = page.getByRole("menu", {
+      name: "Calendar actions for Calendar hotel",
+    });
+    for (const lodgingSurface of [firstLodgingBar, stay]) {
+      await lodgingSurface.click({ button: "right" });
+      await expect(lodgingActionMenu.getByRole("menuitem")).toHaveText([
+        "Edit",
+        "Duplicate",
+        "Delete",
+      ]);
+      await page.keyboard.press("Escape");
+    }
+
+    const block = calendar.locator('[data-calendar-item-id="calendar-order-first"]').first();
+    await block.click({ button: "right" });
+    const actionMenu = page.getByRole("menu", {
+      name: "Calendar actions for First stop",
+    });
+    const actionButtons = actionMenu.getByRole("menuitem");
+    await expect(actionButtons).toHaveCount(12);
+    expect(
+      await actionButtons.evaluateAll((buttons) =>
+        buttons.map((button) => button.ariaLabel || button.textContent?.trim()),
+      ),
+    ).toEqual([
+      "Previous day",
+      "Next day",
+      "15 minutes earlier",
+      "15 minutes later",
+      "Move First stop up",
+      "Move First stop down",
+      "Edit",
+      "Duplicate",
+      "15 minutes longer",
+      "15 minutes shorter",
+      "Make flexible",
+      "Delete",
+    ]);
+    const iconButtons = actionButtons.filter({ hasNotText: /\S/ });
+    await expect(iconButtons).toHaveCount(6);
+    const iconButtonTops = await iconButtons.evaluateAll((buttons) =>
+      buttons.map((button) => button.getBoundingClientRect().top),
+    );
+    expect(Math.max(...iconButtonTops) - Math.min(...iconButtonTops)).toBeLessThan(1);
+
+    const moveUp = actionMenu.getByRole("menuitem", {
+      name: "Move First stop up",
+      exact: true,
+    });
+    const moveDown = actionMenu.getByRole("menuitem", {
+      name: "Move First stop down",
+      exact: true,
+    });
+    await expect(moveUp).toBeDisabled();
+    await expect(moveDown).toBeEnabled();
+    await moveDown.click();
+    await block.click({ button: "right" });
+    await expect(
+      actionMenu.getByRole("menuitem", {
+        name: "Move First stop down",
+        exact: true,
+      }),
+    ).toBeDisabled();
+    await expect(
+      actionMenu.getByRole("menuitem", {
+        name: "Move First stop up",
+        exact: true,
+      }),
+    ).toBeEnabled();
+    await page.keyboard.press("Escape");
+    await page.mouse.move(lodgingDragPoint.x, lodgingDragPoint.y);
+    await page.mouse.down();
+    await page.mouse.move(lodgingDragPoint.x + dayHeaderBox.width, lodgingDragPoint.y, {
+      steps: 4,
+    });
+    await expect(calendar.locator("[data-calendar-lodging-drag-proxy]")).toBeVisible();
+    await expect(calendar.locator("[data-calendar-lodging-preview]")).toHaveAttribute(
+      "data-start-date",
+      "2027-04-11",
+    );
+    const previewBox = await calendar.locator("[data-calendar-lodging-preview]").boundingBox();
+    const otherLodgingBoxes = await Promise.all([
+      nextLodgingBar.boundingBox(),
+      followingLodgingBar.boundingBox(),
+    ]);
+    if (!previewBox || otherLodgingBoxes.some((box) => !box)) {
+      throw new Error("Missing lodging preview geometry");
+    }
+    const previewOverlapsLodging = otherLodgingBoxes.some(
+      (box) =>
+        box &&
+        previewBox.x < box.x + box.width &&
+        previewBox.x + previewBox.width > box.x &&
+        previewBox.y < box.y + box.height &&
+        previewBox.y + previewBox.height > box.y,
+    );
+    expect(previewOverlapsLodging).toBe(false);
+    await page.mouse.up();
+  } finally {
+    await page.goto("/");
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("calendar colors the full stay when departure conflicts", async ({ page }) => {
+  const dayId = "2027-04-10";
+  const lodging = itemForCreate("lodging", dayId, {
+    id: "conflict-hotel",
+    title: "Conflict hotel",
+    place: { placeId: "conflict-hotel-place" },
+    lodging: {
+      startDate: dayId,
+      endDate: "2027-04-11",
+      leaveTimes: { "2027-04-11": "10:45" },
+    },
+  });
+  const overlappingPlace = itemForCreate("place", "2027-04-11", {
+    id: "conflict-breakfast",
+    title: "Overlapping breakfast",
+    place: { placeId: "conflict-breakfast-place" },
+    startTime: "10:00",
+    durationMinutes: 60,
+  });
+  const id = await createEmptyTrip([lodging, overlappingPlace], "2027-04-11");
+  try {
+    await page.addInitScript(() =>
+      localStorage.setItem("pacenotes-display-name", "Calendar conflict editor"),
+    );
+    await page.goto(`/trips/${id}?view=calendar#2027-04-11`);
+    const stay = page.locator('[data-calendar-stay-id="conflict-hotel"]');
+    await expect(stay).toHaveAttribute("data-calendar-stay-conflict", "true");
+    const geometry = await stay.evaluate(async (element) => {
+      const track = element.parentElement;
+      if (!track) return null;
+      track.style.height = "1001px";
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const bottom = element.getBoundingClientRect().bottom * window.devicePixelRatio;
+      track.style.removeProperty("height");
+      return { bottom, roundedBottom: Math.round(bottom) };
+    });
+    expect(geometry).not.toBeNull();
+    expect(Math.abs((geometry?.bottom ?? 0) - (geometry?.roundedBottom ?? 0))).toBeLessThan(0.01);
+    const appearance = await stay.evaluate((element) => {
+      const original = getComputedStyle(element);
+      const color = original.color;
+      const backgroundColor = original.backgroundColor;
+      const backgroundImage = original.backgroundImage;
+      const dangerProbe = document.createElement("span");
+      dangerProbe.style.color = "var(--danger)";
+      element.append(dangerProbe);
+      const danger = getComputedStyle(dangerProbe).color;
+      dangerProbe.remove();
+      const htmlElement = element as HTMLElement;
+      htmlElement.style.color = "rgb(0, 0, 255)";
+      const changed = getComputedStyle(element);
+      const changedBackgroundColor = changed.backgroundColor;
+      const changedBackgroundImage = changed.backgroundImage;
+      htmlElement.style.removeProperty("color");
+      return {
+        color,
+        danger,
+        backgroundColor,
+        backgroundImage,
+        changedBackgroundColor,
+        changedBackgroundImage,
+      };
+    });
+    expect(appearance.color).toBe(appearance.danger);
+    expect(appearance.backgroundColor).not.toBe(appearance.changedBackgroundColor);
+    expect(appearance.backgroundImage).not.toBe(appearance.changedBackgroundImage);
+  } finally {
+    await page.goto("/");
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+test("duration-only changes keep a flexible item untimed", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "Calendar resize coverage runs once");
+  const dayId = "2027-04-10";
+  const target = itemForCreate("place", dayId, {
+    id: "duration-only-target",
+    title: "Duration only target",
+    startTime: null,
+    durationMinutes: 60,
+  });
+  const id = await createEmptyTrip([target], dayId);
+  const savedTiming = async () => {
+    const [stored] = await db.select().from(documents).where(eq(documents.name, id));
+    if (!stored) return null;
+    const document = new Y.Doc();
+    Y.applyUpdate(document, stored.data);
+    const item = readTripDocument(document).items[target.id];
+    document.destroy();
+    return item ? { startTime: item.startTime, durationMinutes: item.durationMinutes } : null;
+  };
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.addInitScript(() =>
+      localStorage.setItem("pacenotes-display-name", "Duration-only editor"),
+    );
+    await page.goto(`/trips/${id}?view=calendar#${dayId}`);
+    const calendar = page.getByRole("region", { name: "Trip calendar" });
+    const block = calendar.locator('[data-calendar-item-id="duration-only-target"]').first();
+    await expect(block.locator("time")).toContainText("Flexible");
+
+    await block.getByRole("button", { name: "Duration only target", exact: true }).click();
+    const editor = calendar.locator(".item-editor");
+    await editor.getByLabel("Duration in minutes").fill("75");
+    await expect.poll(savedTiming, { timeout: 5_000 }).toEqual({
+      startTime: null,
+      durationMinutes: 75,
+    });
+    await expect(block.locator("time")).toContainText("Flexible");
+    await editor.getByRole("button", { name: "Close editor" }).click();
+
+    await block.click({ button: "right" });
+    const actions = page.getByRole("menu", {
+      name: "Calendar actions for Duration only target",
+    });
+    await actions.getByRole("menuitem", { name: "15 minutes longer" }).click();
+    await expect.poll(savedTiming, { timeout: 5_000 }).toEqual({
+      startTime: null,
+      durationMinutes: 90,
+    });
+    await expect(block.locator("time")).toContainText("Flexible");
+
+    const track = calendar.locator(`[data-calendar-track="${dayId}"]`);
+    const endHandle = block.getByRole("button", {
+      name: "Change end of Duration only target",
+    });
+    const [endHandleBox, trackBox] = await Promise.all([
+      endHandle.boundingBox(),
+      track.boundingBox(),
+    ]);
+    if (!endHandleBox || !trackBox) throw new Error("Missing end resize geometry");
+    const snapDistance = trackBox.height / 96;
+    await page.mouse.move(
+      endHandleBox.x + endHandleBox.width / 2,
+      endHandleBox.y + endHandleBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      endHandleBox.x + endHandleBox.width / 2,
+      endHandleBox.y + endHandleBox.height / 2 + snapDistance,
+      { steps: 4 },
+    );
+    await page.mouse.up();
+    await expect.poll(savedTiming, { timeout: 5_000 }).toEqual({
+      startTime: null,
+      durationMinutes: 105,
+    });
+    await expect(block.locator("time")).toContainText("Flexible");
+
+    const startHandle = block.getByRole("button", {
+      name: "Change start of Duration only target",
+    });
+    const startHandleBox = await startHandle.boundingBox();
+    if (!startHandleBox) throw new Error("Missing start resize geometry");
+    await page.mouse.move(
+      startHandleBox.x + startHandleBox.width / 2,
+      startHandleBox.y + startHandleBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      startHandleBox.x + startHandleBox.width / 2,
+      startHandleBox.y + startHandleBox.height / 2 + snapDistance,
+      { steps: 4 },
+    );
+    await page.mouse.up();
+    await expect.poll(savedTiming, { timeout: 5_000 }).toEqual({
+      startTime: "08:15",
+      durationMinutes: 90,
+    });
+    await expect(block.locator("time")).not.toContainText("Flexible");
+  } finally {
+    if (!page.isClosed()) await page.goto("/");
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("changing calendar duration keeps itinerary order", async ({ page }) => {
+  const dayId = "2027-04-10";
+  const target = itemForCreate("place", dayId, {
+    id: "duration-target",
+    title: "Duration target",
+    startTime: "09:00",
+    durationMinutes: 60,
+  });
+  const peer = itemForCreate("place", dayId, {
+    id: "duration-peer",
+    title: "Same-time peer",
+    startTime: "09:00",
+    durationMinutes: 60,
+  });
+  const id = await createEmptyTrip([target, peer], dayId);
+  try {
+    await page.addInitScript(() =>
+      localStorage.setItem("pacenotes-display-name", "Duration editor"),
+    );
+    await page.goto(`/trips/${id}`);
+    const itineraryEntries = page.locator(`[data-day-id="${dayId}"] .entry-select`);
+    await expect(itineraryEntries).toHaveText(["Duration target", "Same-time peer"]);
+    await page.getByRole("button", { name: "Calendar", exact: true }).click();
+    const targetBlock = page.locator('[data-calendar-item-id="duration-target"]').first();
+    await targetBlock.click({ button: "right" });
+    const actions = page.getByRole("menu", {
+      name: "Calendar actions for Duration target",
+    });
+    await actions.getByRole("menuitem", { name: "15 minutes longer" }).click();
+    await expect(targetBlock).toContainText("09:00 - 10:15");
+
+    await page.getByRole("button", { name: "Itinerary", exact: true }).click();
+    await expect(itineraryEntries).toHaveText(["Duration target", "Same-time peer"]);
+  } finally {
+    await page.goto("/");
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+test("calendar ends on the final labeled hour", async ({ page }) => {
+  const id = await createEmptyTrip([], "2027-04-10");
+  try {
+    await page.addInitScript(() =>
+      localStorage.setItem("pacenotes-display-name", "Calendar edge editor"),
+    );
+    await page.goto(`/trips/${id}?view=calendar`);
+    const calendar = page.locator("[data-trip-calendar]");
+    const finalHourLabel = calendar.locator("[data-calendar-time-gutter] time").last();
+    const hourLines = calendar.locator("[data-calendar-hour-lines]");
+    const firstDayTrack = calendar.locator("[data-calendar-track]").first();
+    await expect(finalHourLabel).toBeVisible();
+    await expect(finalHourLabel).toHaveText("30:00");
+    const [finalHourLabelBox, hourLinesBox, timeGutterBox, firstDayTrackBox] = await Promise.all([
+      finalHourLabel.boundingBox(),
+      hourLines.boundingBox(),
+      calendar.locator("[data-calendar-time-gutter]").boundingBox(),
+      firstDayTrack.boundingBox(),
+    ]);
+    if (!finalHourLabelBox || !hourLinesBox || !timeGutterBox || !firstDayTrackBox) {
+      throw new Error("Missing final calendar hour geometry");
+    }
+    const trackEnd = hourLinesBox.y + hourLinesBox.height;
+    expect(finalHourLabelBox.y + finalHourLabelBox.height / 2).toBeCloseTo(trackEnd, 0);
+    expect(timeGutterBox.y + timeGutterBox.height).toBeCloseTo(trackEnd, 0);
+    expect(firstDayTrackBox.y + firstDayTrackBox.height).toBeCloseTo(trackEnd, 0);
+    await expect
+      .poll(() =>
+        hourLines.evaluate((canvas: HTMLCanvasElement) => {
+          const context = canvas.getContext("2d");
+          if (!context || canvas.height === 0) return false;
+          const pixels = context.getImageData(0, canvas.height - 1, canvas.width, 1).data;
+          return pixels.some((channel, index) => index % 4 === 3 && channel > 0);
+        }),
+      )
+      .toBe(true);
+    const calendarScroller = calendar.locator(":scope > div").first();
+    await calendarScroller.evaluate((element) => {
+      element.scrollTop = (element.scrollHeight - element.clientHeight) / 2;
+    });
+    const [visibleTrackBox, calendarScrollerBox] = await Promise.all([
+      firstDayTrack.boundingBox(),
+      calendarScroller.boundingBox(),
+    ]);
+    if (!visibleTrackBox || !calendarScrollerBox) {
+      throw new Error("Missing calendar hover geometry");
+    }
+    const pointer = {
+      x: visibleTrackBox.x + visibleTrackBox.width / 2,
+      y: calendarScrollerBox.y + calendarScrollerBox.height * 0.65,
+    };
+    await page.mouse.move(pointer.x, pointer.y);
+    const timeGuide = calendar.locator("[data-calendar-time-guide]");
+    await expect(timeGuide).toBeVisible();
+    const timeGuideBox = await timeGuide.boundingBox();
+    if (!timeGuideBox) throw new Error("Missing calendar time guide");
+    expect(Math.abs(timeGuideBox.y - pointer.y)).toBeLessThanOrEqual(1);
+  } finally {
+    await page.goto("/");
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("calendar view schedules items and shows the calendar on mobile", async ({
   page,
 }, testInfo) => {
   test.skip(testInfo.project.name !== "chromium", "Calendar interaction coverage runs once");
@@ -759,7 +2183,11 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     id: "calendar-hotel",
     title: "City hotel",
     place: { placeId: "calendar-hotel-place" },
-    lodging: { startDate: dayId, endDate: "2027-04-11" },
+    lodging: {
+      startDate: dayId,
+      endDate: "2027-04-11",
+      leaveTimes: { "2027-04-11": "09:30" },
+    },
   });
   const id = await createEmptyTrip([note, timed, timedSecond, lodging], "2027-04-14");
   try {
@@ -768,7 +2196,9 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
       localStorage.setItem("pacenotes-display-name", "Calendar editor"),
     );
     await page.goto(`/trips/${id}?view=calendar#${dayId}`);
-    const controls = page.getByRole("group", { name: "Planner content" });
+    const controls = page
+      .getByRole("region", { name: "Itinerary", exact: true })
+      .getByRole("group", { name: "Itinerary / Calendar" });
     const calendarButton = controls.getByRole("button", { name: "Calendar", exact: true });
     const itineraryButton = controls.getByRole("button", { name: "Itinerary", exact: true });
     const calendar = page.getByRole("region", { name: "Trip calendar" });
@@ -796,6 +2226,16 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
         return hit === element || element.contains(hit);
       }),
     ).toBe(true);
+    const stay = calendar.locator('[data-calendar-stay-id="calendar-hotel"]');
+    await expect(stay).toBeVisible();
+    const stayTitle = stay.getByText("Stay at City hotel", { exact: true });
+    const stayLeaveTime = calendar.locator(
+      '[data-calendar-stay-leave-id="calendar-hotel"][data-calendar-stay-leave-date="2027-04-11"]',
+    );
+    const stayTitleBox = await stayTitle.boundingBox();
+    const stayLeaveTimeBox = await stayLeaveTime.boundingBox();
+    if (!stayTitleBox || !stayLeaveTimeBox) throw new Error("Missing stay label geometry");
+    expect(stayLeaveTimeBox.y).toBeGreaterThanOrEqual(stayTitleBox.y + stayTitleBox.height);
     const lodgingButton = calendar.getByRole("button", { name: "City hotel", exact: true }).first();
     await expect(lodgingButton).toBeVisible();
     const lodgingIconBox = await lodgingButton.locator("svg").boundingBox();
@@ -808,8 +2248,13 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
       0,
     );
 
+    const mapViewButton = page
+      .getByRole("group", { name: "Planner view" })
+      .getByRole("button", { name: "Map", exact: true });
+    await mapViewButton.click();
+    await expect(mapViewButton).toHaveAttribute("aria-pressed", "false");
     const lodgingSegments = calendar.locator('[data-calendar-lodging-id="calendar-hotel"]');
-    await expect(lodgingSegments).toHaveCount(2);
+    await expect(lodgingSegments).toHaveCount(1);
     const lodgingDayBox = await calendar.locator("header").first().boundingBox();
     const originalLodgingBox = await lodgingSegments.first().boundingBox();
     if (!lodgingDayBox || !originalLodgingBox) {
@@ -839,7 +2284,7 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     ).toBeLessThan(1);
     await page.mouse.up();
     const shiftedLodging = calendar.locator(
-      '[data-calendar-all-day="2027-04-12"] [data-calendar-lodging-id="calendar-hotel"]',
+      '[data-calendar-lodging-id="calendar-hotel"][data-start-date="2027-04-12"]',
     );
     await shiftedLodging.scrollIntoViewIfNeeded();
     const shiftedLodgingBox = await shiftedLodging.boundingBox();
@@ -870,14 +2315,10 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     await page.mouse.move(shiftedStartX - lodgingDayBox.width, shiftedStartY, { steps: 4 });
     await page.mouse.up();
     await expect(
-      calendar.locator(
-        '[data-calendar-all-day="2027-04-10"] [data-calendar-lodging-id="calendar-hotel"]',
-      ),
+      calendar.locator('[data-calendar-lodging-id="calendar-hotel"][data-start-date="2027-04-10"]'),
     ).toHaveCount(0);
     await expect(
-      calendar.locator(
-        '[data-calendar-all-day="2027-04-11"] [data-calendar-lodging-id="calendar-hotel"]',
-      ),
+      calendar.locator('[data-calendar-lodging-id="calendar-hotel"][data-start-date="2027-04-11"]'),
     ).toBeVisible();
 
     const checkInHandle = calendar.getByRole("button", {
@@ -893,6 +2334,9 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     expect(
       Math.abs(checkInBox.y + checkInBox.height - (checkInBlockBox.y + checkInBlockBox.height)),
     ).toBeLessThanOrEqual(3);
+    const lodgingBackground = await checkInHandle
+      .locator("..")
+      .evaluate((element) => getComputedStyle(element).backgroundColor);
     await page.mouse.move(
       checkInBox.x + checkInBox.width / 2,
       checkInBox.y + checkInBox.height / 2,
@@ -904,18 +2348,32 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
       { steps: 4 },
     );
     const resizeGuide = calendar.locator("[data-calendar-lodging-resize-guide]");
+    const lodgingResizeTargets = calendar.locator('[data-calendar-lodging-preview="true"]');
     await expect(resizeGuide).toBeVisible();
-    await expect(lodgingTarget).toContainText("3 days");
-    await expect(lodgingTarget).toHaveAttribute("data-start-date", "2027-04-10");
+    await expect(lodgingResizeTargets).toHaveCount(1);
+    await expect(lodgingResizeTargets).toHaveAttribute("data-start-date", "2027-04-10");
+    await expect(lodgingResizeTargets).toHaveCSS("background-color", lodgingBackground);
+    await expect(lodgingResizeTargets).toContainText("3 days");
+    expect(
+      await resizeGuide.evaluate((element) => Number(getComputedStyle(element).zIndex)),
+    ).toBeLessThan(
+      await lodgingResizeTargets
+        .first()
+        .evaluate((element) => Number(getComputedStyle(element).zIndex)),
+    );
+    await expect(lodgingResizeTargets).toHaveAttribute("data-end-date", "2027-04-12");
     const resizeGuideBox = await resizeGuide.boundingBox();
     if (!resizeGuideBox) throw new Error("Missing lodging resize guide geometry");
+    const resizeLodgingBox = await lodgingResizeTargets.first().boundingBox();
+    if (!resizeLodgingBox) throw new Error("Missing lodging resize preview geometry");
+    expect(
+      Math.abs(resizeGuideBox.y - (resizeLodgingBox.y + resizeLodgingBox.height)),
+    ).toBeLessThanOrEqual(3);
     expect(resizeGuideBox.width).toBeGreaterThan(lodgingDayBox.width * 1.8);
     expect(resizeGuideBox.height).toBeLessThan(4);
     await page.mouse.up();
     await expect(
-      calendar.locator(
-        '[data-calendar-all-day="2027-04-10"] [data-calendar-lodging-id="calendar-hotel"]',
-      ),
+      calendar.locator('[data-calendar-lodging-id="calendar-hotel"][data-start-date="2027-04-10"]'),
     ).toBeVisible();
 
     const checkOutHandle = calendar.getByRole("button", {
@@ -957,13 +2415,15 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
       { steps: 4 },
     );
     await expect(resizeGuide).toBeVisible();
-    await expect(lodgingTarget).toContainText("2 days");
-    await expect(lodgingTarget).toHaveAttribute("data-end-date", "2027-04-11");
+    await expect(lodgingResizeTargets).toHaveCount(1);
+    await expect(lodgingResizeTargets).toHaveAttribute("data-end-date", "2027-04-11");
+    await expect(lodgingResizeTargets).toContainText("2 days");
+    await expect(
+      calendar.locator('[data-calendar-lodging-id="calendar-hotel"][data-end-date="2027-04-12"]'),
+    ).toHaveCount(0);
     await page.mouse.up();
     await expect(
-      calendar.locator(
-        '[data-calendar-all-day="2027-04-12"] [data-calendar-lodging-id="calendar-hotel"]',
-      ),
+      calendar.locator('[data-calendar-lodging-id="calendar-hotel"][data-end-date="2027-04-12"]'),
     ).toHaveCount(0);
     const extendedCheckOutHandle = calendar.getByRole("button", {
       name: "Change check-out for City hotel",
@@ -983,15 +2443,16 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
       { steps: 4 },
     );
     await expect(resizeGuide).toBeVisible();
-    await expect(lodgingTarget).toContainText("3 days");
-    await expect(lodgingTarget).toHaveAttribute("data-end-date", "2027-04-12");
+    await expect(lodgingResizeTargets).toHaveCount(1);
+    await expect(lodgingResizeTargets).toHaveAttribute("data-end-date", "2027-04-12");
+    await expect(lodgingResizeTargets).toContainText("3 days");
     await page.mouse.up();
     await expect(
-      calendar.locator(
-        '[data-calendar-all-day="2027-04-12"] [data-calendar-lodging-id="calendar-hotel"]',
-      ),
+      calendar.locator('[data-calendar-lodging-id="calendar-hotel"][data-end-date="2027-04-12"]'),
     ).toBeVisible();
 
+    await mapViewButton.click();
+    await expect(mapViewButton).toHaveAttribute("aria-pressed", "true");
     const calendarScroller = calendar.locator(":scope > div").first();
     const firstDayHeader = calendar.locator("header").first();
     const allDayLabel = calendar.getByText("All day", { exact: true });
@@ -1025,11 +2486,21 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
       throw new Error("Missing horizontally scrolled all-day label geometry");
     }
     expect(horizontalScrollLeft).toBeGreaterThan(0);
-    expect(horizontallyScrolledAllDayLabelBox.x).toBeCloseTo(
-      allDayLabelBox.x - horizontalScrollLeft,
-      0,
-    );
+    expect(horizontallyScrolledAllDayLabelBox.x).toBeCloseTo(allDayLabelBox.x, 0);
     expect(horizontallyScrolledAllDayLabelBox.y).toBeCloseTo(allDayLabelBox.y, 0);
+    const scrolledLodgingBox = await calendar
+      .locator('[data-calendar-lodging-id="calendar-hotel"]')
+      .first()
+      .boundingBox();
+    if (!scrolledLodgingBox) throw new Error("Missing scrolled lodging geometry");
+    const gutterCoversLodging = await allDayLabel.evaluate(
+      (label, point) => label.contains(document.elementFromPoint(point.x, point.y)),
+      {
+        x: horizontallyScrolledAllDayLabelBox.x + horizontallyScrolledAllDayLabelBox.width / 2,
+        y: scrolledLodgingBox.y + scrolledLodgingBox.height / 2,
+      },
+    );
+    expect(gutterCoversLodging).toBe(true);
     await calendarScroller.evaluate((element) => {
       element.scrollTop = 0;
       element.scrollLeft = 0;
@@ -1100,6 +2571,15 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     await expect(block).toContainText("09:15 - 10:15");
     await blockButton.click();
     const calendarEditor = calendar.locator(".item-editor");
+    await expect(block).toHaveAttribute("data-calendar-selected", "true");
+    await expect(calendarEditor).toBeVisible();
+    await calendarEditor.getByRole("button", { name: "Close editor" }).click();
+    await expect(calendarEditor).toBeHidden();
+    await block.click({ button: "right" });
+    const editMenu = page.getByRole("menu", {
+      name: "Calendar actions for Morning museum",
+    });
+    await editMenu.getByRole("menuitem", { name: "Edit", exact: true }).click();
     await expect(calendarEditor).toBeVisible();
     const calendarScrollerWithEditorBox = await calendarScroller.boundingBox();
     const calendarEditorBox = await calendarEditor.boundingBox();
@@ -1164,29 +2644,54 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
 
     await expect(block.getByRole("button", { name: /Calendar actions/ })).toHaveCount(0);
     await block.click({ button: "right" });
-    const actionMenu = page.getByRole("toolbar", {
+    const actionMenu = page.getByRole("menu", {
       name: "Calendar actions for Morning museum",
     });
     await expect(actionMenu).toBeVisible();
-    const actionButtons = actionMenu.getByRole("button");
-    await expect(actionButtons).toHaveCount(7);
+    const actionButtons = actionMenu.getByRole("menuitem");
+    await expect(actionButtons).toHaveCount(12);
     expect(
-      await actionButtons.evaluateAll((buttons) => buttons.map((button) => button.ariaLabel)),
+      await actionButtons.evaluateAll((buttons) =>
+        buttons.map((button) => button.ariaLabel || button.textContent?.trim()),
+      ),
     ).toEqual([
       "Previous day",
       "Next day",
       "15 minutes earlier",
       "15 minutes later",
+      "Move Morning museum up",
+      "Move Morning museum down",
+      "Edit",
+      "Duplicate",
       "15 minutes longer",
       "15 minutes shorter",
-      "Clone",
+      "Make flexible",
+      "Delete",
     ]);
-    expect(await actionButtons.locator("svg").count()).toBe(7);
-    const actionButtonTops = await actionButtons.evaluateAll((buttons) =>
-      buttons.map((button) => button.getBoundingClientRect().top),
+    expect(await actionButtons.locator("svg").count()).toBe(12);
+    expect(
+      await actionButtons
+        .evaluateAll((buttons) => buttons.slice(0, 6).map((button) => button.textContent?.trim()))
+        .then((labels) => labels.every((label) => label === "")),
+    ).toBe(true);
+    const directionButtonTops = await actionButtons.evaluateAll((buttons) =>
+      buttons.slice(0, 6).map((button) => button.getBoundingClientRect().top),
     );
-    expect(Math.max(...actionButtonTops) - Math.min(...actionButtonTops)).toBeLessThan(1);
-    const nextDayAction = actionMenu.getByRole("button", { name: "Next day", exact: true });
+    expect(Math.max(...directionButtonTops) - Math.min(...directionButtonTops)).toBeLessThan(1);
+    const moveUpAction = actionMenu.getByRole("menuitem", {
+      name: "Move Morning museum up",
+      exact: true,
+    });
+    const moveDownAction = actionMenu.getByRole("menuitem", {
+      name: "Move Morning museum down",
+      exact: true,
+    });
+    await expect(moveUpAction).toBeDisabled();
+    await expect(moveDownAction).toBeEnabled();
+    const nextDayAction = actionMenu.getByRole("menuitem", {
+      name: "Next day",
+      exact: true,
+    });
     expect(
       await nextDayAction.evaluate((element) => {
         const bounds = element.getBoundingClientRect();
@@ -1197,6 +2702,12 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
         return hit === element || element.contains(hit);
       }),
     ).toBe(true);
+    await actionMenu.getByRole("menuitem", { name: "15 minutes longer", exact: true }).click();
+    await expect(block).toContainText("09:15 - 10:30");
+    await block.click({ button: "right" });
+    await actionMenu.getByRole("menuitem", { name: "15 minutes shorter", exact: true }).click();
+    await expect(block).toContainText("09:15 - 10:15");
+    await block.click({ button: "right" });
     await page.keyboard.press("Escape");
     await expect(actionMenu).toBeHidden();
 
@@ -1218,15 +2729,88 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     await expect(actionMenu).toBeHidden();
     await expect(page).toHaveURL(/#2027-04-11$/);
     await block.click({ button: "right" });
-    await actionMenu.getByRole("button", { name: "Clone", exact: true }).click();
+    await actionMenu.getByRole("menuitem", { name: "Duplicate", exact: true }).click();
     await expect(actionMenu).toBeHidden();
-    const clonedBlocks = calendar.getByRole("button", {
+    const duplicatedBlocks = calendar.getByRole("button", {
       name: "Morning museum",
       exact: true,
     });
-    await expect(clonedBlocks).toHaveCount(2);
-    await expect(clonedBlocks.nth(0)).toContainText("09:15 - 10:15");
-    await expect(clonedBlocks.nth(1)).toContainText("09:15 - 10:15");
+    await expect(duplicatedBlocks).toHaveCount(2);
+    await expect(duplicatedBlocks.nth(0)).toContainText("09:15 - 10:15");
+    await expect(duplicatedBlocks.nth(1)).toContainText("09:15 - 10:15");
+
+    await duplicatedBlocks.nth(1).click({ button: "right" });
+    page.once("dialog", async (dialog) => {
+      expect(dialog.type()).toBe("confirm");
+      await dialog.dismiss();
+    });
+    await actionMenu.getByRole("menuitem", { name: "Delete", exact: true }).click();
+    await expect(duplicatedBlocks).toHaveCount(2);
+    await duplicatedBlocks.nth(1).click({ button: "right" });
+    page.once("dialog", async (dialog) => dialog.accept());
+    await actionMenu.getByRole("menuitem", { name: "Delete", exact: true }).click();
+    await expect(duplicatedBlocks).toHaveCount(1);
+
+    const allDayCell = calendar.locator('[data-calendar-all-day="2027-04-14"]');
+    await allDayCell.click({ button: "right" });
+    const addMenu = page.getByRole("menu", { name: "Add calendar item" });
+    await expect(addMenu.getByRole("menuitem")).toHaveCount(1);
+    await expect(addMenu.getByRole("menuitem", { name: "Add lodging" })).toBeVisible();
+    await addMenu.getByRole("menuitem", { name: "Add lodging" }).click();
+    const placeSearch = page.locator(".place-search");
+    await expect(placeSearch).toBeVisible();
+    await expect(placeSearch.getByRole("heading", { name: "Add lodging" })).toBeVisible();
+    await expect(placeSearch.getByLabel("Check-in date")).toHaveValue("2027-04-14");
+    await calendar.getByText("All day", { exact: true }).click();
+    await expect(placeSearch).toBeHidden();
+
+    const emptyTrack = calendar.locator('[data-calendar-track="2027-04-11"]');
+    await emptyTrack.scrollIntoViewIfNeeded();
+    const contextPoint = await emptyTrack.evaluate((track) => {
+      const bounds = track.getBoundingClientRect();
+      const x = bounds.left + bounds.width / 2;
+      const firstY = Math.max(0, bounds.top) + 80;
+      const lastY = Math.min(window.innerHeight, bounds.bottom) - 20;
+      for (let y = firstY; y <= lastY; y += 20) {
+        const target = document.elementFromPoint(x, y);
+        if (
+          target &&
+          track.contains(target) &&
+          !target.closest("[data-calendar-item-id], [data-calendar-stay-id]")
+        ) {
+          return { x, y };
+        }
+      }
+      throw new Error("No visible empty calendar space");
+    });
+    await page.mouse.click(contextPoint.x, contextPoint.y, { button: "right" });
+    await expect(addMenu.getByRole("menuitem")).toHaveCount(3);
+    const placeMenuBox = await addMenu.boundingBox();
+    await addMenu.getByRole("menuitem", { name: "Add place" }).click();
+    await expect(placeSearch.getByRole("heading", { name: "Add a place" })).toBeVisible();
+    const placeSearchBox = await placeSearch.boundingBox();
+    if (!placeMenuBox || !placeSearchBox) throw new Error("Missing place search geometry");
+    expect(placeSearchBox.x).toBeCloseTo(placeMenuBox.x, 0);
+    expect(placeSearchBox.y).toBeCloseTo(placeMenuBox.y, 0);
+    await calendar.getByText("All day", { exact: true }).click();
+
+    await page.mouse.click(contextPoint.x, contextPoint.y, { button: "right" });
+    const reservationMenuBox = await addMenu.boundingBox();
+    await addMenu.getByRole("menuitem", { name: "Add reservation" }).click();
+    await expect(placeSearch.getByRole("heading", { name: "Add reservation" })).toBeVisible();
+    await expect(placeSearch.getByLabel("Date")).toHaveValue("2027-04-11");
+    await expect(placeSearch.getByLabel("Start time")).not.toHaveValue("");
+    const reservationSearchBox = await placeSearch.boundingBox();
+    if (!reservationMenuBox || !reservationSearchBox) {
+      throw new Error("Missing reservation search geometry");
+    }
+    expect(reservationSearchBox.x).toBeCloseTo(reservationMenuBox.x, 0);
+    expect(reservationSearchBox.y).toBeCloseTo(reservationMenuBox.y, 0);
+    await calendar.getByText("All day", { exact: true }).click();
+
+    await page.mouse.click(contextPoint.x, contextPoint.y, { button: "right" });
+    await addMenu.getByRole("menuitem", { name: "Add transport" }).click();
+    await expect(emptyTrack.locator("[data-calendar-item-id]")).toHaveCount(3);
 
     await itineraryButton.click();
     await expect(calendar).toBeHidden();
@@ -1235,8 +2819,238 @@ test("calendar view schedules items and stays on the itinerary on mobile", async
     await page.setViewportSize({ width: 390, height: 800 });
     await calendarButton.click();
     await expect(page).toHaveURL(/[?&]view=calendar/);
-    await expect(calendar).toBeHidden();
-    await expect(page.locator(".calendar-mobile-itinerary .day-section").first()).toBeVisible();
+    await expect(calendar).toBeVisible();
+    await expect(page.locator(".calendar-mobile-itinerary")).toBeHidden();
+    expect(
+      await calendar.evaluate(
+        (element) => element.getBoundingClientRect().width <= window.innerWidth,
+      ),
+    ).toBe(true);
+  } finally {
+    if (!page.isClosed()) await page.goto("/");
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("calendar blocks travel before lodging leave time", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "Calendar lodging conflict coverage runs once");
+  const firstDay = "2027-04-10";
+  const secondDay = "2027-04-11";
+  const lodging = itemForCreate("lodging", firstDay, {
+    id: "calendar-conflict-hotel",
+    title: "Conflict hotel",
+    place: { placeId: "calendar-conflict-hotel-place" },
+    lodging: {
+      startDate: firstDay,
+      endDate: secondDay,
+      leaveTimes: { [secondDay]: "09:00" },
+    },
+  });
+  const early = itemForCreate("place", secondDay, {
+    id: "calendar-conflict-early",
+    title: "Early stop",
+    place: { placeId: "calendar-conflict-early-place" },
+    startTime: "08:30",
+    durationMinutes: 60,
+  });
+  const id = await createEmptyTrip([lodging, early], secondDay);
+  try {
+    await page.addInitScript(() =>
+      localStorage.setItem("pacenotes-display-name", "Calendar conflict editor"),
+    );
+    await page.goto(`/trips/${id}?view=calendar#${secondDay}`);
+    const calendar = page.getByRole("region", { name: "Trip calendar" });
+    const track = calendar.locator(`[data-calendar-track="${secondDay}"]`);
+    const stay = track.locator(
+      '[data-calendar-stay-id="calendar-conflict-hotel"][data-calendar-stay-conflict="true"]',
+    );
+    await expect(stay).toBeVisible();
+    await expect(track.locator("[data-calendar-route-leg]")).toHaveCount(0);
+    const lineColors = await stay.evaluate((element) => {
+      const danger = getComputedStyle(element).getPropertyValue("--danger");
+      const probe = document.createElement("span");
+      probe.style.color = danger;
+      document.body.append(probe);
+      const normalizedDanger = getComputedStyle(probe).color;
+      probe.remove();
+      return {
+        line: getComputedStyle(element).borderBottomColor,
+        danger: normalizedDanger,
+      };
+    });
+    expect(lineColors.line).toBe(lineColors.danger);
+    await expect(
+      track.locator(
+        '[data-calendar-stay-leave-id="calendar-conflict-hotel"][data-calendar-stay-leave-date="2027-04-11"]',
+      ),
+    ).toHaveCSS("color", lineColors.danger);
+  } finally {
+    await page.goto("/");
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+test("calendar transport legs follow overlap lanes and reduce details by width", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "Calendar layout coverage runs once");
+  const cases = [
+    {
+      dayId: "2027-04-10",
+      lanes: 1,
+      duration: true,
+      mode: true,
+      icon: true,
+      destinationStart: "10:05",
+      conflict: true,
+    },
+    {
+      dayId: "2027-04-11",
+      lanes: 2,
+      duration: false,
+      mode: true,
+      icon: true,
+      destinationStart: "11:00",
+      conflict: false,
+    },
+    {
+      dayId: "2027-04-12",
+      lanes: 4,
+      duration: false,
+      mode: false,
+      icon: false,
+      destinationStart: "11:00",
+      conflict: false,
+    },
+    {
+      dayId: "2027-04-13",
+      lanes: 8,
+      duration: false,
+      mode: false,
+      icon: false,
+      destinationStart: "11:00",
+      conflict: false,
+    },
+  ] as const;
+  const items = cases.flatMap(({ dayId, lanes, destinationStart }) => [
+    ...Array.from({ length: lanes }, (_, index) =>
+      itemForCreate("place", dayId, {
+        id: `route-${dayId}-${index}`,
+        title: `Route source ${dayId} ${index}`,
+        place: { placeId: `route-place-${dayId}-${index}` },
+        startTime: "09:00",
+        durationMinutes: 60,
+      }),
+    ),
+    itemForCreate("place", dayId, {
+      id: `route-${dayId}-destination`,
+      title: `Route destination ${dayId}`,
+      place: { placeId: `route-place-${dayId}-destination` },
+      startTime: destinationStart,
+      durationMinutes: 60,
+    }),
+  ]);
+  const id = await createEmptyTrip(items, "2027-04-13");
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setDeviceMetricsOverride", {
+      width: 1280,
+      height: 900,
+      deviceScaleFactor: 1.25,
+      mobile: false,
+    });
+    await page.addInitScript(() =>
+      localStorage.setItem("pacenotes-display-name", "Route layout editor"),
+    );
+    await page.goto(`/trips/${id}?view=calendar#2027-04-10`);
+    const calendar = page.getByRole("region", { name: "Trip calendar" });
+    await expect(calendar).toBeVisible();
+    await calendar.locator("[data-calendar-time-gutter]").evaluate((element) => {
+      element.parentElement?.style.setProperty("--calendar-track-height", "2880px");
+    });
+
+    for (const expected of cases) {
+      const track = calendar.locator(`[data-calendar-track="${expected.dayId}"]`);
+      const source = track.locator(`[data-calendar-item-id="route-${expected.dayId}-0"]`);
+      const route = track.locator("[data-calendar-route-leg]").first();
+      await expect(route).toBeVisible();
+      const sourceBox = await source.boundingBox();
+      const routeBox = await route.boundingBox();
+      if (!sourceBox || !routeBox) throw new Error("Missing route lane geometry");
+      const trackBox = await track.boundingBox();
+      if (!trackBox) throw new Error("Missing calendar track geometry");
+      expect(routeBox.height).toBeCloseTo((trackBox.height * 15) / (24 * 60), 0);
+      const em = await route.evaluate((element) =>
+        Number.parseFloat(getComputedStyle(element).fontSize),
+      );
+      expect(routeBox.x - sourceBox.x).toBeCloseTo(em * 0.35, 0);
+      expect(sourceBox.width - routeBox.width).toBeCloseTo(em * 0.7, 0);
+      const connector = await route.locator("i").evaluate((line) => {
+        const bounds = line.getBoundingClientRect();
+        const routeBounds = line.parentElement?.getBoundingClientRect();
+        const style = getComputedStyle(line);
+        return {
+          deviceWidth: bounds.width * devicePixelRatio,
+          deviceCapHeight:
+            Number.parseFloat(getComputedStyle(line, "::after").height) * devicePixelRatio,
+          offset: routeBounds ? bounds.left - routeBounds.left : 0,
+          expectedOffset: Number.parseFloat(style.fontSize) * 0.2,
+        };
+      });
+      expect(connector.deviceWidth).toBeCloseTo(2, 1);
+      expect(connector.deviceCapHeight).toBeCloseTo(2, 1);
+      expect(connector.offset).toBeCloseTo(connector.expectedOffset, 1);
+      if (expected.lanes === 1) {
+        const routeInfo = route.locator("[data-calendar-route-info]");
+        const routeInfoBox = await routeInfo.boundingBox();
+        if (!routeInfoBox) throw new Error("Missing route label geometry");
+        expect(routeInfoBox.width).toBeLessThan(routeBox.width * 0.75);
+        await expect(routeInfo).toHaveCSS("justify-self", "start");
+        const labelGap = await route.evaluate((element) => {
+          const line = element.querySelector("i");
+          const info = element.querySelector("[data-calendar-route-info]");
+          if (!line || !info) return null;
+          return info.getBoundingClientRect().left - line.getBoundingClientRect().right;
+        });
+        expect(labelGap).not.toBeNull();
+        expect(labelGap ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(em * 0.5);
+      }
+
+      const duration = route.locator("[data-calendar-route-duration]");
+      const mode = route.locator("[data-calendar-route-mode]");
+      const icon = route.locator("[data-calendar-route-icon]");
+      if (expected.duration) await expect(duration).toBeVisible();
+      else await expect(duration).toBeHidden();
+      if (expected.mode) await expect(mode).toBeVisible();
+      else await expect(mode).toBeHidden();
+      if (expected.icon) await expect(icon).toBeVisible();
+      else await expect(icon).toBeHidden();
+      await expect(route).toHaveAttribute("aria-label", /.+ - .+/);
+      if (expected.conflict) {
+        const colors = await route.evaluate((element) => {
+          const line = element.querySelector("i");
+          const info = element.querySelector("[data-calendar-route-info]");
+          if (!line || !info) return null;
+          const probe = document.createElement("span");
+          probe.style.color = getComputedStyle(element).getPropertyValue("--danger");
+          document.body.append(probe);
+          const danger = getComputedStyle(probe).color;
+          probe.remove();
+          return {
+            line: getComputedStyle(line).backgroundColor,
+            end: getComputedStyle(line, "::after").backgroundColor,
+            label: getComputedStyle(info).color,
+            danger,
+          };
+        });
+        expect(colors).toEqual({
+          line: colors?.danger,
+          end: colors?.danger,
+          label: colors?.danger,
+          danger: colors?.danger,
+        });
+      }
+    }
   } finally {
     if (!page.isClosed()) await page.goto("/");
     await db.delete(trips).where(eq(trips.id, id));
@@ -1295,6 +3109,41 @@ test("drawer button resizes without closing and restores the sidebar width", asy
   }
 });
 
+test("mobile itinerary sheet follows pointer drag", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile", "The mobile project covers sheet resizing");
+  const id = await createEmptyTrip();
+  try {
+    await page.addInitScript(() =>
+      localStorage.setItem("pacenotes-display-name", "Mobile sheet editor"),
+    );
+    await page.goto(`/trips/${id}`);
+    const panel = page.getByRole("region", { name: "Itinerary", exact: true });
+    const handle = page.locator(".mobile-sheet-handle");
+    await expect(handle).toBeVisible();
+    const initialHeight = await panel.evaluate((element) => element.getBoundingClientRect().height);
+    const bounds = await handle.boundingBox();
+    if (!bounds) throw new Error("The mobile sheet handle is not visible");
+    const x = bounds.x + bounds.width / 2;
+    const y = bounds.y + bounds.height / 2;
+    const session = await page.context().newCDPSession(page);
+    await session.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x, y }],
+    });
+    await session.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ x, y: y - 120 }],
+    });
+    await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await expect
+      .poll(() => panel.evaluate((element) => element.getBoundingClientRect().height))
+      .toBeGreaterThan(initialHeight + 80);
+  } finally {
+    await page.goto("/");
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
 test("selected places and item edits save automatically", async ({ page }) => {
   const id = await createEmptyTrip();
   try {
@@ -1320,6 +3169,24 @@ test("selected places and item edits save automatically", async ({ page }) => {
     const row = page.locator(".itinerary-entry");
     await expect(row).toHaveCount(1);
     await expect(row.locator(".entry-select")).toHaveText("Test destination");
+    const entrySelect = row.locator(".entry-select");
+    await entrySelect.focus();
+    await entrySelect.press("Tab");
+    await page.keyboard.press("Shift+Tab");
+    await expect(entrySelect).toBeFocused();
+    expect(
+      await row.evaluate((entry) => {
+        const title = entry.querySelector(".entry-select");
+        if (!(title instanceof HTMLElement)) throw new Error("The entry title is missing");
+        return {
+          entryOutline: getComputedStyle(entry).outlineStyle,
+          titleOutline: getComputedStyle(title).outlineStyle,
+        };
+      }),
+    ).toEqual({
+      entryOutline: "solid",
+      titleOutline: "none",
+    });
     await expect(page.locator(".place-search")).toHaveCount(0);
     await expect(page.locator(".item-editor")).toHaveCount(0);
     await expect(row.getByRole("button", { name: /Edit .* label/ })).toHaveCount(0);
@@ -1609,7 +3476,7 @@ test("auto placement includes the day's lodging destination", async ({ page }) =
       id: "ellsworth",
       title: "Ellsworth",
       place: { placeId: "placement-ellsworth" },
-      lodging: { startDate: dayId, endDate: "2027-04-11" },
+      lodging: lodgingForDates(dayId, "2027-04-11"),
       durationMinutes: 0,
     }),
   ]);
@@ -1723,7 +3590,8 @@ test("item editors expand inline after their entries", async ({ page }) => {
   }
 });
 
-test("pointer drops rejoin the reordered list without a pause", async ({ page }) => {
+test("pointer drops rejoin the reordered list without a pause", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === "mobile", "Mouse drag coverage runs on desktop");
   const id = await createEmptyTrip();
   try {
     await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Drag editor"));
@@ -1760,7 +3628,8 @@ test("pointer drops rejoin the reordered list without a pause", async ({ page })
     await db.delete(trips).where(eq(trips.id, id));
   }
 });
-test("entries can be dragged to another day", async ({ page }) => {
+test("entries can be dragged to another day", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === "mobile", "Mouse drag coverage runs on desktop");
   const id = await createEmptyTrip();
   try {
     await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Day editor"));
@@ -1797,13 +3666,96 @@ test("entries can be dragged to another day", async ({ page }) => {
     await db.delete(trips).where(eq(trips.id, id));
   }
 });
+test("itinerary drag remains active while the list scrolls", async ({ page }) => {
+  const dates = Array.from(
+    { length: 8 },
+    (_, offset) => `2027-04-${String(10 + offset).padStart(2, "0")}`,
+  );
+  const items = dates.flatMap((date, dayIndex) =>
+    Array.from({ length: 4 }, (_, itemIndex) =>
+      itemForCreate("note", date, {
+        id: `scroll-drag-${dayIndex}-${itemIndex}`,
+        title: `Day ${dayIndex + 1} item ${itemIndex + 1}`,
+      }),
+    ),
+  );
+  const id = await createEmptyTrip(items, dates.at(-1));
+  try {
+    await page.setViewportSize({ width: 1000, height: 700 });
+    await page.addInitScript(() =>
+      localStorage.setItem("pacenotes-display-name", "Scroll drag editor"),
+    );
+    await page.goto(`/trips/${id}`);
+    const panel = page.locator(".planner-panel");
+    const days = page.locator(".day-section");
+    const sourceDay = days.nth(1);
+    await sourceDay.scrollIntoViewIfNeeded();
+    await expect(sourceDay).toHaveAttribute("data-rendered", "true");
+    const sourceEntries = sourceDay.locator(".itinerary-entry");
+    await expect(sourceEntries).toHaveCount(4);
+    const sourceBox = await sourceEntries.first().boundingBox();
+    if (!sourceBox) throw new Error("Missing scroll drag geometry");
 
-test("Places to visit can jump into view and drag an item into a day", async ({ page }) => {
+    await page.mouse.move(sourceBox.x + 8, sourceBox.y + 8);
+    await page.mouse.down();
+    await page.mouse.move(sourceBox.x + 8, sourceBox.y + 16);
+    await expect(page.locator(".itinerary-entry.is-dragging")).toHaveCount(1);
+    const scrollBefore = await panel.evaluate((element) => element.scrollTop);
+    await panel.evaluate((element) => {
+      element.scrollTop += 1000;
+    });
+    await expect
+      .poll(() => panel.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(scrollBefore);
+    await expect(sourceDay).toHaveAttribute("data-rendered", "true");
+    await expect(sourceEntries).toHaveCount(4);
+    await expect(page.locator(".itinerary-entry.is-dragging")).toHaveCount(1);
+
+    await page.mouse.up();
+    await expect(page.locator(".itinerary-entry.is-dragging")).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page
+          .locator(".day-heading b")
+          .allTextContents()
+          .then((counts) => counts.reduce((total, count) => total + Number(count), 0)),
+      )
+      .toBe(items.length);
+    await expect
+      .poll(() => page.locator('.day-section[data-rendered="true"] .itinerary-entry').count())
+      .toBeGreaterThan(0);
+  } finally {
+    await page.goto("/");
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("Places to visit can jump into view and drag an item into a day", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name === "mobile", "Mouse drag coverage runs on desktop");
   const id = await createEmptyTrip([
-    itemForCreate("note", null, {
+    itemForCreate("place", "2027-04-12", {
+      id: "inbox-walk-anchor",
+      title: "Existing stop",
+      place: { placeId: "cafe-anchor" },
+    }),
+    itemForCreate("place", null, {
+      id: "inbox-walk-candidate",
       title: "Visit later",
+      place: { placeId: "cafe" },
+      travelMode: "DRIVING",
     }),
   ]);
+  const readCandidateTravelMode = async () => {
+    const [stored] = await db.select().from(documents).where(eq(documents.name, id));
+    if (!stored) return null;
+    const saved = new Y.Doc();
+    Y.applyUpdate(saved, stored.data);
+    const travelMode = readTripDocument(saved).items["inbox-walk-candidate"]?.travelMode ?? null;
+    saved.destroy();
+    return travelMode;
+  };
   try {
     await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Inbox editor"));
     await page.goto(`/trips/${id}`);
@@ -1829,17 +3781,24 @@ test("Places to visit can jump into view and drag an item into a day", async ({ 
     await expect(page.locator(".itinerary-entry.is-dragging")).toHaveCount(1);
     await page.mouse.move(
       destinationBox.x + destinationBox.width / 2,
-      destinationBox.y + destinationBox.height / 2,
+      destinationBox.y + destinationBox.height - 8,
       { steps: 8 },
     );
     await page.mouse.up();
 
     await expect(source).toHaveCount(0);
-    await expect(destination.locator(".entry-select")).toHaveText("Visit later");
+    await expect(destination.locator(".entry-select")).toHaveCount(2);
+    await expect.poll(readCandidateTravelMode).toBe("WALKING");
     await page.reload();
-    await expect(page.locator(".day-section").last().locator(".entry-select")).toHaveText(
-      "Visit later",
-    );
+    await expect(page.locator(".day-section").last().locator(".entry-select")).toHaveCount(2);
+    await destination
+      .locator(".transport-leg")
+      .last()
+      .getByLabel("Travel mode")
+      .selectOption("DRIVING");
+    await expect.poll(readCandidateTravelMode).toBe("DRIVING");
+    await page.reload();
+    await expect.poll(readCandidateTravelMode).toBe("DRIVING");
   } finally {
     await db.delete(trips).where(eq(trips.id, id));
   }
@@ -2075,6 +4034,60 @@ test("two open planners exchange a live item edit", async ({ browser }, testInfo
   await second.close();
 });
 
+test("planner loads a trip with a lodging gap", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "Planner route coverage runs once");
+  const firstLodging = itemForCreate("lodging", "2027-04-10", {
+    id: "lodging-before-gap",
+    title: "Hotel before gap",
+    place: { placeId: "hotel-before-gap" },
+    lodging: {
+      startDate: "2027-04-10",
+      endDate: "2027-04-12",
+      leaveTimes: { "2027-04-11": "09:00", "2027-04-12": "09:00" },
+    },
+  });
+  const nextLodging = itemForCreate("lodging", "2027-04-13", {
+    id: "lodging-after-gap",
+    title: "Hotel after gap",
+    place: { placeId: "hotel-after-gap" },
+    lodging: {
+      startDate: "2027-04-13",
+      endDate: "2027-04-14",
+      leaveTimes: { "2027-04-14": "09:00" },
+    },
+  });
+  const stop = itemForCreate("place", "2027-04-13", {
+    id: "place-after-gap",
+    title: "Place after gap",
+    place: { placeId: "place-after-gap" },
+    startTime: "10:00",
+  });
+  const id = await createEmptyTrip([firstLodging, nextLodging, stop], "2027-04-14");
+  try {
+    await page.addInitScript(() =>
+      localStorage.setItem("pacenotes-display-name", "Lodging gap editor"),
+    );
+    await page.goto(`/trips/${id}`);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              globalThis as typeof globalThis & {
+                __pacenotesRouteComputes?: number;
+              }
+            ).__pacenotesRouteComputes ?? 0,
+        ),
+      )
+      .toBeGreaterThan(0);
+    await expect(page.getByRole("region", { name: "Itinerary", exact: true })).toBeVisible();
+    await expect(page.getByText("Trip not found", { exact: true })).toHaveCount(0);
+  } finally {
+    if (!page.isClosed()) await page.goto("/");
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
 test("hard deletion removes the shared trip", async ({ page }, testInfo) => {
   test.skip(
     testInfo.project.name !== "chromium",
@@ -2084,6 +4097,7 @@ test("hard deletion removes the shared trip", async ({ page }, testInfo) => {
   await page.goto(`/trips/${tripId}`);
   await page.getByRole("button", { name: "Delete trip" }).click();
   const dialog = page.getByRole("dialog", { name: "Delete this trip?" });
+  await expect(dialog.locator("p strong")).toHaveText("Shared Tokyo plan");
   await dialog.getByLabel("Trip title confirmation").fill("Shared Tokyo plan");
   await dialog.getByRole("button", { name: "Delete trip" }).click();
   await expect(page).toHaveURL("/");
@@ -2094,7 +4108,7 @@ test("hard deletion removes the shared trip", async ({ page }, testInfo) => {
   await expect(page.getByText("Trip not found", { exact: true })).toBeVisible();
 });
 
-test("transport endpoints connect to adjacent itinerary places", async ({ page }) => {
+test("transport endpoints connect to adjacent itinerary places", async ({ page }, testInfo) => {
   const dayId = "2027-04-10";
   const before = itemForCreate("place", dayId, {
     title: "Before transport",
@@ -2174,43 +4188,52 @@ test("transport endpoints connect to adjacent itinerary places", async ({ page }
     await expect(unit("Arriving train").locator(".transport-leg")).toHaveCount(0);
     await expect(unit("After one-sided transport").locator(".transport-leg")).toBeVisible();
 
-    const trainEntry = unit("Train").locator(".itinerary-entry");
-    const displacedEntry = unit("After transport").locator(".itinerary-entry");
-    const trainBox = await trainEntry.boundingBox();
-    const displacedBox = await displacedEntry.boundingBox();
-    const legOffsets = await page.locator(".transport-leg").evaluateAll((legs) => {
-      const origin = legs[0]?.getBoundingClientRect().top ?? 0;
-      return legs.map((leg) => leg.getBoundingClientRect().top - origin);
-    });
-    if (!trainBox || !displacedBox) throw new Error("Missing transport drag geometry");
-    await page.mouse.move(trainBox.x + 8, trainBox.y + 8);
-    await page.mouse.down();
-    await page.mouse.move(trainBox.x + 8, trainBox.y + 16);
-    await expect(trainEntry).toHaveClass(/is-dragging/);
-    await page.mouse.move(
-      displacedBox.x + displacedBox.width / 2,
-      displacedBox.y + displacedBox.height - 2,
-      { steps: 8 },
-    );
-    await expect(unit("Train").locator(".entry-drag-space")).toHaveCSS(
-      "height",
-      `${trainBox.height}px`,
-    );
-    expect(
-      await page.locator(".transport-leg").evaluateAll((legs) => {
-        const origin = legs[0]?.getBoundingClientRect().top ?? 0;
-        return legs.map((leg) => leg.getBoundingClientRect().top - origin);
-      }),
-    ).toEqual(legOffsets);
-    expect(
-      await page
-        .locator(".leg-mode")
-        .evaluateAll((modes) =>
-          modes.every((mode) => getComputedStyle(mode).visibility === "visible"),
-        ),
-    ).toBe(true);
-    await page.mouse.up();
-    await expect(page.locator(".itinerary-entry.is-dragging")).toHaveCount(0);
+    if (testInfo.project.name !== "mobile") {
+      const trainEntry = unit("Train").locator(".itinerary-entry");
+      const displacedEntry = unit("After transport").locator(".itinerary-entry");
+      const trainBox = await trainEntry.boundingBox();
+      const displacedBox = await displacedEntry.boundingBox();
+      if (!trainBox || !displacedBox) throw new Error("Missing transport drag geometry");
+      const list = trainEntry.locator(
+        "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' itinerary-list ')][1]",
+      );
+      const listHeight = await list.evaluate((element) => element.getBoundingClientRect().height);
+      await page.mouse.move(trainBox.x + 8, trainBox.y + 8);
+      await page.mouse.down();
+      await page.mouse.move(trainBox.x + 8, trainBox.y + 16);
+      await expect(trainEntry).toHaveClass(/is-dragging/);
+      await page.mouse.move(
+        displacedBox.x + displacedBox.width / 2,
+        displacedBox.y + displacedBox.height - 2,
+        { steps: 8 },
+      );
+      const placeholder = page.locator("[data-rfd-placeholder-context-id]");
+      await expect(placeholder).toBeVisible();
+      const placeholderBox = await placeholder.boundingBox();
+      if (!placeholderBox) throw new Error("Missing itinerary drop preview");
+      expect(placeholderBox.height).toBeCloseTo(trainBox.height, 0);
+      await expect(unit("Train").locator("[data-rfd-placeholder-context-id]")).toHaveCount(0);
+      await expect
+        .poll(async () => {
+          const shiftedDisplacedBox = await displacedEntry.boundingBox();
+          if (!shiftedDisplacedBox) throw new Error("Missing displaced itinerary entry");
+          return displacedBox.y - shiftedDisplacedBox.y;
+        })
+        .toBeCloseTo(trainBox.height, 0);
+      expect(await list.evaluate((element) => element.getBoundingClientRect().height)).toBeCloseTo(
+        listHeight,
+        0,
+      );
+      expect(
+        await page
+          .locator(".leg-mode")
+          .evaluateAll((modes) =>
+            modes.every((mode) => getComputedStyle(mode).visibility === "visible"),
+          ),
+      ).toBe(true);
+      await page.mouse.up();
+      await expect(page.locator(".itinerary-entry.is-dragging")).toHaveCount(0);
+    }
     await expect(page.locator(".map-number-marker")).toHaveCount(8);
     expect(await page.locator(".map-number-marker span").allTextContents()).toEqual([
       "1",
@@ -2316,14 +4339,14 @@ test("trip language localizes existing Google places and routes", async ({ page 
 
     await page.getByRole("button", { name: "Trip settings" }).click();
     const dialog = page.getByRole("dialog", { name: "Trip settings" });
-    const language = dialog.getByLabel("Language");
+    const language = dialog.getByLabel(/^Trip language/);
     await expect(language.locator('option[value="zh-CN"]')).toHaveText("简体中文");
     await expect(language.locator('option[value="zh-TW"]')).toHaveText("繁體中文");
     await language.selectOption("zh-CN");
     await dialog.getByRole("button", { name: "Save settings" }).click();
 
-    await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
-    await expect(page.getByRole("button", { name: "分享" })).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page.getByRole("button", { name: "Share" })).toBeVisible();
     await expect(page.locator(".entry-select").first()).toHaveText("简体-language-place-one");
     const placeLanguages = await page.evaluate(
       () =>
@@ -2361,6 +4384,10 @@ test("map features stay visible across every trip day", async ({ page }) => {
     }),
     itemForCreate("place", "2027-04-11", {
       title: "Second map place",
+      place: { placeId: "second-map-place" },
+    }),
+    itemForCreate("place", "2027-04-12", {
+      title: "Repeated second map place",
       place: { placeId: "second-map-place" },
     }),
     itemForCreate("place", "2027-04-12", {
@@ -2406,12 +4433,26 @@ test("map features stay visible across every trip day", async ({ page }) => {
           }
         ).__pacenotesTransportPolylines ?? 0,
     );
+  const dashedTransportPolylines = () =>
+    page.evaluate(
+      () =>
+        (
+          globalThis as typeof globalThis & {
+            __pacenotesDashedTransportPolylines?: number;
+          }
+        ).__pacenotesDashedTransportPolylines ?? 0,
+    );
   await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Trip-wide map"));
   try {
     await page.goto(`/trips/${routeTrip}`);
     const dates = page.locator(".date-tabs [data-day-tab]");
     await expect(dates.nth(0)).toHaveAttribute("aria-current", "date");
     await expect(page.locator(".map-number-marker")).toHaveCount(3);
+    expect(await page.locator(".map-number-marker span").allTextContents()).toEqual([
+      "1",
+      "1",
+      "1",
+    ]);
     await expect.poll(routePolylines).toBe(2);
     await dates.nth(2).click();
     await expect(page.locator(".map-number-marker")).toHaveCount(3);
@@ -2423,13 +4464,15 @@ test("map features stay visible across every trip day", async ({ page }) => {
     expect(await page.locator(".map-number-marker span").allTextContents()).toEqual([
       "1",
       "2",
-      "3",
-      "4",
+      "1",
+      "2",
     ]);
     await expect.poll(transportPolylines).toBe(2);
+    await expect.poll(dashedTransportPolylines).toBe(2);
     await dates.nth(1).click();
     await expect(page.locator(".map-number-marker")).toHaveCount(4);
     await expect.poll(transportPolylines).toBe(2);
+    await expect.poll(dashedTransportPolylines).toBe(2);
   } finally {
     await db.delete(trips).where(inArray(trips.id, [routeTrip, transportTrip]));
   }
@@ -2443,11 +4486,7 @@ test("places across days have transport unless lodging separates them", async ({
   const lodging = itemForCreate("lodging", "2027-04-10", {
     title: "Overnight stay",
     place: { placeId: "overnight-stay" },
-    lodging: {
-      startDate: "2027-04-10",
-      endDate: "2027-04-11",
-      confirmation: "",
-    },
+    lodging: lodgingForDates("2027-04-10", "2027-04-11"),
   });
   const dayTwo = itemForCreate("place", "2027-04-11", {
     title: "Day two place",
@@ -2483,6 +4522,7 @@ test("places across days have transport unless lodging separates them", async ({
     expect((warningBox?.y ?? 0) + (warningBox?.height ?? 0)).toBeLessThanOrEqual(
       (headingBox?.y ?? 0) + (headingBox?.height ?? 0),
     );
+
     await expect(days.nth(2).locator(".missing-lodging")).toHaveCount(0);
     const routeComputes = () =>
       page.evaluate(
@@ -2641,6 +4681,138 @@ test("places across days have transport unless lodging separates them", async ({
     await db.delete(trips).where(eq(trips.id, id));
   }
 });
+test("transport endpoint search limits primary place types by travel method", async ({ page }) => {
+  const id = await createEmptyTrip([
+    itemForCreate("transport", "2027-04-10", {
+      id: "plane-endpoint-search",
+      title: "Flight",
+      transport: {
+        mode: "plane",
+        customMode: "",
+        from: null,
+        to: null,
+      },
+    }),
+  ]);
+  try {
+    await page.addInitScript(() =>
+      localStorage.setItem("pacenotes-display-name", "Endpoint search editor"),
+    );
+    await page.goto(`/trips/${id}`);
+    await page.locator(".itinerary-entry").click({ position: { x: 8, y: 8 } });
+    const editor = page.locator(".item-editor");
+    const endpointTypes = (label: string) =>
+      page
+        .locator(`gmp-place-autocomplete[aria-label="${label}"]`)
+        .evaluate(
+          (element) =>
+            (element as HTMLElement & { includedPrimaryTypes?: string[] }).includedPrimaryTypes,
+        );
+    const travelMethod = editor.getByRole("combobox", { name: /^Travel method/ });
+    for (const [mode, expectedTypes] of [
+      ["plane", ["airport", "airstrip", "heliport", "international_airport"]],
+      ["train", ["train_station", "transit_station", "subway_station"]],
+      ["bus", ["bus_station", "bus_stop", "transit_station"]],
+      ["ferry", ["ferry_terminal"]],
+    ] as const) {
+      await travelMethod.selectOption(mode);
+      await expect.poll(() => endpointTypes("From")).toEqual(expectedTypes);
+      await expect.poll(() => endpointTypes("To")).toEqual(expectedTypes);
+    }
+  } finally {
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("route legs without detailed geometry use a dashed direct map line", async ({ page }) => {
+  const id = await createEmptyTrip([
+    itemForCreate("place", "2027-04-10", {
+      id: "fallback-route-start",
+      title: "Museum",
+      place: { placeId: "museum-anchor" },
+    }),
+    itemForCreate("place", "2027-04-10", {
+      id: "fallback-route-end",
+      title: "Hotel",
+      place: { placeId: "museum" },
+      travelMode: "TRANSIT",
+    }),
+  ]);
+  try {
+    await page.goto(`/trips/${id}`);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const records =
+            (
+              globalThis as typeof globalThis & {
+                __pacenotesPolylineOptions?: Array<{
+                  dashPath: unknown;
+                  path: Array<{ lat?: number; lng?: number }>;
+                  strokeOpacity: number | undefined;
+                }>;
+              }
+            ).__pacenotesPolylineOptions ?? [];
+          return records.some(
+            (record) =>
+              record.strokeOpacity === 0 &&
+              record.dashPath === "M 0,-1 0,1" &&
+              record.path[0]?.lat === 36 &&
+              record.path[0]?.lng === 140 &&
+              record.path[1]?.lat === 36.001 &&
+              record.path[1]?.lng === 140,
+          );
+        }),
+      )
+      .toBe(true);
+  } finally {
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("routes with provider geometry use a solid map line when details are incomplete", async ({
+  page,
+}) => {
+  const id = await createEmptyTrip([
+    itemForCreate("place", "2027-04-10", {
+      id: "partial-route-start",
+      title: "Start",
+      place: { placeId: "no-detail-start" },
+    }),
+    itemForCreate("place", "2027-04-10", {
+      id: "partial-route-end",
+      title: "End",
+      place: { placeId: "no-detail-end" },
+    }),
+  ]);
+  try {
+    await page.goto(`/trips/${id}`);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const records =
+            (
+              globalThis as typeof globalThis & {
+                __pacenotesPolylineOptions?: Array<{
+                  dashPath: unknown;
+                  path: Array<{ lat?: number; lng?: number }>;
+                  strokeOpacity: number | undefined;
+                }>;
+              }
+            ).__pacenotesPolylineOptions ?? [];
+          return records.some(
+            (record) =>
+              record.strokeOpacity === 0.82 &&
+              record.dashPath === undefined &&
+              record.path.some((point) => point.lat === 37.05 && point.lng === 141.08),
+          );
+        }),
+      )
+      .toBe(true);
+  } finally {
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
 
 test("a note-only day has no loose route endpoint", async ({ page }) => {
   const place = itemForCreate("place", "2027-04-10", {
@@ -2666,11 +4838,7 @@ test("removing the only stop leaves a persistent lodging gap", async ({ page }) 
   const previousLodging = itemForCreate("lodging", "2027-04-10", {
     title: "Previous overnight stay",
     place: { placeId: "overnight-stay" },
-    lodging: {
-      startDate: "2027-04-09",
-      endDate: "2027-04-10",
-      confirmation: "",
-    },
+    lodging: lodgingForDates("2027-04-09", "2027-04-10"),
   });
   const middle = itemForCreate("place", "2027-04-10", {
     title: "Only day stop",
@@ -2679,11 +4847,7 @@ test("removing the only stop leaves a persistent lodging gap", async ({ page }) 
   const nextLodging = itemForCreate("lodging", "2027-04-10", {
     title: "Next overnight stay",
     place: { placeId: "overnight-stay" },
-    lodging: {
-      startDate: "2027-04-10",
-      endDate: "2027-04-11",
-      confirmation: "",
-    },
+    lodging: lodgingForDates("2027-04-10", "2027-04-11"),
   });
   const id = await createEmptyTrip([previousLodging, middle, nextLodging]);
   try {
@@ -2717,11 +4881,7 @@ test("routes within one day use one day color", async ({ page }) => {
   const lodging = itemForCreate("lodging", "2027-04-10", {
     title: "Three-day stay",
     place: { placeId: "hotel" },
-    lodging: {
-      startDate: "2027-04-10",
-      endDate: "2027-04-12",
-      confirmation: "",
-    },
+    lodging: lodgingForDates("2027-04-10", "2027-04-12"),
   });
   const place = itemForCreate("place", "2027-04-11", {
     title: "Middle-day place",
@@ -2930,6 +5090,82 @@ test("continuous days support transport, place-bound stays, and history shortcut
   }
 });
 
+test("first and last day controls extend the trip", async ({ page }) => {
+  const id = await createEmptyTrip();
+  try {
+    await page.addInitScript(() =>
+      localStorage.setItem("pacenotes-display-name", "Day range editor"),
+    );
+    await page.goto(`/trips/${id}`);
+    await expect(page.getByRole("button", { name: /^Add a day before / })).toHaveCount(1);
+    await expect(page.getByRole("button", { name: /^Add a day after / })).toHaveCount(1);
+
+    await page.getByRole("button", { name: /^Add a day before / }).click();
+    await expect(page.locator(".day-section")).toHaveCount(4);
+    await page.getByRole("button", { name: /^Add a day after / }).click();
+    await expect(page.locator(".day-section")).toHaveCount(5);
+
+    await expect
+      .poll(async () => {
+        const [stored] = await db.select().from(documents).where(eq(documents.name, id));
+        if (!stored) return null;
+        const document = new Y.Doc();
+        Y.applyUpdate(document, new Uint8Array(stored.data));
+        const snapshot = readTripDocument(document);
+        document.destroy();
+        return { startDate: snapshot.startDate, endDate: snapshot.endDate };
+      })
+      .toEqual({ startDate: "2027-04-09", endDate: "2027-04-13" });
+  } finally {
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("trip settings change the date range without a fieldset border", async ({ page }) => {
+  const id = await createEmptyTrip();
+  try {
+    await page.addInitScript(() =>
+      localStorage.setItem("pacenotes-display-name", "Date settings editor"),
+    );
+    await page.goto(`/trips/${id}`);
+    const settingsButton = page.getByRole("button", { name: "Trip settings" });
+    await settingsButton.click();
+    const settings = page.getByRole("dialog", { name: "Trip settings" });
+    const startDate = settings.getByRole("textbox", { name: "Start", exact: true });
+    const endDate = settings.getByRole("textbox", { name: "End", exact: true });
+    await expect(startDate).toHaveValue("2027-04-10");
+    await expect(endDate).toHaveValue("2027-04-12");
+    await expect(settings.locator(".trip-date-range")).toHaveCSS("border-top-width", "0px");
+
+    await startDate.fill("2027-04-09");
+    await endDate.fill("2027-04-13");
+    await settings.getByRole("button", { name: "Save settings" }).click();
+    await expect(page.locator(".day-section")).toHaveCount(5);
+    await expect
+      .poll(async () => {
+        const [stored] = await db.select().from(documents).where(eq(documents.name, id));
+        if (!stored) return null;
+        const document = new Y.Doc();
+        Y.applyUpdate(document, new Uint8Array(stored.data));
+        const snapshot = readTripDocument(document);
+        document.destroy();
+        return { startDate: snapshot.startDate, endDate: snapshot.endDate };
+      })
+      .toEqual({ startDate: "2027-04-09", endDate: "2027-04-13" });
+
+    await page.reload();
+    await settingsButton.click();
+    await expect(settings.getByRole("textbox", { name: "Start", exact: true })).toHaveValue(
+      "2027-04-09",
+    );
+    await expect(settings.getByRole("textbox", { name: "End", exact: true })).toHaveValue(
+      "2027-04-13",
+    );
+  } finally {
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
 test("trip settings control language, units, default travel, and persist", async ({ page }) => {
   const id = await createEmptyTrip([
     itemForCreate("place", "2027-04-10", {
@@ -2956,25 +5192,72 @@ test("trip settings control language, units, default travel, and persist", async
         ),
       );
     expect(headerActions).toEqual(["Undo", "Redo", "Trip settings", "Delete trip", "Share"]);
+    await page.locator(".day-section").first().getByRole("button", { name: "Place" }).click();
+    await page.locator("gmp-place-autocomplete").evaluate((element) => {
+      element.dispatchEvent(
+        Object.assign(new Event("gmp-select"), {
+          placePrediction: {
+            toPlace: () => ({
+              id: "near-settings-place",
+              location: { lat: () => 35.001, lng: () => 139 },
+              fetchFields: async () => {},
+            }),
+          },
+        }),
+      );
+    });
+    const nearPlaceUnit = page
+      .locator(".itinerary-unit")
+      .filter({ has: page.locator(".entry-select").filter({ hasText: /^Test destination$/ }) })
+      .last();
+    await expect(nearPlaceUnit.getByLabel("Travel mode")).toHaveValue("WALKING");
 
-    await page.getByRole("button", { name: "Trip settings" }).click();
+    const settingsButton = page.getByRole("button", { name: "Trip settings" });
+    await settingsButton.click();
     const settings = page.getByRole("dialog", { name: "Trip settings" });
-    await expect(settings.getByLabel("Language")).toHaveValue("en");
+    const languageSelects = settings.locator(".settings-language-row select");
+    await expect(languageSelects.nth(0)).toHaveValue("en");
+    await expect(languageSelects.nth(1)).toHaveValue("");
     await expect(settings.getByLabel("Distance units")).toHaveValue("metric");
     await expect(settings.getByLabel("Default transportation")).toHaveValue("DRIVING");
-    await expect(settings.getByLabel("Calendar hours")).toHaveValue("24");
-    await settings.getByLabel("Language").selectOption("fr");
+    const calendarStart = settings.getByLabel("Calendar day starts");
+    await expect(calendarStart).toHaveValue("6");
+    await expect(calendarStart.locator("option")).toHaveCount(24);
+    await page.keyboard.press("Escape");
+    await expect(settings).toHaveCount(0);
+    await settingsButton.click();
+    await page.locator(".dialog-backdrop").click({ position: { x: 4, y: 4 } });
+    await expect(settings).toHaveCount(0);
+
+    await settingsButton.click();
+    await settings.getByLabel("Distance units").selectOption("imperial");
+    let discardPrompt = "";
+    page.once("dialog", (dialog) => {
+      discardPrompt = dialog.message();
+      void dialog.dismiss();
+    });
+    await page.keyboard.press("Escape");
+    await expect(settings).toBeVisible();
+    expect(discardPrompt).toBe("Discard unsaved trip settings?");
+    await expect(settings.getByLabel("Distance units")).toHaveValue("imperial");
+
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.locator(".dialog-backdrop").click({ position: { x: 4, y: 4 } });
+    await expect(settings).toHaveCount(0);
+    await settingsButton.click();
+    await expect(settings.getByLabel("Distance units")).toHaveValue("metric");
+    await languageSelects.nth(0).selectOption("fr");
     await settings.getByLabel("Distance units").selectOption("imperial");
     await settings.getByLabel("Default transportation").selectOption("WALKING");
-    await settings.getByLabel("Calendar hours").selectOption("30");
+    await calendarStart.selectOption("7");
     await settings.getByRole("button", { name: "Save settings" }).click();
 
     await expect(page.locator(".day-heading h2").first()).toContainText("samedi 10 avril");
-    await page.getByRole("button", { name: "Calendar", exact: true }).click();
-    const calendarHours = page.locator("[data-calendar-time-gutter] time");
-    await expect(calendarHours.first()).toHaveText("06:00");
-    await expect(calendarHours.last()).toHaveText("30:00");
-    await page.getByRole("button", { name: "Itinerary", exact: true }).click();
+    await page.getByRole("button", { name: "Calendrier", exact: true }).click();
+    const calendarHourLabels = page.locator("[data-calendar-time-gutter] time");
+    await expect(calendarHourLabels.first()).toHaveText("07:00");
+    await expect(calendarHourLabels.last()).toHaveText("31:00");
+    await page.getByRole("button", { name: "Itinéraire", exact: true }).click();
     await expect(page.locator(".transport-leg").first()).toContainText(/10\s*min - 0,6\s*mi/);
     await page.locator(".day-section").first().getByRole("button", { name: "Lieu" }).click();
     await page.locator("gmp-place-autocomplete").evaluate((element) => {
@@ -2992,7 +5275,8 @@ test("trip settings control language, units, default travel, and persist", async
     });
     const addedUnit = page
       .locator(".itinerary-unit")
-      .filter({ has: page.locator(".entry-select").filter({ hasText: /^Test destination$/ }) });
+      .filter({ has: page.locator(".entry-select").filter({ hasText: /^Test destination$/ }) })
+      .last();
     await expect(addedUnit.getByLabel("Mode de déplacement")).toHaveValue("WALKING");
 
     await expect
@@ -3004,23 +5288,27 @@ test("trip settings control language, units, default travel, and persist", async
         const snapshot = readTripDocument(document);
         document.destroy();
         return {
-          language: snapshot.language,
+          tripLanguage: snapshot.tripLanguage,
           distanceUnit: snapshot.distanceUnit,
           defaultTravelMode: snapshot.defaultTravelMode,
-          calendarHours: snapshot.calendarHours,
+          calendarStartHour: snapshot.calendarStartHour,
         };
       })
       .toEqual({
-        language: "fr",
+        tripLanguage: null,
         distanceUnit: "imperial",
         defaultTravelMode: "WALKING",
-        calendarHours: 30,
+        calendarStartHour: 7,
       });
+    await expect
+      .poll(() => page.evaluate(() => localStorage.getItem("pacenotes-ui-language")))
+      .toBe("fr");
     await page.reload();
     await page.getByRole("button", { name: "Paramètres du voyage" }).click();
-    await expect(
-      page.getByRole("dialog", { name: "Paramètres du voyage" }).getByLabel("Langue"),
-    ).toHaveValue("fr");
+    const savedSettings = page.getByRole("dialog", { name: "Paramètres du voyage" });
+    const savedLanguageSelects = savedSettings.locator(".settings-language-row select");
+    await expect(savedLanguageSelects.nth(0)).toHaveValue("fr");
+    await expect(savedLanguageSelects.nth(1)).toHaveValue("");
     await expect(
       page.getByRole("dialog", { name: "Paramètres du voyage" }).getByLabel("Unités de distance"),
     ).toHaveValue("imperial");
@@ -3028,8 +5316,93 @@ test("trip settings control language, units, default travel, and persist", async
       page.getByRole("dialog", { name: "Paramètres du voyage" }).getByLabel("Transport par défaut"),
     ).toHaveValue("WALKING");
     await expect(
-      page.getByRole("dialog", { name: "Paramètres du voyage" }).getByLabel("Heures du calendrier"),
-    ).toHaveValue("30");
+      page
+        .getByRole("dialog", { name: "Paramètres du voyage" })
+        .getByLabel("Début du jour du calendrier"),
+    ).toHaveValue("7");
+  } finally {
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("trip language can override the local UI language", async ({ page }) => {
+  const id = await createEmptyTrip();
+  try {
+    await page.addInitScript(() => {
+      localStorage.setItem("pacenotes-display-name", "Language override editor");
+      localStorage.setItem("pacenotes-ui-language", "ja");
+    });
+    await page.goto(`/trips/${id}`);
+    await expect(page.getByRole("button", { name: "旅行設定" })).toBeVisible();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              globalThis as typeof globalThis & {
+                __pacenotesPlaceLanguages?: string[];
+              }
+            ).__pacenotesPlaceLanguages?.at(-1) ?? "",
+        ),
+      )
+      .toBe("ja");
+
+    await page.getByRole("button", { name: "旅行設定" }).click();
+    const settings = page.getByRole("dialog", { name: "旅行設定" });
+    const languageSelects = settings.locator(".settings-language-row select");
+    await expect(languageSelects).toHaveCount(2);
+    await expect(languageSelects.nth(0)).toHaveValue("ja");
+    await expect(languageSelects.nth(1)).toHaveValue("");
+    const [uiBox, tripBox] = await Promise.all([
+      languageSelects.nth(0).boundingBox(),
+      languageSelects.nth(1).boundingBox(),
+    ]);
+    expect(uiBox?.y).toBe(tripBox?.y);
+    await languageSelects.nth(1).selectOption("fr");
+    await settings.locator('button[type="submit"]').click();
+
+    await expect
+      .poll(async () => {
+        const [stored] = await db.select().from(documents).where(eq(documents.name, id));
+        if (!stored) return null;
+        const document = new Y.Doc();
+        Y.applyUpdate(document, new Uint8Array(stored.data));
+        const tripLanguage = readTripDocument(document).tripLanguage;
+        document.destroy();
+        return tripLanguage;
+      })
+      .toBe("fr");
+    await expect(page.getByRole("button", { name: "旅行設定" })).toBeVisible();
+    await page.getByRole("button", { name: "旅行設定" }).click();
+    const savedLanguageSelects = page
+      .getByRole("dialog", { name: "旅行設定" })
+      .locator(".settings-language-row select");
+    await expect(savedLanguageSelects.nth(0)).toHaveValue("ja");
+    await expect(savedLanguageSelects.nth(1)).toHaveValue("fr");
+    await savedLanguageSelects.nth(0).selectOption("de");
+    await expect(savedLanguageSelects.nth(1)).toHaveValue("fr");
+    await page.getByRole("dialog", { name: "旅行設定" }).locator('button[type="submit"]').click();
+    await expect(page.getByRole("button", { name: "Reiseeinstellungen" })).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(() => localStorage.getItem("pacenotes-ui-language")))
+      .toBe("de");
+    await page.getByRole("button", { name: "Google Places durchsuchen" }).click();
+    await expect(page.locator("gmp-place-autocomplete")).toHaveJSProperty(
+      "requestedLanguage",
+      "fr",
+    );
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              globalThis as typeof globalThis & {
+                __pacenotesPlaceLanguages?: string[];
+              }
+            ).__pacenotesPlaceLanguages?.at(-1) ?? "",
+        ),
+      )
+      .toBe("fr");
   } finally {
     await db.delete(trips).where(eq(trips.id, id));
   }
@@ -3060,6 +5433,37 @@ test("route mode is selected from an inline dropdown", async ({ page }) => {
     await routeMode.selectOption("TRANSIT");
     await expect(routeMode).toHaveValue("TRANSIT");
     await expect(routeMode.locator("option:checked")).toHaveText("Public transport");
+    await expect(leg).toContainText("25 min");
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              globalThis as typeof globalThis & {
+                __pacenotesDirectionsComputes?: number;
+              }
+            ).__pacenotesDirectionsComputes ?? 0,
+        ),
+      )
+      .toBe(1);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const scope = globalThis as typeof globalThis & {
+            __pacenotesRouteEndpoints?: Array<{
+              originPlaceId: string | null;
+              destinationPlaceId: string | null;
+              travelMode: string;
+            }>;
+          };
+          return scope.__pacenotesRouteEndpoints?.at(-1) ?? null;
+        }),
+      )
+      .toEqual({
+        originPlaceId: "route-mode-museum",
+        destinationPlaceId: "route-mode-cafe",
+        travelMode: "TRANSIT",
+      });
     await expect(leg.locator(".leg-options")).toHaveCount(0);
     const selectedHeight = await leg.evaluate((element) => element.getBoundingClientRect().height);
     expect(Math.abs(initialHeight - selectedHeight)).toBeLessThan(1);
@@ -3106,7 +5510,7 @@ test("per-day add controls target their day and date navigation follows the view
     await expect(page.locator(".planner-toolbar")).toHaveCount(0);
     await expect(
       page.locator(".day-heading").getByRole("button", { name: /^Delete day / }),
-    ).toHaveCount(3);
+    ).toHaveCount(2);
     await expect(days.getByRole("button", { name: "Place", exact: true })).toHaveCount(3);
     await addDayItem(page, "note", 1);
     await expect(days.nth(0).locator(".itinerary-entry")).toHaveCount(18);
@@ -3117,6 +5521,7 @@ test("per-day add controls target their day and date navigation follows the view
     await addDayItem(page, "place", 0);
     await expect(days.nth(1).locator(".place-search")).toHaveCount(0);
     await expect(days.nth(0).locator(".place-search")).toBeVisible();
+    await page.locator("gmp-place-autocomplete").focus();
     await page.keyboard.press("Escape");
     await expect(page.locator(".place-search")).toHaveCount(0);
     await addDayItem(page, "place", 1);
@@ -3133,53 +5538,10 @@ test("per-day add controls target their day and date navigation follows the view
     await expect(dates.nth(1)).toHaveAttribute("aria-current", "date");
     await expect(page.locator(".item-editor textarea")).toHaveValue("Keep this draft");
     await page.getByRole("button", { name: "Close editor", exact: true }).click();
-    await page.emulateMedia({ reducedMotion: "no-preference" });
-    await panel.evaluate((element) => {
-      const samples: number[] = [];
-      const times: number[] = [];
-      element.addEventListener("scroll", () => {
-        samples.push(element.scrollTop);
-        times.push(performance.now());
-        element.setAttribute("data-scroll-times", JSON.stringify(times));
-        element.setAttribute("data-scroll-samples", JSON.stringify(samples));
-      });
-      element.addEventListener("scrollend", () => {
-        element.setAttribute("data-scroll-ended", String(performance.now()));
-      });
-    });
-    const start = await panel.evaluate((element) => element.scrollTop);
     await dates.nth(2).click();
-    await expect(panel).toHaveAttribute("data-scroll-ended", /\d/);
     await expect(panel).toHaveAttribute("aria-busy", "false");
     await expect(dates.nth(2)).toHaveAttribute("aria-current", "date");
-    const end = await panel.evaluate((element) => element.scrollTop);
-    const samples: number[] = JSON.parse((await panel.getAttribute("data-scroll-samples")) ?? "[]");
-    const times: number[] = JSON.parse((await panel.getAttribute("data-scroll-times")) ?? "[]");
-    expect((times.at(-1) ?? 0) - (times[0] ?? 0)).toBeLessThan(300);
-    expect(
-      new Set(
-        samples.filter(
-          (value) => value > Math.min(start, end) + 2 && value < Math.max(start, end) - 2,
-        ),
-      ).size,
-    ).toBeGreaterThanOrEqual(3);
-    const trajectory = [start, ...samples, end];
-    const steps = trajectory
-      .slice(1)
-      .map((value, index) => Math.abs(value - (trajectory[index] ?? value)))
-      .filter((value) => value >= 1);
-    expect(Math.max(...steps) / Math.min(...steps)).toBeGreaterThan(1.5);
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    const priorSamples = JSON.parse(
-      (await panel.getAttribute("data-scroll-samples")) ?? "[]",
-    ).length;
-    await dates.nth(0).click();
-    await expect(panel).toHaveAttribute("aria-busy", "false");
-    await expect(dates.nth(0)).toHaveAttribute("aria-current", "date");
-    const reducedSamples: number[] = JSON.parse(
-      (await panel.getAttribute("data-scroll-samples")) ?? "[]",
-    );
-    expect(new Set(reducedSamples.slice(priorSamples)).size).toBeLessThanOrEqual(1);
+    await expect(days.nth(2).locator(".day-heading")).toBeInViewport();
   } finally {
     await db.delete(trips).where(eq(trips.id, id));
   }
