@@ -10,6 +10,13 @@ Set these values on the web process:
 - `GOOGLE_MAP_ID`: Google cloud map ID for Advanced Markers.
 - `PORT`: Web port. The default is `3000`.
 
+Optional server-only routing settings:
+
+- `MOTIS_URL`: MOTIS base URL. When this value is absent, Google supplies every route.
+- `MOTIS_TIMEOUT_MS`: One shared MOTIS batch deadline in milliseconds. The default is `5000` and the maximum is `60000`.
+
+Do not add these settings to browser public configuration. The PaceNotes server sends only bounded, validated Japan public transport requests to MOTIS.
+
 ## Create the required values
 
 Only `GOOGLE_MAPS_API_KEY` comes from Google as a credential. `GOOGLE_MAP_ID` is a public identifier. Create `RATE_LIMIT_SALT` locally. Obtain the production `DATABASE_URL` from the PostgreSQL operator. Set `PORT` from the deployment address.
@@ -91,7 +98,7 @@ HTTP and WebSocket traffic use the same origin and port. Browsers connect to `/s
 3. Run `docker compose config --quiet` to check the environment.
 4. Run `docker compose up --build -d`.
 5. Open the app and confirm that place search, place details, the map, markers, and route legs load.
-6. Check `/health/ready` and `/health/live`.
+6. Check `/health/ready`, `/health/live`, and `/health/providers`.
 
 Google setup references:
 
@@ -100,6 +107,25 @@ Google setup references:
 - [Places UI Kit setup](https://developers.google.com/maps/documentation/javascript/places-ui-kit/get-started)
 - [Map ID setup](https://developers.google.com/maps/documentation/javascript/map-ids/get-map-id)
 - [API key security](https://developers.google.com/maps/api-security-best-practices)
+
+## Optional MOTIS routing
+
+Review [the route data sources and licenses](routes.md) before you enable or publish MOTIS data. The operator is responsible for the required provider and data rights.
+
+The optional Compose profile uses the public `ghcr.io/george-miao/pacenotes-motis:latest` image and keeps port 8080 on the private Compose network. Add these values to `.env`:
+
+```dotenv
+MOTIS_URL=http://motis:8080
+MOTIS_TIMEOUT_MS=5000
+```
+
+Start the profile:
+
+```sh
+docker compose --profile motis up --build -d
+```
+
+PaceNotes will start normally even when MOTIS is unavailable, by simply falling back to Google.
 
 ## One-host stack
 

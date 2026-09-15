@@ -45,10 +45,13 @@ The Nix image is available as `.#docker` on Linux. Set these runtime values:
 - `RATE_LIMIT_SALT`
 - `GOOGLE_MAPS_API_KEY`
 - `GOOGLE_MAP_ID`
+- `MOTIS_URL` (optional, server-only)
+- `MOTIS_TIMEOUT_MS` (optional, server-only)
 
 ## Documentation
 
 - [Architecture](docs/architecture.md)
 - [Deployment](docs/deployment.md)
+- [Routing data and MOTIS](docs/routes.md)
 - [Security](docs/security.md)
 - [License](LICENSE)

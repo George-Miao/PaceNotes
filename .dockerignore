@@ -1,0 +1,9 @@
+*
+!docs/
+!docs/routes.md
+!motis/
+!motis/Dockerfile
+!motis/config.yml
+!motis/fetch-inputs.sh
+!patch/
+!patch/osr-32-way-nodes.patch

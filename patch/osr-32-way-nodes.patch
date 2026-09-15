@@ -1,0 +1,60 @@
+diff --git a/include/osr/types.h b/include/osr/types.h
+index ee16e55..338053f 100644
+--- a/include/osr/types.h
++++ b/include/osr/types.h
+@@ -170,8 +170,10 @@ using elevation_monotonic_t =
+ 
+ using way_pos_t = std::uint8_t;
+ 
+-constexpr auto const kMaxWaysPerNode = way_pos_t{16U};
++constexpr auto const kMaxWaysPerNode = way_pos_t{32U};
+ constexpr auto const kInlineWaysPerNode = way_pos_t{2U};
++constexpr auto const kWayPositionBits = 5U;
++static_assert(kMaxWaysPerNode <= (1U << kWayPositionBits));
+ 
+ using cost_t = std::uint32_t;
+ using duration_t = std::chrono::duration<std::uint16_t>;  // sec -> max ~18h
+diff --git a/include/osr/ways.h b/include/osr/ways.h
+index c78d056..9ecce5c 100644
+--- a/include/osr/ways.h
++++ b/include/osr/ways.h
+@@ -59,7 +59,7 @@ struct restriction {
+   template <std::size_t NMaxTypes>
+   friend constexpr auto static_type_hash(
+       restriction const*, cista::hash_data<NMaxTypes> h) noexcept {
+-    return h.combine(cista::hash("restriction v1.1"));
++    return h.combine(cista::hash("restriction v1.2"));
+   }
+ 
+   template <typename Ctx>
+@@ -68,8 +68,8 @@ struct restriction {
+   template <typename Ctx>
+   friend void deserialize(Ctx const&, restriction*) {}
+ 
+-  way_pos_t from_ : 4;
+-  way_pos_t to_ : 4;
++  way_pos_t from_ : kWayPositionBits;
++  way_pos_t to_ : kWayPositionBits;
+   way_pos_t applies_to_default_ : 1;
+   way_pos_t applies_to_bus_ : 1;
+   way_pos_t applies_to_hgv_ : 1;
+diff --git a/test/entry_storage_test.cc b/test/entry_storage_test.cc
+index 8a6e315..6a15d94 100644
+--- a/test/entry_storage_test.cc
++++ b/test/entry_storage_test.cc
+@@ -90,6 +90,15 @@ TEST(entry_storage, maximum_degree_exposes_every_slot) {
+   EXPECT_EQ(storage_t::kN * sizeof(storage_t::slot_t), arena.offset_);
+ }
+ 
++TEST(entry_storage, restriction_stores_maximum_way_positions) {
++  auto r = restriction{};
++  r.from_ = kMaxWaysPerNode - 1U;
++  r.to_ = kMaxWaysPerNode - 2U;
++
++  EXPECT_EQ(kMaxWaysPerNode - 1U, r.from_);
++  EXPECT_EQ(kMaxWaysPerNode - 2U, r.to_);
++}
++
+ TEST(entry_storage, additional_nodes_use_maximum_size) {
+   auto const w = make_routing({1U});
+   auto arena = entry_storage_arena{};

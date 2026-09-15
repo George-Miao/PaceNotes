@@ -40,6 +40,8 @@ services:
       GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:?GOOGLE_MAPS_API_KEY is required}
       GOOGLE_MAP_ID: ${GOOGLE_MAP_ID:?GOOGLE_MAP_ID is required}
       PORT: 3000
+      MOTIS_URL: ${MOTIS_URL:-}
+      MOTIS_TIMEOUT_MS: ${MOTIS_TIMEOUT_MS:-5000}
     ports:
       - "3000:3000"
     healthcheck:
@@ -50,6 +52,16 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+    restart: unless-stopped
+
+  motis:
+    image: ghcr.io/george-miao/pacenotes-motis:latest
+    profiles: ["motis"]
+    healthcheck:
+      test: ["CMD", "/bin/curl", "--fail", "--silent", "http://127.0.0.1:8080/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     restart: unless-stopped
 volumes:
   postgres-data:

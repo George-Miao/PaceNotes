@@ -1,0 +1,22 @@
+server:
+  host: 0.0.0.0
+  port: 8080
+  data_attribution_link: https://github.com/George-Miao/PaceNotes/blob/main/docs/routes.md
+timetable:
+  first_day: TODAY
+  num_days: 365
+  railviz: false
+  with_shapes: true
+  datasets:
+    japanrail:
+      path: jp_japan-rail.gtfs.zip
+    okinawabus:
+      path: okinawa-bus.gtfs.zip
+    okinawashuttle:
+      path: okinawa-airport-shuttle.gtfs.zip
+osm: japan.osm.pbf
+elevators: false
+street_routing: true
+osr_footpath: false
+geocoding: false
+reverse_geocoding: false
