@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { createGoogleRouteAdapter } from "~/features/google/route-adapter";
-import { createTripText, languageTag } from "~/features/trip/language";
 import type { TravelMode, TripLanguage } from "~/features/trip/model";
 import type {
   ComputedRoute,
@@ -97,17 +96,17 @@ export function useRouteLegs(
       const computed = await Promise.all(
         pairs.map(async (pair): Promise<RouteLeg> => {
           const motis = motisResults.get(pair.id);
-          if (motis?.state === "ready") return readyLeg(pair, motis, language);
-          if (!googleAdapter) return unavailableLeg(pair, language);
+          if (motis?.state === "ready") return readyLeg(pair, motis);
+          if (!googleAdapter) return unavailableLeg(pair);
           try {
             const route = await googleAdapter.compute(
               pair.from,
               pair.to,
               routeDepartureTime(pair.to.travelMode, pair.from.departureTime),
             );
-            return readyLeg(pair, route, language);
+            return readyLeg(pair, route);
           } catch {
-            return unavailableLeg(pair, language);
+            return unavailableLeg(pair);
           }
         }),
       );
@@ -208,7 +207,6 @@ function initializeLegs(
               to: routePoint(pair.to),
               mode: pair.to.travelMode,
               color: pair.to.color,
-              duration: "",
               durationMinutes: null,
               distanceMeters: null,
               geometryQuality: "approximate",
@@ -246,7 +244,8 @@ function mergeComputedLegs(
   return next;
 }
 
-function readyLeg(pair: RoutePair, route: ComputedRoute, language: TripLanguage): RouteLeg {
+function readyLeg(pair: RoutePair, route: ComputedRoute): RouteLeg {
+  const durationMinutes = Math.max(1, Math.round(route.durationMillis / 60_000));
   return {
     fromId: pair.from.id,
     toId: pair.to.id,
@@ -254,8 +253,7 @@ function readyLeg(pair: RoutePair, route: ComputedRoute, language: TripLanguage)
     to: routePoint(pair.to),
     mode: pair.to.travelMode,
     color: pair.to.color,
-    duration: formatDuration(route.durationMillis, language),
-    durationMinutes: Math.max(1, Math.round(route.durationMillis / 60_000)),
+    durationMinutes,
     distanceMeters: route.distanceMeters,
     geometryQuality: route.geometryQuality,
     path: route.path,
@@ -263,7 +261,7 @@ function readyLeg(pair: RoutePair, route: ComputedRoute, language: TripLanguage)
   };
 }
 
-function unavailableLeg(pair: RoutePair, language: TripLanguage): RouteLeg {
+function unavailableLeg(pair: RoutePair): RouteLeg {
   return {
     fromId: pair.from.id,
     toId: pair.to.id,
@@ -271,7 +269,6 @@ function unavailableLeg(pair: RoutePair, language: TripLanguage): RouteLeg {
     to: routePoint(pair.to),
     mode: pair.to.travelMode,
     color: pair.to.color,
-    duration: createTripText(language)("routeUnavailable"),
     durationMinutes: null,
     distanceMeters: null,
     geometryQuality: "approximate",
@@ -319,21 +316,6 @@ function routePlansColorKey(plans: RouteLegPlan[]): string {
   return JSON.stringify(
     plans.map((plan) => [plan.id, plan.stops.map((stop) => [stop.id, stop.color])]),
   );
-}
-
-function formatDuration(milliseconds: number, language: TripLanguage): string {
-  const totalMinutes = Math.max(1, Math.round(milliseconds / 60_000));
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  const format = (value: number, unit: "hour" | "minute") =>
-    new Intl.NumberFormat(languageTag(language), {
-      style: "unit",
-      unit,
-      unitDisplay: "short",
-    }).format(value);
-  return [hours ? format(hours, "hour") : "", minutes ? format(minutes, "minute") : ""]
-    .filter(Boolean)
-    .join(" ");
 }
 
 function routePoint(stop: MapStop): RoutePoint {

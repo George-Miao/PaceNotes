@@ -58,9 +58,9 @@ export type CalendarRouteGap = {
   dayId: string;
   startMinute: number;
   durationMinutes: number;
+  totalDurationMinutes: number;
   state: RouteLeg["state"];
   mode: RouteLeg["mode"];
-  label: string;
   conflict: boolean;
   lane: number;
   laneCount: number;
@@ -508,7 +508,7 @@ function buildRouteGaps(
           durationMinutes: used,
           state: leg.state,
           mode: leg.mode,
-          label: leg.duration,
+          totalDurationMinutes: leg.durationMinutes,
           conflict,
           lane: source.lane,
           laneCount: source.laneCount,

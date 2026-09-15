@@ -1536,6 +1536,19 @@ export function createTripText(language: TripLanguage): TripText {
 export function languageTag(language: TripLanguage): string {
   return language;
 }
+export function formatTravelDuration(totalMinutes: number, language: TripLanguage): string {
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  const formatUnit = (value: number, unit: "hour" | "minute") =>
+    new Intl.NumberFormat(languageTag(language), {
+      style: "unit",
+      unit,
+      unitDisplay: "short",
+    }).format(value);
+  return [hours ? formatUnit(hours, "hour") : "", minutes ? formatUnit(minutes, "minute") : ""]
+    .filter(Boolean)
+    .join(" ");
+}
 
 export function travelModeLabel(language: TripLanguage, mode: TravelMode): string {
   const text = createTripText(language);

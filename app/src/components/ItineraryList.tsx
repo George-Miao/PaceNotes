@@ -12,6 +12,7 @@ import type { RouteLeg } from "~/features/routing/route-legs";
 import { routeContinuations } from "~/features/trip/day-plan";
 import {
   createTripText,
+  formatTravelDuration,
   travelModeLabel,
   useTripText,
   useUiLanguage,
@@ -279,6 +280,10 @@ function TransportLeg({
   const language = useUiLanguage();
   const text = useTripText();
   const routeUrl = googleMapsRouteUrl([leg.from, leg.to], leg.mode);
+  const duration =
+    leg.durationMinutes === null
+      ? text("routeUnavailable")
+      : formatTravelDuration(leg.durationMinutes, language);
   return (
     <div
       className={`transport-leg state-${leg.state}`}
@@ -290,7 +295,7 @@ function TransportLeg({
         {leg.state === "updating"
           ? text("updatingRoute")
           : `${leg.state === "stale" ? `${text("stale")} - ` : ""}${[
-              leg.duration,
+              duration,
               formatDistance(leg.distanceMeters, distanceUnit, language),
             ]
               .filter(Boolean)

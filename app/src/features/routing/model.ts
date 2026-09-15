@@ -35,7 +35,6 @@ export type RouteLeg = {
   to: RoutePoint;
   mode: TravelMode;
   color: string;
-  duration: string;
   durationMinutes: number | null;
   distanceMeters: number | null;
   geometryQuality: RouteGeometryQuality;

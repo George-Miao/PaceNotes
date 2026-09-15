@@ -94,7 +94,6 @@ function leg(
     to,
     mode,
     color: "#007bb8",
-    duration: "10 min",
     durationMinutes: 10,
     distanceMeters: 1000,
     geometryQuality: "detailed",

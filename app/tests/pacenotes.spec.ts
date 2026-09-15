@@ -4369,6 +4369,9 @@ test("trip language localizes existing Google places and routes", async ({ page 
         ),
       )
       .toContain("zh-CN");
+    await expect(page.locator(".transport-leg").first()).toContainText("10 min - 1.0 km");
+    await page.getByRole("button", { name: "Calendar", exact: true }).click();
+    await expect(page.locator("[data-calendar-route-duration]").first()).toContainText("10 min");
     await page.getByRole("button", { name: "Map location: Museum", exact: true }).click();
     await expect(page.getByRole("heading", { name: "简体-museum" })).toBeVisible();
   } finally {

@@ -30,7 +30,7 @@ import {
   snapCalendarMinute,
   timeForCalendarMinute,
 } from "~/features/trip/calendar-layout";
-import { createTripText, travelModeLabel } from "~/features/trip/language";
+import { createTripText, formatTravelDuration, travelModeLabel } from "~/features/trip/language";
 import {
   type CalendarStartHour,
   type Lodging,
@@ -1364,38 +1364,42 @@ export function Calendar({
                   </time>
                 </div>
               ))}
-              {column.routeGaps.map((gap) => (
-                <div
-                  data-calendar-route-leg
-                  data-travel-mode={gap.mode}
-                  role="img"
-                  aria-label={`${travelModeLabel(language, gap.mode)} - ${gap.conflict ? `${gap.label} - ${text("conflict")}` : gap.label}`}
-                  className={`${styles.routeGap}${gap.conflict ? ` ${styles.routeConflict}` : ""}`}
-                  key={gap.key}
-                  style={{
-                    top: minutePercent(gap.startMinute),
-                    height: minutePercent(Math.max(calendarMinimumMinutes, gap.durationMinutes)),
-                    left: `calc(${(gap.lane / gap.laneCount) * 100}% + 0.6em)`,
-                    width: `calc(${100 / gap.laneCount}% - 1.2em)`,
-                  }}
-                >
-                  <i aria-hidden="true" />
-                  <span className={styles.routeInfo} data-calendar-route-info aria-hidden="true">
-                    <Icon
-                      className={styles.routeIcon}
-                      data-calendar-route-icon
-                      icon={iconForTravelMode(gap.mode)}
-                      aria-hidden="true"
-                    />
-                    <span className={styles.routeMode} data-calendar-route-mode>
-                      {travelModeLabel(language, gap.mode)}
+              {column.routeGaps.map((gap) => {
+                const duration = formatTravelDuration(gap.totalDurationMinutes, language);
+                const label = gap.conflict ? `${duration} - ${text("conflict")}` : duration;
+                return (
+                  <div
+                    data-calendar-route-leg
+                    data-travel-mode={gap.mode}
+                    role="img"
+                    aria-label={`${travelModeLabel(language, gap.mode)} - ${label}`}
+                    className={`${styles.routeGap}${gap.conflict ? ` ${styles.routeConflict}` : ""}`}
+                    key={gap.key}
+                    style={{
+                      top: minutePercent(gap.startMinute),
+                      height: minutePercent(Math.max(calendarMinimumMinutes, gap.durationMinutes)),
+                      left: `calc(${(gap.lane / gap.laneCount) * 100}% + 0.6em)`,
+                      width: `calc(${100 / gap.laneCount}% - 1.2em)`,
+                    }}
+                  >
+                    <i aria-hidden="true" />
+                    <span className={styles.routeInfo} data-calendar-route-info aria-hidden="true">
+                      <Icon
+                        className={styles.routeIcon}
+                        data-calendar-route-icon
+                        icon={iconForTravelMode(gap.mode)}
+                        aria-hidden="true"
+                      />
+                      <span className={styles.routeMode} data-calendar-route-mode>
+                        {travelModeLabel(language, gap.mode)}
+                      </span>
+                      <span className={styles.routeDuration} data-calendar-route-duration>
+                        {label}
+                      </span>
                     </span>
-                    <span className={styles.routeDuration} data-calendar-route-duration>
-                      {gap.conflict ? `${gap.label} - ${text("conflict")}` : gap.label}
-                    </span>
-                  </span>
-                </div>
-              ))}
+                  </div>
+                );
+              })}
               {column.segments.map((segment) => {
                 const notes =
                   column.noteGroups.find((group) => group.anchorItemId === segment.item.id)
