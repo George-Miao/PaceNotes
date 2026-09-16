@@ -32,9 +32,12 @@ RUN apt-get update && \
 WORKDIR /import
 COPY motis/config.yml ./config.yml
 COPY motis/fetch-inputs.sh /usr/local/bin/fetch-motis-inputs
+COPY motis/prepare_feeds.py /usr/local/lib/motis/prepare_feeds.py
 COPY motis/enrich_rail_shapes.py /usr/local/lib/motis/enrich_rail_shapes.py
 COPY motis/test_enrich_rail_shapes.py /usr/local/lib/motis/test_enrich_rail_shapes.py
-RUN chmod 0755 /usr/local/bin/fetch-motis-inputs && \
+COPY motis/test_prepare_feeds.py /usr/local/lib/motis/test_prepare_feeds.py
+RUN chmod 0755 /usr/local/bin/fetch-motis-inputs \
+      /usr/local/lib/motis/prepare_feeds.py && \
     python3 -m unittest discover -s /usr/local/lib/motis -p 'test_*.py' && \
     fetch-motis-inputs && \
     cp jp_japan-rail.source.gtfs.zip jp_japan-rail.gtfs.zip && \
@@ -42,7 +45,8 @@ RUN chmod 0755 /usr/local/bin/fetch-motis-inputs && \
       jp_japan-rail.gtfs.zip N02-25_GML.zip && \
     sha256sum jp_japan-rail.gtfs.zip >> input-sha256.txt && \
     /build/source/build/motis import && \
-    cp input-sha256.txt data/input-sha256.txt
+    cp input-sha256.txt input-sources.tsv data/ && \
+    if test -s input-failures.txt; then cp input-failures.txt data/; fi
 
 FROM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
 RUN apk add --no-cache ca-certificates curl libgcc libstdc++ && \

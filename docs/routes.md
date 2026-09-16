@@ -15,46 +15,32 @@ The image build checks these source revisions:
 - MOTIS 2.11.3 at commit `b228a4519d196d9dd01b5ce80be46e642abc953e`.
 - OSR at commit `a7b2ec2728544304ef1d8397b3042abc8d10f7e7`.
 
-The build verifies the Geofabrik MD5 file, checks each GTFS ZIP, checks required GTFS files, checks the two OTTOP agency IDs, and writes SHA-256 values to `/data/input-sha256.txt`. The image contains one imported data snapshot. It does not update that snapshot at run time.
+The build verifies the Geofabrik MD5 file, checks each GTFS ZIP, checks required GTFS files, and writes SHA-256 values to `/data/input-sha256.txt`. It also writes source URLs, archive hashes, and agency identifiers to `/data/input-sources.tsv`. The image contains one imported data snapshot. It does not update that snapshot at run time.
 
-## Data sources and licenses
+## Data sources
 
-Before publication, the repository variable `MOTIS_DATA_RIGHTS_CONFIRMED` must be `true`. The operator must review the current source terms and must have the right to download, process, publish, and operate the data. This check is necessary because an aggregate GTFS download can contain data from more than one publisher.
+The image uses one Japan data set:
 
-### OpenStreetMap Japan
+- [Geofabrik Japan](https://download.geofabrik.de/asia/japan.html) supplies the OpenStreetMap extract.
+- [Transitous](https://api.transitous.org/gtfs/) supplies its indexed Japan GTFS archives.
+- [Transitland Atlas](https://github.com/transitland/transitland-atlas/blob/main/feeds/tshimada291.github.com.dmfr.json) supplies the OTTOP feed list.
+- [GTFS Data Repository](https://api.gtfs-data.jp/v2/feeds) supplies current repository feeds.
+- [Mobility Database](https://mobilitydatabase.org/) supplies additional current Japan feeds.
+- [Hokkaido Open Data Platform](https://ckan.hoda.jp/dataset/gtfs-data) supplies current Hokkaido feeds.
+- [Hiroshima Bus Association](https://www.bus-kyo.or.jp/gtfs-open-data) supplies current Hiroshima feeds.
+- [Tottori Prefecture Open Data Portal](https://odp-pref-tottori.tori-info.co.jp/) supplies current Tottori feeds.
+- [MLIT](https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N02-2025.html) supplies railway geometry used to enrich rail shapes.
 
-- Source: [Geofabrik Japan download](https://download.geofabrik.de/asia/japan.html)
-- File used by the weekly build: `japan-latest.osm.pbf`
-- Data copyright: OpenStreetMap contributors
-- License: [Open Data Commons Open Database License 1.0](https://www.openstreetmap.org/copyright)
+The build validates each archive, removes exact duplicate archives, and records rejected feeds in `/data/input-failures.txt`. See [Japan public transit feed research](japan-transit-feeds.md).
+Build the image with:
 
-The repository links to the upstream file. It does not retain a copy of the PBF.
+```sh
+docker build \
+  --file motis/Dockerfile \
+  --tag pacenotes-motis \
+  .
+```
 
-### Japan Rail GTFS
-
-- Source: [Transitous Japan Rail aggregate](https://api.transitous.org/gtfs/jp_japan-rail.gtfs.zip)
-- Transitous project: [transitous.org](https://transitous.org/)
-- License: The aggregate does not supply one license identifier for all included publishers. The operator must review the included publisher terms and confirm redistribution rights before publication.
-
-### Okinawa Bus GTFS
-
-- Source: [OTTOP open data catalog](https://www.ottop.org/gtfs-opendata)
-- Agency ID: `2360001000457`
-- Publisher: NPO OTTOP
-- License: [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/), unless the OTTOP catalog states a different term for the feed
-
-### Okinawa Airport Shuttle GTFS
-
-- Source: [OTTOP open data catalog](https://www.ottop.org/gtfs-opendata)
-- Agency ID: `360005005779`
-- Publisher: NPO OTTOP
-- License: [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/), unless the OTTOP catalog states a different term for the feed
-
-### Software
-
-- [MOTIS](https://github.com/motis-project/motis) uses the MIT License.
-- [OSR](https://github.com/motis-project/osr) uses the MIT License.
-- The PaceNotes patch and build files use the PaceNotes AGPL-3.0-or-later license.
 
 ## Image tags and updates
 

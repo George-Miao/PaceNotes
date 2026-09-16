@@ -110,7 +110,7 @@ Google setup references:
 
 ## Optional MOTIS routing
 
-Review [the route data sources and licenses](routes.md) before you enable or publish MOTIS data. The operator is responsible for the required provider and data rights.
+Review [the route data sources](routes.md) before you enable MOTIS.
 
 The optional Compose profile uses the public `ghcr.io/george-miao/pacenotes-motis:latest` image and keeps port 8080 on the private Compose network. Add these values to `.env`:
 
