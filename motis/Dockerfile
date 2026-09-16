@@ -15,8 +15,12 @@ RUN --mount=type=cache,target=/deps \
 COPY patch/osr-32-way-nodes.patch /tmp/osr-32-way-nodes.patch
 RUN --mount=type=cache,target=/deps \
     test "$(git -C deps/osr rev-parse HEAD)" = "$OSR_REVISION" && \
-    git -C deps/osr apply --check /tmp/osr-32-way-nodes.patch && \
-    git -C deps/osr apply /tmp/osr-32-way-nodes.patch && \
+    if git -C deps/osr apply --check /tmp/osr-32-way-nodes.patch; then \
+      git -C deps/osr apply /tmp/osr-32-way-nodes.patch; \
+    elif ! git -C deps/osr apply --reverse --check /tmp/osr-32-way-nodes.patch; then \
+      echo "OSR patch does not apply cleanly" >&2; \
+      exit 1; \
+    fi && \
     cmake -G Ninja -S . -B build --preset=linux-amd64-release && \
     cmake --build build --target motis osr-test --parallel 16 && \
     build/deps/osr/osr-test
