@@ -9,11 +9,10 @@ RUN git clone --branch v2.11.3 --depth 1 https://github.com/motis-project/motis.
     test "$(git -C source rev-parse HEAD)" = "$MOTIS_REVISION"
 
 WORKDIR /build/source
-RUN --mount=type=cache,target=/deps \
-    ln -s /deps deps && \
-    cmake -G Ninja -S . -B build --preset=linux-amd64-release
 COPY patch/osr-32-way-nodes.patch /tmp/osr-32-way-nodes.patch
 RUN --mount=type=cache,target=/deps \
+    ln -s /deps deps && \
+    cmake -G Ninja -S . -B build --preset=linux-amd64-release && \
     test "$(git -C deps/osr rev-parse HEAD)" = "$OSR_REVISION" && \
     if git -C deps/osr apply --check /tmp/osr-32-way-nodes.patch; then \
       git -C deps/osr apply /tmp/osr-32-way-nodes.patch; \
