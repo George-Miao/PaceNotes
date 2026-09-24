@@ -2,7 +2,7 @@
 
 ## Runtime and storage
 
-The TanStack Start process serves server functions and the Hocuspocus `/sync` route. A separate process applies ordered Drizzle migrations and exits.
+The TanStack Start process applies ordered Drizzle migrations before it serves server functions and the Hocuspocus `/sync` route.
 
 PostgreSQL 18 stores trip metadata, durable Yjs documents, and recent trip-creation events.
 

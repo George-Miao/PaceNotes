@@ -135,7 +135,7 @@ Run:
 docker compose up -d
 ```
 
-The stack starts PostgreSQL, waits for it to become healthy, runs the migration process once, then starts the web process. The web process serves HTTP and `/sync` WebSocket traffic on port 3000. Readiness includes a database query. Liveness only confirms that the web process can answer.
+The stack starts PostgreSQL and waits for it to become healthy. The web service applies database migrations before it serves HTTP and `/sync` WebSocket traffic on port 3000. Readiness includes a database query. Liveness only confirms that the web process can answer.
 
 Use a reverse proxy with TLS. Route normal requests and WebSocket upgrades for `/sync` to port 3000. Keep PostgreSQL private.
 
@@ -147,9 +147,8 @@ The supported upgrade flow is:
 
 1. Back up PostgreSQL.
 2. Pull or build the new PaceNotes image.
-3. Run the migration process.
-4. Replace the web process.
-5. Check `/health/ready` and `/health/live`.
+3. Replace the web process. The new process applies database migrations before it starts serving traffic.
+4. Check `/health/ready` and `/health/live`.
 
 ## Provider configuration
 
