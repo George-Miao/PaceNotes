@@ -1,7 +1,7 @@
 import { Temporal } from "@js-temporal/polyfill";
 import { z } from "zod";
 
-export const itemTypes = ["place", "note", "reservation", "lodging", "transport"] as const;
+const itemTypes = ["place", "note", "reservation", "lodging", "transport"] as const;
 export const travelModes = ["DRIVING", "TRANSIT", "WALKING"] as const;
 export const transportModes = ["plane", "train", "bus", "ferry", "custom"] as const;
 export const tripLanguages = ["en", "zh-CN", "zh-TW", "ja", "de", "es", "fr", "it"] as const;
@@ -9,11 +9,6 @@ export const distanceUnits = ["metric", "imperial"] as const;
 export const calendarStartHourOptions = [
   0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
 ] as const;
-export const travelModeLabels = {
-  DRIVING: "Car",
-  TRANSIT: "Public Transport",
-  WALKING: "Walk",
-} as const satisfies Record<TravelMode, string>;
 export type TransportMode = (typeof transportModes)[number];
 export type Transport = {
   from: PlaceReference | null;
@@ -211,7 +206,7 @@ export const tripItemSchema = z
     item.type === "note" ? { ...item, startTime: null, durationMinutes: 0 } : item,
   );
 
-export const defaultLodgingLeaveTime = "08:00";
+const defaultLodgingLeaveTime = "08:00";
 
 export function lodgingForDates(
   startDate: string,

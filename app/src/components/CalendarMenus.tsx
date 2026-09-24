@@ -35,7 +35,7 @@ export type CalendarItemAction =
   | "duplicate"
   | "edit"
   | "delete";
-export type CalendarLodgingAction = Extract<CalendarItemAction, "duplicate" | "edit" | "delete">;
+type CalendarLodgingAction = Extract<CalendarItemAction, "duplicate" | "edit" | "delete">;
 
 export type CalendarAddType = "place" | "reservation" | "lodging" | "transport";
 export type CalendarMenuPosition = { left: number; top: number };

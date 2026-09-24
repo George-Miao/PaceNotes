@@ -8,7 +8,6 @@ import {
   type TripSnapshot,
 } from "./model";
 
-export const calendarHourEm = 4;
 export const calendarSnapMinutes = 15;
 export const calendarMinimumMinutes = 15;
 export const calendarDayMinutes = 24 * 60;
@@ -33,7 +32,7 @@ export type CalendarStay = {
   endMinute: number;
   conflict: boolean;
 };
-export type CalendarLodgingBar = {
+type CalendarLodgingBar = {
   key: string;
   item: TripItem;
   lodging: Pick<Lodging, "startDate" | "endDate">;
@@ -48,12 +47,12 @@ export type CalendarLodgingLayout = {
   missingDayIds: ReadonlySet<string>;
 };
 
-export type CalendarNoteGroup = {
+type CalendarNoteGroup = {
   anchorItemId: string | null;
   notes: TripItem[];
 };
 
-export type CalendarRouteGap = {
+type CalendarRouteGap = {
   key: string;
   dayId: string;
   startMinute: number;

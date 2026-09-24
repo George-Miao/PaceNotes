@@ -480,7 +480,7 @@ function dashedLineIcons(color: string): google.maps.IconSequence[] {
     },
   ];
 }
-export function createStackedMarkerContent(stops: readonly MapStop[], count: number): HTMLElement {
+function createStackedMarkerContent(stops: readonly MapStop[], count: number): HTMLElement {
   const stack = document.createElement("div");
   stack.className = "map-marker-stack";
   const visibleCount = Math.min(stops.length, 4);

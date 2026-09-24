@@ -11,7 +11,7 @@ import type {
 } from "./model";
 import { readMotisRoutes } from "./routes.functions";
 
-export type { MapStop, MapTransport, RouteLeg, RouteLegPlan, RoutePoint } from "./model";
+export type { MapStop, MapTransport, RouteLeg, RouteLegPlan } from "./model";
 
 const minimumFutureDepartureMs = 60_000;
 

@@ -211,24 +211,6 @@ export function removeTripItem(document: Y.Doc, id: string): void {
   }, "delete-item");
 }
 
-export function reorderTripItems(document: Y.Doc, source: number, destination: number): void {
-  const order = document.getArray<string>(orderKey);
-  if (
-    source === destination ||
-    source < 0 ||
-    source >= order.length ||
-    destination < 0 ||
-    destination >= order.length
-  )
-    return;
-  document.transact(() => {
-    const [id] = order.slice(source, source + 1);
-    if (!id) return;
-    order.delete(source, 1);
-    order.insert(destination, [id]);
-  }, "reorder-item");
-}
-
 export function setTripOrder(document: Y.Doc, ids: string[]): void {
   const order = document.getArray<string>(orderKey);
   document.transact(() => {
