@@ -10,7 +10,7 @@
 - `app/src/db/` and `app/drizzle/` own the PostgreSQL schema and migrations.
 - `app/src/features/google/` owns Google place search, transient place fields, map display, and route computation.
 - `flake.nix` owns development dependencies, the reproducible application build, and the Linux image build.
-- `compose.yaml` runs the web, migration, and PostgreSQL processes on one host.
+- `compose.yaml` runs published application and MOTIS images with PostgreSQL. `compose.dev.yaml` builds the application from local files and uses the published MOTIS image.
 
 ## Product contract
 
@@ -58,7 +58,7 @@ Run all commands from the repository root unless stated otherwise.
 - `pnpm --dir app build` builds the web, collaboration, migration, and PWA outputs.
 - `nix flake check` runs the release checks.
 - `nix build .#docker` builds the Linux image on Linux.
-- `docker compose up --build` runs the complete local stack.
+- `docker compose -f compose.dev.yaml up --build` runs the complete local stack.
 
 ## Change rules
 

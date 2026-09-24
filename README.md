@@ -10,13 +10,13 @@ PaceNotes is an open source, high-performance web itinerary planner. Several peo
 2. Run `direnv allow`.
 3. Copy `.env.example` to `.env`.
 4. Add a restricted Google browser key and a Google map ID.
-5. Run `docker compose up --build`.
+5. Run `docker compose -f compose.dev.yaml up --build`.
 6. Open `http://localhost:3000`.
 
 For application development:
 
 ```sh
-docker compose up db
+docker compose -f compose.dev.yaml up db
 pnpm --dir app install
 pnpm --dir app db:migrate
 pnpm --dir app dev
@@ -37,7 +37,7 @@ Run `pnpm --dir app test:e2e` after the web process and PostgreSQL are ready. Ru
 
 ## Deployment
 
-`compose.yaml` runs one web process, a one-shot migration process, and PostgreSQL 18.6. The web process serves HTTP and the `/sync` WebSocket route on one port. The image workflow builds the Nix image for AMD64. A push to `main` publishes `main-SHA` and `latest-unstable`. A `vMAJOR.MINOR.PATCH` tag publishes the version and `latest`, then creates a GitHub release.
+`compose.yaml` runs published application and MOTIS images with a one-shot migration process and PostgreSQL 18.6. `compose.dev.yaml` builds the application from local files and uses the published MOTIS image. The web process serves HTTP and the `/sync` WebSocket route on one port. The image workflow builds the Nix image for AMD64. A push to `main` publishes `main-SHA` and `latest-unstable`. A `vMAJOR.MINOR.PATCH` tag publishes the version and `latest`, then creates a GitHub release.
 
 The Nix image is available as `.#docker` on Linux. Set these runtime values:
 

@@ -96,7 +96,7 @@ HTTP and WebSocket traffic use the same origin and port. Browsers connect to `/s
 1. Create a [Cloud Billing budget and alert](https://cloud.google.com/billing/docs/how-to/budgets).
 2. Review the quotas for Maps JavaScript API, Routes API, Places API (New), and Places UI Kit.
 3. Run `docker compose config --quiet` to check the environment.
-4. Run `docker compose up --build -d`.
+4. Run `docker compose up -d`.
 5. Open the app and confirm that place search, place details, the map, markers, and route legs load.
 6. Check `/health/ready`, `/health/live`, and `/health/providers`.
 
@@ -122,7 +122,7 @@ MOTIS_TIMEOUT_MS=5000
 Start the profile:
 
 ```sh
-docker compose --profile motis up --build -d
+docker compose --profile motis up -d
 ```
 
 PaceNotes will start normally even when MOTIS is unavailable, by simply falling back to Google.
@@ -132,7 +132,7 @@ PaceNotes will start normally even when MOTIS is unavailable, by simply falling 
 Run:
 
 ```sh
-docker compose up --build -d
+docker compose up -d
 ```
 
 The stack starts PostgreSQL, waits for it to become healthy, runs the migration process once, then starts the web process. The web process serves HTTP and `/sync` WebSocket traffic on port 3000. Readiness includes a database query. Liveness only confirms that the web process can answer.

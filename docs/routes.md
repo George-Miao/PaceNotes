@@ -8,7 +8,7 @@ The MOTIS service is API-only. It does not include the MOTIS web interface or ma
 
 ## Prebuilt MOTIS service
 
-PaceNotes publishes the AMD64 container image `ghcr.io/george-miao/pacenotes-motis` for this service. It contains MOTIS 2.11.3, imported route data, and the OSR patch in `patch/osr-32-way-nodes.patch`. The patch changes `osr::restriction` from four-bit way positions to five-bit way positions. It increases `kMaxWaysPerNode` from 16 to 32 and changes the serialized type hash from `restriction v1.1` to `restriction v1.2`. This lets the Japan OSM import represent higher-degree route nodes. Data made by an unpatched OSR build is not compatible with the patched restriction type.
+PaceNotes publishes the AMD64 container image `ghcr.io/george-miao/pacenotes-motis` for this service. It contains MOTIS 2.11.3, imported route data, and the OSR patch in `motis/patch/osr-32-way-nodes.patch`. The patch changes `osr::restriction` from four-bit way positions to five-bit way positions. It increases `kMaxWaysPerNode` from 16 to 32 and changes the serialized type hash from `restriction v1.1` to `restriction v1.2`. This lets the Japan OSM import represent higher-degree route nodes. Data made by an unpatched OSR build is not compatible with the patched restriction type.
 
 The image build checks these source revisions:
 
@@ -60,7 +60,7 @@ MOTIS_TIMEOUT_MS=5000
 Then run:
 
 ```sh
-docker compose --profile motis up --build -d
+docker compose --profile motis up -d
 ```
 
 Compose does not publish the MOTIS port to the host. PaceNotes still starts when MOTIS is unavailable. `/health/ready` does not depend on MOTIS. `/health/providers` reports MOTIS as `disabled`, `ready`, or `degraded`.
