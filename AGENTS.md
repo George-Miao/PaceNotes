@@ -26,11 +26,10 @@
 ## Data and provider rules
 
 - Yjs is the source of truth for live trip content. Do not copy the trip into another client state store.
-- PostgreSQL is the durable store. A Docker volume is not a backup.
+- PostgreSQL is the durable store.
 - Hocuspocus runs inside the Nitro web process on `/sync`. TanStack server functions remain request-response interfaces.
 - Google Maps Platform supplies place search, transient place fields, the map, and default route legs.
-- When `MOTIS_URL` is configured, transient coordinates and country codes may be sent to MOTIS only for public transport routes with both endpoints in Japan. The operator must have the required provider and data rights.
-- Store only Google Place IDs. Resolve names, addresses, coordinates, country codes, reviews, and photos in memory. Never copy Google place content into Yjs or PostgreSQL.
+- When `MOTIS_URL` is configured, transient coordinates and country codes may be sent to MOTIS.
 - Restrict the Google browser key by exact origin and interface. Never commit a key.
 - Logs must not include full trip URLs, query text, coordinates, notes, provider parameters, or secret values.
 
@@ -42,7 +41,6 @@
 - Desktop uses a resizable itinerary and map split. Mobile uses a draggable bottom sheet. Keep Map, List, and Split modes.
 - Timed itinerary entries show time first, then a type icon, title, optional status, and details. Transport legs are grey and borderless between bordered entry cards.
 - Use Iconify Lucide icons for actions and item types. Give icon-only controls an accessible name.
-- Do not add color to date navigation. Its hover state is grey and its active state is white.
 
 ## Development commands
 
