@@ -11,10 +11,9 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build && pnpm check:bundles && pnpm build:workers && pnpm typecheck",
-    "build:workers": "esbuild src/db/migrate.ts --bundle --platform=node --format=esm --outfile=.output/migrate/index.mjs && esbuild src/launch.mjs --bundle --platform=node --format=esm --external:./server/index.mjs --outfile=.output/start.mjs",
+    "build:workers": "esbuild src/db/migrate.ts --bundle --platform=node --format=esm --outfile=.output/migrate/index.mjs && esbuild src/launch.mjs --bundle --platform=node --format=esm --external:./migrate/index.mjs --external:./server/index.mjs --outfile=.output/start.mjs",
     "check:bundles": "node scripts/check-bundle-size.mjs",
     "start": "node .output/start.mjs",
-    "start:migrate": "node .output/migrate/index.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "format": "biome format --write .",

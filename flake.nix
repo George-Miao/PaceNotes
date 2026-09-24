@@ -96,7 +96,7 @@
               ];
               Cmd = [
                 "/bin/node"
-                ".output/server/index.mjs"
+                ".output/start.mjs"
               ];
               ExposedPorts = {
                 "3000/tcp" = { };
