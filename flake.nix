@@ -125,7 +125,7 @@
               cache_root="''${XDG_CACHE_HOME:-$HOME/.cache}/pacenotes/motis-v2.11.3"
               source_dir="$cache_root/source"
               build_dir="$cache_root/build"
-              patch_file="''${MOTIS_PATCH:-$PWD/patch/osr-32-way-nodes.patch}"
+              patch_file="''${MOTIS_PATCH:-$PWD/motis/patch/osr-32-way-nodes.patch}"
               motis_revision="b228a4519d196d9dd01b5ce80be46e642abc953e"
               osr_revision="a7b2ec2728544304ef1d8397b3042abc8d10f7e7"
 
