@@ -38,12 +38,10 @@ class EnrichmentStats:
     candidate_trips: int
     enriched_trips: int
     generated_shapes: int
-    unmatched_sequences: int
 
 
 @dataclass(frozen=True)
 class Stop:
-    id: str
     name: str
     point: Point
 
@@ -251,7 +249,7 @@ def enrich_gtfs(gtfs_path: Path, mlit_path: Path) -> EnrichmentStats:
             if row.get("route_id") in high_speed_routes and not row.get("shape_id", "").strip()
         }
         if not candidates:
-            return EnrichmentStats(0, 0, 0, 0)
+            return EnrichmentStats(0, 0, 0)
         sequences = read_stop_sequences(archive, candidates)
         required_stops = {stop_id for sequence in sequences.values() for stop_id in sequence}
         stops = read_stops(archive, required_stops)
@@ -264,11 +262,9 @@ def enrich_gtfs(gtfs_path: Path, mlit_path: Path) -> EnrichmentStats:
 
     generated: dict[str, list[Point]] = {}
     assignments: dict[str, str] = {}
-    unmatched = 0
     for sequence, trip_ids in sorted(sequence_trips.items()):
         path = match_sequence(sequence, stops, graphs, network, station_matcher)
         if path is None:
-            unmatched += 1
             continue
         shape_id = shape_id_for(sequence)
         generated[shape_id] = path
@@ -281,7 +277,6 @@ def enrich_gtfs(gtfs_path: Path, mlit_path: Path) -> EnrichmentStats:
         candidate_trips=len(candidates),
         enriched_trips=len(assignments),
         generated_shapes=len(generated),
-        unmatched_sequences=unmatched,
     )
 
 
@@ -478,7 +473,6 @@ def read_stops(archive: zipfile.ZipFile, stop_ids: set[str]) -> dict[str, Stop]:
             if stop_id not in stop_ids:
                 continue
             result[stop_id] = Stop(
-                id=stop_id,
                 name=row.get("stop_name", ""),
                 point=(float(row["stop_lon"]), float(row["stop_lat"])),
             )
@@ -656,16 +650,6 @@ def distance_meters(start: Point, end: Point) -> float:
     return EARTH_RADIUS_METERS * 2.0 * math.atan2(math.sqrt(value), math.sqrt(1.0 - value))
 
 
-def nearest_point(point: Point, candidates: Iterable[Point]) -> Optional[Point]:
-    nearest: Optional[Point] = None
-    nearest_distance = math.inf
-    for candidate in candidates:
-        distance = distance_meters(point, candidate)
-        if distance < nearest_distance:
-            nearest = candidate
-            nearest_distance = distance
-    return nearest
-
 def closest_points(
     first: Iterable[Point], second: Iterable[Point]
 ) -> Optional[tuple[Point, Point]]:
@@ -766,7 +750,9 @@ class CsvReaderContext:
     def __enter__(self) -> csv.DictReader:
         return self.reader
 
-    def __exit__(self, exception_type: object, exception: object, traceback: object) -> None:
+    def __exit__(
+        self, _exception_type: object, _exception: object, _traceback: object
+    ) -> None:
         self._text.close()
 
 
