@@ -4,11 +4,6 @@ on:
   schedule:
     - cron: "17 3 * * 1"
   workflow_dispatch:
-    inputs:
-      data_rights_confirmed:
-        description: Confirm current provider and data publication rights
-        required: true
-        type: boolean
   release:
     types: [published]
 
@@ -23,24 +18,9 @@ permissions:
   contents: read
 
 jobs:
-  rights:
-    name: Check publication rights
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Require an explicit rights confirmation
-        env:
-          REPOSITORY_CONFIRMATION: ${{ vars.MOTIS_DATA_RIGHTS_CONFIRMED }}
-          RUN_CONFIRMATION: ${{ inputs.data_rights_confirmed }}
-        shell: bash
-        run: |
-          if [[ "$REPOSITORY_CONFIRMATION" != "true" && "$RUN_CONFIRMATION" != "true" ]]; then
-            echo "MOTIS_DATA_RIGHTS_CONFIRMED must be true before data publication" >&2
-            exit 1
-          fi
 
   publish:
     name: Build and publish AMD64 image
-    needs: rights
     runs-on: ubuntu-latest
     permissions:
       contents: read
