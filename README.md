@@ -47,6 +47,7 @@ The Nix image is available as `.#docker` on Linux. Set these runtime values:
 - `GOOGLE_MAP_ID`
 - `MOTIS_URL` (optional, server-only)
 - `MOTIS_TIMEOUT_MS` (optional, server-only)
+- `FRANKFURTER_URL` (optional, server-only exchange-rate endpoint; defaults to `https://api.frankfurter.dev`)
 
 ## Documentation
 
