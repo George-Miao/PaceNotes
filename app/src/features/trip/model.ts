@@ -1,5 +1,6 @@
 import { Temporal } from "@js-temporal/polyfill";
 import { z } from "zod";
+import type { Expense, Friend, Settlement } from "../expense/model";
 
 const itemTypes = ["place", "note", "reservation", "lodging", "transport"] as const;
 export const travelModes = ["DRIVING", "TRANSIT", "WALKING"] as const;
@@ -81,6 +82,10 @@ export type TripSnapshot = {
   days: TripDay[];
   order: string[];
   items: Record<string, TripItem>;
+  currency: string | null;
+  friends: Record<string, Friend>;
+  expenses: Record<string, Expense>;
+  settlements: Record<string, Settlement>;
 };
 
 export type NewTripInput = {
@@ -275,6 +280,10 @@ export function createInitialSnapshot(id: string, input: NewTripInput): TripSnap
     days,
     order: [],
     items: {},
+    currency: null,
+    friends: {},
+    expenses: {},
+    settlements: {},
   };
 }
 

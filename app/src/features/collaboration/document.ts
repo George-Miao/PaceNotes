@@ -1,5 +1,15 @@
 import * as Y from "yjs";
 import {
+  currencySchema,
+  type Expense,
+  expenseSchema,
+  type Friend,
+  financialIdSchema,
+  friendSchema,
+  type Settlement,
+  settlementSchema,
+} from "../expense/model";
+import {
   calendarStartHourSchema,
   defaultCalendarStartHour,
   distanceUnitSchema,
@@ -19,6 +29,9 @@ const metadataKey = "metadata";
 const daysKey = "days";
 const orderKey = "order";
 const itemsKey = "items";
+const friendsKey = "friends";
+const expensesKey = "expenses";
+const settlementsKey = "settlements";
 
 export function initializeTripDocument(document: Y.Doc, snapshot: TripSnapshot): void {
   document.transact(() => {
@@ -35,6 +48,7 @@ export function initializeTripDocument(document: Y.Doc, snapshot: TripSnapshot):
     metadata.delete("uiLanguage");
     metadata.set("distanceUnit", snapshot.distanceUnit);
     metadata.set("calendarStartHour", snapshot.calendarStartHour);
+    metadata.set("currency", snapshot.currency ?? null);
     metadata.delete("calendarHours");
 
     const days = document.getArray<{ id: string; date: string }>(daysKey);
@@ -46,7 +60,16 @@ export function initializeTripDocument(document: Y.Doc, snapshot: TripSnapshot):
     order.insert(0, snapshot.order);
 
     const items = document.getMap<Y.Map<unknown>>(itemsKey);
-    for (const [id, item] of Object.entries(snapshot.items)) items.set(id, itemToMap(item));
+    for (const [id, item] of Object.entries(snapshot.items)) items.set(id, recordToMap(item));
+    const friends = document.getMap<Y.Map<unknown>>(friendsKey);
+    for (const [id, friend] of Object.entries(snapshot.friends ?? {}))
+      friends.set(id, recordToMap(friend));
+    const expenses = document.getMap<Y.Map<unknown>>(expensesKey);
+    for (const [id, expense] of Object.entries(snapshot.expenses ?? {}))
+      expenses.set(id, recordToMap(expense));
+    const settlements = document.getMap<Y.Map<unknown>>(settlementsKey);
+    for (const [id, settlement] of Object.entries(snapshot.settlements ?? {}))
+      settlements.set(id, recordToMap(settlement));
   }, "initialize");
 }
 
@@ -65,6 +88,40 @@ export function readTripDocument(document: Y.Doc): TripSnapshot {
   const defaultTravelMode = travelModeSchema.safeParse(metadata.get("defaultTravelMode"));
   const calendarStartHour = calendarStartHourSchema.safeParse(metadata.get("calendarStartHour"));
 
+  const storedCurrency = currencySchema.nullable().safeParse(metadata.get("currency"));
+  const { friends } = projectFriends(document.getMap<Y.Map<unknown>>(friendsKey));
+  const expenses: Record<string, Expense> = {};
+  document.getMap<Y.Map<unknown>>(expensesKey).forEach((value, key) => {
+    if (!(value instanceof Y.Map)) return;
+    const parsed = expenseSchema.safeParse(value.toJSON());
+    if (parsed.success && parsed.data.id === key) expenses[key] = parsed.data;
+  });
+  // A concurrent attachment race can leave two CRDT records pointing at one item.
+  // Project the same lexical winner on every replica, even before normalization syncs.
+  const occupied = new Set<string>();
+  for (const id of Object.keys(expenses).sort()) {
+    const expense = expenses[id];
+    if (!expense) continue;
+    if (!expense.itemId) {
+      if (expense.followsItemDate) expenses[id] = detachedExpense(expense);
+      continue;
+    }
+    const item = items[expense.itemId];
+    if (!item || occupied.has(expense.itemId)) {
+      expenses[id] = detachedExpense(expense);
+      continue;
+    }
+    occupied.add(expense.itemId);
+    if (expense.followsItemDate && validItemDate(item.dayId) && expense.date !== item.dayId) {
+      expenses[id] = datedExpense(expense, item.dayId);
+    }
+  }
+  const settlements: Record<string, Settlement> = {};
+  document.getMap<Y.Map<unknown>>(settlementsKey).forEach((value, key) => {
+    if (!(value instanceof Y.Map)) return;
+    const parsed = settlementSchema.safeParse(value.toJSON());
+    if (parsed.success && parsed.data.id === key) settlements[key] = parsed.data;
+  });
   return {
     id: String(metadata.get("id") ?? ""),
     title: String(metadata.get("title") ?? "Untitled trip"),
@@ -85,6 +142,10 @@ export function readTripDocument(document: Y.Doc): TripSnapshot {
     days: document.getArray<{ id: string; date: string }>(daysKey).toArray(),
     order: document.getArray<string>(orderKey).toArray(),
     items,
+    currency: storedCurrency.success ? storedCurrency.data : null,
+    friends,
+    expenses,
+    settlements,
   };
 }
 
@@ -94,6 +155,130 @@ export function setTripField(
   value: unknown,
 ): void {
   document.transact(() => document.getMap(metadataKey).set(field, value), "trip-field");
+}
+
+export function setTripCurrency(document: Y.Doc, currency: string): void {
+  const parsed = currencySchema.parse(currency);
+  const metadata = document.getMap<unknown>(metadataKey);
+  const current = metadata.get("currency");
+  if (
+    current !== null &&
+    current !== undefined &&
+    current !== parsed &&
+    (document.getMap(expensesKey).size > 0 || document.getMap(settlementsKey).size > 0)
+  ) {
+    throw new Error("Rebase expenses and settlements before changing the trip currency");
+  }
+  if (current !== parsed) {
+    document.transact(() => metadata.set("currency", parsed), "trip-currency");
+  }
+}
+
+export function upsertFriends(document: Y.Doc, updates: readonly Friend[]): void {
+  if (!updates.length) return;
+  const parsed = updates.map((friend) => friendSchema.parse(friend));
+  const friends = document.getMap<Y.Map<unknown>>(friendsKey);
+  const names = new Map(
+    Object.values(projectFriends(friends).friends).map((friend) => [
+      friend.id,
+      friend.name.toLowerCase(),
+    ]),
+  );
+  for (const friend of parsed) names.set(friend.id, friend.name.toLowerCase());
+  if (new Set(names.values()).size !== names.size) {
+    throw new Error("A tripmate with this name already exists");
+  }
+  document.transact(() => {
+    for (const friend of parsed) upsertRecord(friends, friend);
+  }, "upsert-friend");
+}
+
+export function upsertFriend(document: Y.Doc, friend: Friend): void {
+  upsertFriends(document, [friend]);
+}
+
+export function upsertExpense(document: Y.Doc, expense: Expense): void {
+  const parsed = expenseSchema.parse(expense);
+  if (!currencySchema.safeParse(document.getMap(metadataKey).get("currency")).success) {
+    throw new Error("Choose a trip currency before adding expenses");
+  }
+  const expenses = document.getMap<Y.Map<unknown>>(expensesKey);
+  const stored = expenses.get(parsed.id);
+  const previous = stored instanceof Y.Map ? expenseSchema.safeParse(stored.toJSON()) : null;
+  const prior = previous?.success ? previous.data : null;
+  const friends = document.getMap<Y.Map<unknown>>(friendsKey);
+  const oldSplit = prior ? splitParticipants(prior) : new Set<string>();
+  const nextSplit = splitParticipants(parsed);
+  const participants = new Set([parsed.payerId, ...nextSplit]);
+  for (const id of participants) {
+    const friend = friends.get(id);
+    const valid = friend instanceof Y.Map ? friendSchema.safeParse(friend.toJSON()) : null;
+    if (!valid?.success) throw new Error("Choose a tripmate on this trip");
+    if (
+      valid.data.archived &&
+      ((id === parsed.payerId && prior?.payerId !== id) || (nextSplit.has(id) && !oldSplit.has(id)))
+    ) {
+      throw new Error("Archived tripmates cannot be added as payers or split participants");
+    }
+  }
+  let next = parsed;
+  if (parsed.itemId) {
+    const item = document.getMap<Y.Map<unknown>>(itemsKey).get(parsed.itemId);
+    if (!(item instanceof Y.Map)) throw new Error("Attached item no longer exists");
+    for (const [id, record] of expenses) {
+      if (id === parsed.id || !(record instanceof Y.Map)) continue;
+      if (record.get("itemId") === parsed.itemId) {
+        throw new Error("This item already has an expense");
+      }
+    }
+    const dayId = item.get("dayId");
+    if (parsed.followsItemDate && validItemDate(dayId)) {
+      next = datedExpense(parsed, dayId);
+    }
+  } else if (
+    parsed.followsItemDate ||
+    (prior?.itemId && prior.followsItemDate && parsed.date === prior.date)
+  ) {
+    next = detachedExpense({ ...parsed, followsItemDate: true });
+  }
+  if (
+    prior &&
+    prior.date !== next.date &&
+    next.conversion.source !== "identity" &&
+    next.conversion.requestedDate !== next.date &&
+    !next.conversion.stale
+  ) {
+    next = { ...next, conversion: { ...next.conversion, stale: true } };
+  }
+  document.transact(() => upsertRecord(expenses, next), "upsert-expense");
+}
+
+export function removeExpense(document: Y.Doc, id: string): void {
+  const parsed = financialIdSchema.parse(id);
+  document.transact(() => document.getMap(expensesKey).delete(parsed), "remove-expense");
+}
+
+export function upsertSettlement(document: Y.Doc, settlement: Settlement): void {
+  const parsed = settlementSchema.parse(settlement);
+  if (!currencySchema.safeParse(document.getMap(metadataKey).get("currency")).success) {
+    throw new Error("Choose a trip currency before recording settlements");
+  }
+  const friends = document.getMap<Y.Map<unknown>>(friendsKey);
+  for (const id of [parsed.fromId, parsed.toId]) {
+    const friend = friends.get(id);
+    if (!(friend instanceof Y.Map) || !friendSchema.safeParse(friend.toJSON()).success) {
+      throw new Error("Choose a tripmate on this trip");
+    }
+  }
+  document.transact(
+    () => upsertRecord(document.getMap<Y.Map<unknown>>(settlementsKey), parsed),
+    "upsert-settlement",
+  );
+}
+
+export function removeSettlement(document: Y.Doc, id: string): void {
+  const parsed = financialIdSchema.parse(id);
+  document.transact(() => document.getMap(settlementsKey).delete(parsed), "remove-settlement");
 }
 
 export function setTripSettings(document: Y.Doc, settings: TripSettings): void {
@@ -129,6 +314,7 @@ export function setTripSettings(document: Y.Doc, settings: TripSettings): void {
     if (days.length > 0) days.delete(0, days.length);
     days.insert(0, nextDays);
     for (const { item, next } of nextItems) {
+      if (item.get("dayId") !== next.dayId) syncExpenseDateForItem(document, next.id, next.dayId);
       for (const [key, value] of Object.entries(next)) item.set(key, value);
     }
   }, "trip-settings");
@@ -180,7 +366,7 @@ export function addTripItemWithNextTravelMode(
         )
       : null;
   document.transact(() => {
-    items.set(parsed.id, itemToMap(parsed));
+    items.set(parsed.id, recordToMap(parsed));
     const order = document.getArray<string>(orderKey);
     const index =
       destinationIndex === undefined
@@ -198,12 +384,14 @@ export function updateTripItem(document: Y.Doc, id: string, patch: Partial<TripI
   const current = tripItemSchema.parse(item.toJSON());
   const next = requireReservationSchedule(tripItemSchema.parse({ ...current, ...patch, id }));
   document.transact(() => {
+    if (current.dayId !== next.dayId) syncExpenseDateForItem(document, id, next.dayId);
     for (const [key, value] of Object.entries(next)) item.set(key, value);
   }, "update-item");
 }
 
 export function removeTripItem(document: Y.Doc, id: string): void {
   document.transact(() => {
+    detachExpensesForItem(document, id);
     document.getMap<Y.Map<unknown>>(itemsKey).delete(id);
     const order = document.getArray<string>(orderKey);
     const index = order.toArray().indexOf(id);
@@ -240,6 +428,7 @@ export function moveTripItem(
   );
   const order = document.getArray<string>(orderKey);
   document.transact(() => {
+    if (item.get("dayId") !== next.dayId) syncExpenseDateForItem(document, id, next.dayId);
     item.set("dayId", next.dayId);
     item.set("startTime", next.startTime);
     if (travelMode) item.set("travelMode", next.travelMode);
@@ -319,6 +508,7 @@ export function applyCalendarItemChanges(
 
   document.transact(() => {
     for (const { item, next } of prepared) {
+      if (item.get("dayId") !== next.dayId) syncExpenseDateForItem(document, next.id, next.dayId);
       for (const [key, value] of Object.entries(next)) item.set(key, value);
     }
     if (endDate !== currentEnd) {
@@ -383,7 +573,16 @@ export function normalizeTripDocument(document: Y.Doc): void {
     const lodging = lodgingForDates(value.startDate, value.endDate, previous);
     return JSON.stringify(raw) === JSON.stringify(lodging) ? [] : [{ item, lodging }];
   });
-  if (!migrateCalendarStartHour && !migrateLanguage && notes.length === 0 && lodgings.length === 0)
+  const corrections = expenseCorrections(document);
+  const friendCorrections = projectFriends(document.getMap<Y.Map<unknown>>(friendsKey)).corrections;
+  if (
+    !migrateCalendarStartHour &&
+    !migrateLanguage &&
+    notes.length === 0 &&
+    lodgings.length === 0 &&
+    corrections.length === 0 &&
+    friendCorrections.length === 0
+  )
     return;
   document.transact(() => {
     if (migrateCalendarStartHour) {
@@ -400,6 +599,13 @@ export function normalizeTripDocument(document: Y.Doc): void {
       note.set("durationMinutes", 0);
     }
     for (const { item, lodging } of lodgings) item.set("lodging", lodging);
+    for (const { record, name } of friendCorrections) record.set("name", name);
+    for (const { record, next } of corrections) {
+      for (const [key, value] of Object.entries(next)) {
+        const previous = record.get(key);
+        if (JSON.stringify(previous) !== JSON.stringify(value)) record.set(key, value);
+      }
+    }
   }, "normalize-document");
 }
 
@@ -463,8 +669,10 @@ export function deleteTripDay(document: Y.Doc, dayId: string): void {
     days.delete(deletedIndex, 1);
     const remaining = days.toArray();
 
-    items.forEach((item) => {
-      if (item.get("dayId") === dayId) item.set("dayId", null);
+    items.forEach((item, id) => {
+      if (item.get("dayId") !== dayId) return;
+      syncExpenseDateForItem(document, id, null);
+      item.set("dayId", null);
     });
 
     const metadata = document.getMap(metadataKey);
@@ -473,10 +681,158 @@ export function deleteTripDay(document: Y.Doc, dayId: string): void {
   }, "delete-day");
 }
 
-function itemToMap(item: TripItem): Y.Map<unknown> {
+function recordToMap(record: object): Y.Map<unknown> {
   const map = new Y.Map<unknown>();
-  for (const [key, value] of Object.entries(item)) map.set(key, value);
+  for (const [key, value] of Object.entries(record)) map.set(key, value);
   return map;
+}
+
+function upsertRecord<T extends { id: string }>(root: Y.Map<Y.Map<unknown>>, record: T): void {
+  const map = root.get(record.id);
+  if (!(map instanceof Y.Map)) {
+    root.set(record.id, recordToMap(record));
+    return;
+  }
+  for (const [key, value] of Object.entries(record)) {
+    const previous = map.get(key);
+    if (
+      Object.is(previous, value) ||
+      (previous !== null &&
+        value !== null &&
+        typeof previous === "object" &&
+        typeof value === "object" &&
+        JSON.stringify(previous) === JSON.stringify(value))
+    ) {
+      continue;
+    }
+    map.set(key, value);
+  }
+}
+
+function projectFriends(root: Y.Map<Y.Map<unknown>>): {
+  friends: Record<string, Friend>;
+  corrections: Array<{ record: Y.Map<unknown>; name: string }>;
+} {
+  const entries: Array<{ id: string; record: Y.Map<unknown>; friend: Friend }> = [];
+  for (const [id, record] of root) {
+    if (!(record instanceof Y.Map)) continue;
+    const parsed = friendSchema.safeParse(record.toJSON());
+    if (parsed.success && parsed.data.id === id) {
+      entries.push({ id, record, friend: parsed.data });
+    }
+  }
+  entries.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const reserved = new Set(entries.map(({ friend }) => friend.name.toLowerCase()));
+  const used = new Set<string>();
+  const friends: Record<string, Friend> = {};
+  const corrections: Array<{ record: Y.Map<unknown>; name: string }> = [];
+  for (const { id, record, friend } of entries) {
+    let name = friend.name;
+    if (used.has(name.toLowerCase())) {
+      let suffix = 2;
+      do {
+        const marker = ` (${suffix++})`;
+        name = `${friend.name.slice(0, 100 - marker.length).trimEnd()}${marker}`;
+      } while (reserved.has(name.toLowerCase()) || used.has(name.toLowerCase()));
+    }
+    used.add(name.toLowerCase());
+    friends[id] = name === friend.name ? friend : { ...friend, name };
+    if (name !== friend.name) corrections.push({ record, name });
+  }
+  return { friends, corrections };
+}
+
+function splitParticipants(expense: Expense): Set<string> {
+  switch (expense.split.kind) {
+    case "payer":
+      return new Set();
+    case "equal":
+    case "mixed":
+      return new Set(expense.split.friendIds);
+    case "exact":
+      return new Set(Object.keys(expense.split.shares));
+  }
+}
+
+function datedExpense(expense: Expense, date: string | null): Expense {
+  if (expense.date === date) return expense;
+  const conversion = expense.conversion;
+  return {
+    ...expense,
+    date,
+    conversion:
+      conversion.source === "identity" || conversion.stale
+        ? conversion
+        : { ...conversion, stale: true },
+  };
+}
+
+function detachedExpense(expense: Expense): Expense {
+  const dated = expense.followsItemDate ? datedExpense(expense, null) : expense;
+  return { ...dated, itemId: null, followsItemDate: false };
+}
+
+function validItemDate(value: unknown): value is string | null {
+  return value === null || (typeof value === "string" && tripDates(value, value).length === 1);
+}
+
+function syncExpenseDateForItem(document: Y.Doc, itemId: string, dayId: string | null): void {
+  if (!validItemDate(dayId)) return;
+  const expenses = document.getMap<Y.Map<unknown>>(expensesKey);
+  for (const record of expenses.values()) {
+    if (!(record instanceof Y.Map)) continue;
+    if (record.get("itemId") !== itemId || record.get("followsItemDate") !== true) continue;
+    const parsed = expenseSchema.safeParse(record.toJSON());
+    if (parsed.success) upsertRecord(expenses, datedExpense(parsed.data, dayId));
+  }
+}
+
+function detachExpensesForItem(document: Y.Doc, itemId: string): void {
+  const expenses = document.getMap<Y.Map<unknown>>(expensesKey);
+  for (const record of expenses.values()) {
+    if (!(record instanceof Y.Map) || record.get("itemId") !== itemId) continue;
+    const parsed = expenseSchema.safeParse(record.toJSON());
+    if (parsed.success) {
+      upsertRecord(expenses, detachedExpense(parsed.data));
+    } else {
+      record.set("itemId", null);
+      record.set("followsItemDate", false);
+    }
+  }
+}
+
+function expenseCorrections(document: Y.Doc): Array<{ record: Y.Map<unknown>; next: Expense }> {
+  const expenses = document.getMap<Y.Map<unknown>>(expensesKey);
+  const items = document.getMap<Y.Map<unknown>>(itemsKey);
+  const occupied = new Set<string>();
+  const corrections: Array<{ record: Y.Map<unknown>; next: Expense }> = [];
+  for (const [id, record] of Array.from(expenses.entries()).sort(([a], [b]) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  )) {
+    if (!(record instanceof Y.Map)) continue;
+    const parsed = expenseSchema.safeParse(record.toJSON());
+    if (!parsed.success || parsed.data.id !== id) continue;
+    const itemId = parsed.data.itemId;
+    if (!itemId) {
+      if (parsed.data.followsItemDate) {
+        corrections.push({ record, next: detachedExpense(parsed.data) });
+      }
+      continue;
+    }
+    const expense = parsed.data;
+    const item = items.get(itemId);
+    const validItem = item instanceof Y.Map ? tripItemSchema.safeParse(item.toJSON()) : null;
+    if (!validItem?.success || occupied.has(itemId)) {
+      corrections.push({ record, next: detachedExpense(expense) });
+      continue;
+    }
+    occupied.add(itemId);
+    const dayId = validItem.data.dayId;
+    if (expense.followsItemDate && validItemDate(dayId) && dayId !== expense.date) {
+      corrections.push({ record, next: datedExpense(expense, dayId) });
+    }
+  }
+  return corrections;
 }
 
 function shiftDate(date: string, days: number): string {
