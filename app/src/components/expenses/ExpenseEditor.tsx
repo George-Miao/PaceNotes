@@ -10,7 +10,13 @@ import { removeExpense, upsertExpense } from "~/features/collaboration/document"
 import { defaultExpenseCategory } from "~/features/expense/category";
 import { convertExpense } from "~/features/expense/exchange.functions";
 import type { Expense, ExpenseCategory, Split } from "~/features/expense/model";
-import { currencyDigits, formatMoney, isMoneyInput, revalueAtRate } from "~/features/expense/money";
+import {
+  currencyDigits,
+  formatMoney,
+  isMoneyInput,
+  revalueAtRate,
+  splitRemainingShares,
+} from "~/features/expense/money";
 import type { GooglePlaceView } from "~/features/google/google";
 import { useTripText, useUiLanguage } from "~/features/trip/language";
 import type { TripSnapshot } from "~/features/trip/model";
@@ -197,11 +203,23 @@ export function ExpenseEditor({
           }),
       ];
   const amount = parsedAmount(draft.amount, draft.currency);
-  const specifiedTotal = draft.participants.reduce(
-    (sum, id) => sum + BigInt(parsedAmount(draft.shares[id] ?? "", draft.currency) ?? 0),
-    0n,
-  );
-  const blankCount = draft.participants.filter((id) => !(draft.shares[id] ?? "").trim()).length;
+  let specifiedTotal = 0n;
+  const blankIds: string[] = [];
+  let invalidSpecifiedShare = false;
+  for (const id of draft.participants) {
+    const value = (draft.shares[id] ?? "").trim();
+    if (!value) {
+      blankIds.push(id);
+      continue;
+    }
+    const share = parsedAmount(value, draft.currency);
+    if (share === null || share <= 0) {
+      invalidSpecifiedShare = true;
+    } else {
+      specifiedTotal += BigInt(share);
+    }
+  }
+  const blankCount = blankIds.length;
   const splitIssue =
     draft.splitKind === "shared" && amount !== null && draft.participants.length
       ? specifiedTotal > BigInt(amount)
@@ -213,6 +231,14 @@ export function ExpenseEditor({
           : specifiedTotal !== BigInt(amount)
             ? "expenseSharesMustTotal"
             : null
+      : null;
+  const automaticShares =
+    draft.splitKind === "shared" &&
+    amount !== null &&
+    !invalidSpecifiedShare &&
+    !splitIssue &&
+    blankCount
+      ? splitRemainingShares(BigInt(amount) - specifiedTotal, blankIds)
       : null;
   const setCurrency = (next: string) =>
     setDraft((current) => ({ ...current, currency: next, amount: "", shares: {} }));
@@ -541,7 +567,7 @@ export function ExpenseEditor({
               name="split-kind"
               checked={draft.splitKind === "payer"}
               onChange={() => setDraft({ ...draft, splitKind: "payer" })}
-            />{" "}
+            />
             {text("expensePayerOnly")}
           </label>
           <label>
@@ -550,19 +576,15 @@ export function ExpenseEditor({
               name="split-kind"
               checked={draft.splitKind === "shared"}
               onChange={() => setDraft({ ...draft, splitKind: "shared" })}
-            />{" "}
+            />
             {text("expenseShared")}
           </label>
         </div>
-        {draft.splitKind === "payer" ? (
-          <p className={styles.helper}>{text("expensePayerCoversAll")}</p>
-        ) : (
+        {draft.splitKind === "shared" ? (
           <div className={styles.splitPeople}>
-            <p className={styles.fieldHint} id="expense-shares-hint">
-              {text("expenseBlankSharesHint")}
-            </p>
             {participants.map((friend) => {
               const selected = draft.participants.includes(friend.id);
+              const automaticShare = selected ? automaticShares?.[friend.id] : undefined;
               const unavailable = friend.archived && !selected;
               return (
                 <div
@@ -579,48 +601,45 @@ export function ExpenseEditor({
                   >
                     <FriendName friend={friend} />
                   </button>
-                  <input
-                    className={styles.splitAmount}
-                    type="text"
-                    inputMode="decimal"
-                    value={selected ? (draft.shares[friend.id] ?? "") : ""}
-                    disabled={!selected}
-                    placeholder={draft.currency}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      if (!isMoneyInput(value, draft.currency)) return;
-                      setDraft({
-                        ...draft,
-                        shares: { ...draft.shares, [friend.id]: value },
-                      });
-                    }}
-                    aria-label={text("expensePersonShareInCurrency", {
-                      name: friend.name,
-                      currency: draft.currency,
-                    })}
-                    aria-describedby="expense-shares-hint"
-                  />
+                  <div className={styles.splitAmountField}>
+                    <input
+                      className={styles.splitAmount}
+                      type="text"
+                      inputMode="decimal"
+                      value={selected ? (draft.shares[friend.id] ?? "") : ""}
+                      disabled={!selected}
+                      placeholder={
+                        automaticShare === undefined
+                          ? ""
+                          : inputAmount(automaticShare, draft.currency)
+                      }
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        if (!isMoneyInput(value, draft.currency)) return;
+                        setDraft({
+                          ...draft,
+                          shares: { ...draft.shares, [friend.id]: value },
+                        });
+                      }}
+                      aria-label={text("expensePersonShareInCurrency", {
+                        name: friend.name,
+                        currency: draft.currency,
+                      })}
+                    />
+                    <span className={styles.splitCurrency} aria-hidden="true">
+                      {draft.currency}
+                    </span>
+                  </div>
                 </div>
               );
             })}
-            {amount !== null && draft.participants.length ? (
-              <p className={styles.fieldHint}>
-                {text("expenseSpecifiedOf", {
-                  total:
-                    specifiedTotal <= BigInt(Number.MAX_SAFE_INTEGER)
-                      ? formatMoney(Number(specifiedTotal), draft.currency)
-                      : text("expenseTooLarge"),
-                  amount: formatMoney(amount, draft.currency),
-                })}
-              </p>
-            ) : null}
             {splitIssue && amount !== null ? (
               <p role="alert" className={styles.warning}>
                 {text(splitIssue, { amount: formatMoney(amount, draft.currency) })}
               </p>
             ) : null}
           </div>
-        )}
+        ) : null}
       </fieldset>
       {error ? (
         <p role="alert" className="field-error">

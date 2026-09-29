@@ -586,20 +586,59 @@
 }
 
 .radioRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1.25rem;
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  justify-self: start;
+  gap: 2px;
+  width: min(100%, 19rem);
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--muted-surface);
 }
 
 .radioRow label {
-  display: inline-flex;
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 2.25rem;
   align-items: center;
-  gap: 0.3rem;
+  justify-content: center;
+  padding: 0.35rem 0.6rem;
+  border-radius: var(--radius-s);
+  color: var(--ink);
+  font-size: 0.8125rem;
+  font-weight: 650;
+  text-align: center;
   cursor: pointer;
 }
 
+.radioRow label:hover:not(:has(input:checked)) {
+  background: var(--hover-surface);
+}
+
+.radioRow label:has(input:checked) {
+  color: var(--on-accent);
+  background: var(--accent-fill);
+}
+
+.radioRow label:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .radioRow input {
-  accent-color: var(--accent);
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.radioRow input:focus-visible {
+  outline: none;
 }
 
 .splitPeople {
@@ -671,12 +710,60 @@
   outline-offset: 2px;
 }
 
-.splitAmount {
-  min-width: 0;
+.splitAmountField {
   position: relative;
   z-index: 1;
   grid-column: 2;
+  display: flex;
+  min-width: 0;
+  min-height: 2.25rem;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--raised);
+}
+
+.splitAmountField:hover {
+  border-color: var(--border-strong);
+}
+
+.splitAmountField:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.splitAmountField:has(.splitAmount:disabled) {
+  opacity: 0.55;
+}
+
+.splitAmount {
+  min-width: 0;
+  flex: 1;
   width: 100%;
+  padding: 0.4rem 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+.splitAmount:focus-visible {
+  outline: none;
+}
+
+.splitAmount::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+.splitCurrency {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
 }
 
 .followDate {

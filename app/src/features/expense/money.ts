@@ -189,6 +189,23 @@ function allocateShares(amountMinor: number, weights: [string, bigint][]): Recor
   return result;
 }
 
+export function splitRemainingShares(
+  remaining: bigint,
+  friendIds: readonly string[],
+): Record<string, number> {
+  if (!friendIds.length || remaining < BigInt(friendIds.length)) {
+    throw new RangeError("Every selected tripmate needs a positive share");
+  }
+  const sorted = [...friendIds].sort(compareId);
+  const base = remaining / BigInt(sorted.length);
+  const extra = remaining % BigInt(sorted.length);
+  const shares: Record<string, number> = {};
+  for (const [index, id] of sorted.entries()) {
+    shares[id] = safeAmount(base + (BigInt(index) < extra ? 1n : 0n));
+  }
+  return shares;
+}
+
 // Resolve shares in the expense currency before converting them as one rounded total.
 function originalShares(expense: Expense): Record<string, number> {
   const { split, amountMinor } = expense;
@@ -221,19 +238,10 @@ function originalShares(expense: Expense): Record<string, number> {
   }
   const remaining =
     BigInt(amountMinor) - specified.reduce((sum, [, amount]) => sum + BigInt(amount), 0n);
-  const unspecified = split.friendIds
-    .filter((id) => split.kind !== "mixed" || !(id in split.shares))
-    .sort(compareId);
-  if (remaining < BigInt(unspecified.length)) {
-    throw new RangeError("Every selected tripmate needs a positive share");
-  }
-  const base = remaining / BigInt(unspecified.length);
-  const extra = remaining % BigInt(unspecified.length);
-  const shares: Record<string, number> = Object.fromEntries(specified);
-  for (const [index, id] of unspecified.entries()) {
-    shares[id] = safeAmount(base + (BigInt(index) < extra ? 1n : 0n));
-  }
-  return shares;
+  const unspecified = split.friendIds.filter(
+    (id) => split.kind !== "mixed" || !(id in split.shares),
+  );
+  return { ...Object.fromEntries(specified), ...splitRemainingShares(remaining, unspecified) };
 }
 
 function convertedShares(
