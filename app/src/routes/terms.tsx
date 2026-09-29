@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { StaticPage } from "~/components/StaticPage";
+import { StaticPage } from "~/components/pages/StaticPage";
 
 export const Route = createFileRoute("/terms")({ component: Terms });
 

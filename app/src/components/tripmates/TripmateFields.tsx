@@ -1,6 +1,6 @@
 import type { ComponentProps, ReactNode } from "react";
 import { useRef } from "react";
-import { TitleField } from "./TitleField";
+import { TitleField } from "~/components/planner/TitleField";
 import styles from "./TripmateFields.module.css";
 
 type Props = Omit<

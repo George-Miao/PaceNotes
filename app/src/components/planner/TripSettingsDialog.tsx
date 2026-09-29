@@ -1,6 +1,10 @@
 import { Icon } from "@iconify/react";
 import { Temporal } from "@js-temporal/polyfill";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
+import { CurrencyDropdown } from "~/components/expenses/CurrencyDropdown";
+import { Dropdown, type DropdownOption } from "~/components/ui/Dropdown";
+import { Modal } from "~/components/ui/Modal";
+import modalStyles from "~/components/ui/Modal.module.css";
 import { travelModeLabel, useTripText, useUiLanguage } from "~/features/trip/language";
 import {
   type CalendarStartHour,
@@ -14,8 +18,6 @@ import {
   tripLanguages,
   tripSettingsSchema,
 } from "~/features/trip/model";
-import { CurrencyDropdown } from "./CurrencyDropdown";
-import { Dropdown, type DropdownOption } from "./Dropdown";
 import { iconForTravelMode } from "./item-icon";
 
 const languageLabels: Record<TripLanguage, string> = {
@@ -61,7 +63,6 @@ export function TripSettingsDialog({
   const [currencyError, setCurrencyError] = useState<string | null>(null);
   const language = useUiLanguage();
   const text = useTripText();
-  const backdropRef = useRef<HTMLDivElement>(null);
   const valid = tripSettingsSchema.safeParse(settingsForDocument(draft)).success;
   const requestClose = useCallback(() => {
     if (
@@ -72,37 +73,10 @@ export function TripSettingsDialog({
     onClose();
   }, [currency, draft, nextCurrency, onClose, settings, text]);
 
-  useEffect(() => {
-    const backdrop = backdropRef.current;
-    const closeOnBackdrop = (event: MouseEvent) => {
-      if (event.target === backdrop) requestClose();
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      if (
-        event.target instanceof Element &&
-        event.target.closest('[role="combobox"][aria-expanded="true"]')
-      )
-        return;
-      event.preventDefault();
-      event.stopPropagation();
-      requestClose();
-    };
-    backdrop?.addEventListener("click", closeOnBackdrop);
-    document.addEventListener("keydown", closeOnEscape, true);
-    return () => {
-      backdrop?.removeEventListener("click", closeOnBackdrop);
-      document.removeEventListener("keydown", closeOnEscape, true);
-    };
-  }, [requestClose]);
-
   return (
-    <div ref={backdropRef} className="dialog-backdrop">
+    <Modal title={text("tripSettings")} onClose={requestClose}>
       <form
-        className="dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="trip-settings-title"
+        className={modalStyles.form}
         onSubmit={(event) => {
           event.preventDefault();
           if (!valid || currencyBusy) return;
@@ -133,7 +107,6 @@ export function TripSettingsDialog({
           void save();
         }}
       >
-        <h2 id="trip-settings-title">{text("tripSettings")}</h2>
         <fieldset className="trip-date-range">
           <legend className="sr-only">{text("tripDates")}</legend>
           <label className="field">
@@ -276,7 +249,7 @@ export function TripSettingsDialog({
             </p>
           ) : null}
         </div>
-        <div>
+        <div className={modalStyles.actions}>
           <button type="button" className="ghost-button" onClick={requestClose}>
             {text("cancel")}
           </button>
@@ -285,7 +258,7 @@ export function TripSettingsDialog({
           </button>
         </div>
       </form>
-    </div>
+    </Modal>
   );
 }
 

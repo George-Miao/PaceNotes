@@ -333,8 +333,7 @@
   }
   .field input,
   .field select,
-  .field textarea,
-  .dialog input {
+  .field textarea {
     width: 100%;
     max-width: 100%;
     min-height: 2.25rem;
@@ -1709,38 +1708,6 @@
     box-shadow: var(--shadow);
   }
 
-  .dialog-backdrop {
-    position: fixed;
-    z-index: 1000;
-    inset: 0;
-    display: grid;
-    place-items: center;
-    padding: var(--space-4);
-    background: rgb(20 25 30 / 48%);
-  }
-  .dialog {
-    display: grid;
-    width: min(30rem, 100%);
-    gap: var(--space-3);
-    padding: var(--space-5);
-    border: var(--line) solid var(--border-strong);
-    border-radius: var(--radius-m);
-    background: var(--raised);
-    box-shadow: var(--shadow-panel);
-  }
-  .dialog h2 {
-    margin: 0;
-    font-size: 1rem;
-  }
-  .dialog p {
-    margin: 0;
-    color: var(--muted);
-  }
-  .dialog > div:last-child {
-    display: flex;
-    justify-content: flex-end;
-    gap: var(--space-2);
-  }
   .update-toast {
     position: fixed;
     z-index: 1100;
@@ -1841,19 +1808,65 @@
 
   @media (max-width: 72rem) {
     .planner-header {
-      grid-template-columns: minmax(0, 1fr) auto;
+      position: relative;
+      z-index: 20;
     }
     .planner-header-title {
       grid-column: 1;
       grid-row: 1;
     }
-    .planner-header-actions {
+    .planner-header .planner-view-tools {
       grid-column: 2;
       grid-row: 1;
     }
-    .planner-header .planner-view-tools {
-      grid-column: 1 / -1;
-      grid-row: 2;
+    .planner-header-actions {
+      grid-column: 3;
+      grid-row: 1;
+    }
+    .planner-header .presence-stack span:nth-child(n + 2) {
+      display: none;
+    }
+    .planner-header-more {
+      position: relative;
+    }
+    .planner-header-more-trigger {
+      display: inline-flex;
+    }
+    .planner-header-more-trigger[aria-expanded="true"] {
+      color: var(--accent-ink);
+      background: var(--accent-soft);
+    }
+    .planner-header-more-menu {
+      position: absolute;
+      z-index: 1;
+      top: calc(100% + var(--space-1));
+      right: 0;
+      display: none;
+      width: min(14rem, calc(100vw - 1.5rem));
+      max-height: min(70dvh, 22rem);
+      overflow: auto;
+      padding: var(--space-1);
+      border: var(--line) solid var(--border);
+      border-radius: var(--radius-s);
+      background: var(--raised);
+      box-shadow: var(--shadow-panel);
+    }
+    .planner-header-more-menu.is-open {
+      display: grid;
+    }
+    .planner-header-more-menu .icon-button {
+      width: 100%;
+      min-height: 2.25rem;
+      justify-content: flex-start;
+      gap: var(--space-2);
+      padding: var(--space-2);
+      text-align: left;
+    }
+    .planner-header-more-menu .icon-button:not(.danger-icon):hover:not(:disabled) {
+      background: var(--hover-surface);
+    }
+    .planner-header-action-label {
+      display: inline;
     }
   }
 
@@ -1926,8 +1939,6 @@
       grid-template-rows: auto auto minmax(0, 1fr);
     }
     .planner-header {
-      position: relative;
-      z-index: 20;
       grid-template-columns: minmax(0, 1fr) auto;
       row-gap: var(--space-1);
       padding-block: var(--space-1);
@@ -1951,51 +1962,6 @@
     }
     .planner-header .planner-view-separator {
       margin-inline: 0;
-    }
-    .planner-header .presence-stack span:nth-child(n + 2) {
-      display: none;
-    }
-    .planner-header-more {
-      position: relative;
-    }
-    .planner-header-more-trigger {
-      display: inline-flex;
-    }
-    .planner-header-more-trigger[aria-expanded="true"] {
-      color: var(--accent-ink);
-      background: var(--accent-soft);
-    }
-    .planner-header-more-menu {
-      position: absolute;
-      z-index: 1;
-      top: calc(100% + var(--space-1));
-      right: 0;
-      display: none;
-      width: min(14rem, calc(100vw - 1.5rem));
-      max-height: min(70dvh, 22rem);
-      overflow: auto;
-      padding: var(--space-1);
-      border: var(--line) solid var(--border);
-      border-radius: var(--radius-s);
-      background: var(--raised);
-      box-shadow: var(--shadow-panel);
-    }
-    .planner-header-more-menu.is-open {
-      display: grid;
-    }
-    .planner-header-more-menu .icon-button {
-      width: 100%;
-      min-height: 2.25rem;
-      justify-content: flex-start;
-      gap: var(--space-2);
-      padding: var(--space-2);
-      text-align: left;
-    }
-    .planner-header-more-menu .icon-button:not(.danger-icon):hover:not(:disabled) {
-      background: var(--hover-surface);
-    }
-    .planner-header-action-label {
-      display: inline;
     }
     .planner-view-tools button[aria-pressed="true"]::after {
       bottom: calc(-1 * var(--space-1));

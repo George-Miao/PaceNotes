@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Planner } from "~/components/Planner";
+import { Planner } from "~/components/planner/Planner";
 import { requireTripMetadata, TripLoadError, TripNotFound } from "~/features/trip/route-state";
 import { getTripMetadata } from "~/features/trip/trip.functions";
 

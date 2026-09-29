@@ -1,6 +1,6 @@
+import type { DropdownOption } from "~/components/ui/Dropdown";
 import type { Friend } from "~/features/expense/model";
 import { useTripText } from "~/features/trip/language";
-import type { DropdownOption } from "./Dropdown";
 import styles from "./FriendName.module.css";
 
 export function FriendDot({ color }: { color: string }) {

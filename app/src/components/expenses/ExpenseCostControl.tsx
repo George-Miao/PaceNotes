@@ -16,7 +16,7 @@ import styles from "./ExpenseCostControl.module.css";
 
 // The full expense form loads only after the details popover opens.
 const ExpenseEditor = lazy(async () => {
-  const module = await import("./ExpensesWorkspace");
+  const module = await import("./ExpenseEditor");
   return { default: module.ExpenseEditor };
 });
 

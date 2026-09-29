@@ -55,9 +55,10 @@ async function createEmptyTrip(
 
 async function clickPlannerAction(page: Page, name: string) {
   const header = page.locator(".planner-header");
-  const more = header.locator(".planner-header-more-trigger");
-  if (await page.evaluate(() => matchMedia("(max-width: 48rem)").matches)) await more.click();
-  await header.getByRole("button", { name, exact: true }).click();
+  const action = header.getByRole("button", { name, exact: true });
+  if (await page.evaluate(() => matchMedia("(max-width: 72rem)").matches))
+    await header.locator(".planner-header-more-trigger").click();
+  await action.click();
 }
 
 async function joinTripAs(page: Page, name: string) {
@@ -1110,7 +1111,7 @@ test("tripmate join dialog dismisses on Escape and outside click", async ({ page
     await expect(join.getByRole("textbox", { name: "New tripmate" })).toHaveValue("");
     await join.getByRole("heading", { name: "Who are you on this trip?" }).click();
     await expect(join).toBeVisible();
-    await page.locator(".dialog-backdrop").click({ position: { x: 2, y: 2 } });
+    await page.mouse.click(2, 2);
     await expect(join).toHaveCount(0);
     await expect(guest).toBeVisible();
   } finally {
@@ -1844,6 +1845,74 @@ test("narrow planner controls keep titles and actions readable", async ({ page }
     await expect(more).toHaveAttribute("aria-expanded", "false");
   } finally {
     await page.goto("/");
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("planner keeps tabs in the header when right actions collapse", async ({ page }) => {
+  const id = await createEmptyTrip();
+  try {
+    await page.goto(`/trips/${id}`);
+    await joinTripAs(page, "Header editor");
+    const header = page.locator(".planner-header");
+    const more = header.getByRole("button", { name: "More actions" });
+    for (const width of [1280, 1100, 900, 800]) {
+      await page.setViewportSize({ width, height: 800 });
+      const layout = await header.evaluate((element) => {
+        const title = element.querySelector(".planner-header-title")?.getBoundingClientRect();
+        const tabs = element.querySelector(".planner-view-tools")?.getBoundingClientRect();
+        const actions = element.querySelector(".planner-header-actions")?.getBoundingClientRect();
+        if (!title || !tabs || !actions) throw new Error("Missing planner header controls");
+        const bounds = element.getBoundingClientRect();
+        return {
+          titleRight: title.right,
+          titleCenter: title.top + title.height / 2,
+          tabsLeft: tabs.left,
+          tabsRight: tabs.right,
+          tabsCenter: tabs.top + tabs.height / 2,
+          tabsMidpoint: (tabs.left + tabs.right) / 2,
+          actionsLeft: actions.left,
+          actionsRight: actions.right,
+          actionsCenter: actions.top + actions.height / 2,
+          headerMidpoint: (bounds.left + bounds.right) / 2,
+          headerRight: bounds.right,
+        };
+      });
+      expect(Math.abs(layout.titleCenter - layout.tabsCenter)).toBeLessThan(3);
+      expect(Math.abs(layout.tabsCenter - layout.actionsCenter)).toBeLessThan(3);
+      expect(Math.abs(layout.tabsMidpoint - layout.headerMidpoint)).toBeLessThan(1);
+      expect(layout.titleRight).toBeLessThanOrEqual(layout.tabsLeft + 1);
+      expect(layout.tabsRight).toBeLessThanOrEqual(layout.actionsLeft + 1);
+      expect(layout.actionsRight).toBeLessThanOrEqual(layout.headerRight + 1);
+      if (width <= 1152) {
+        await expect(more).toBeVisible();
+        await more.click();
+        await expect(header.getByRole("button", { name: "Trip settings" })).toBeVisible();
+        await page.keyboard.press("Escape");
+      } else {
+        await expect(more).toBeHidden();
+      }
+    }
+    for (const width of [490, 390, 320]) {
+      await page.setViewportSize({ width, height: 800 });
+      await expect(more).toBeVisible();
+      const layout = await header.evaluate((element) => {
+        const tabs = element.querySelector(".planner-view-tools")?.getBoundingClientRect();
+        const title = element.querySelector(".planner-header-title")?.getBoundingClientRect();
+        if (!tabs || !title) throw new Error("Missing planner tabs");
+        return {
+          tabsTop: tabs.top,
+          titleBottom: title.bottom,
+          tabsBottom: tabs.bottom,
+          headerBottom: element.getBoundingClientRect().bottom,
+        };
+      });
+      expect(layout.tabsTop).toBeGreaterThanOrEqual(layout.titleBottom);
+      expect(layout.tabsBottom).toBeLessThanOrEqual(layout.headerBottom + 1);
+      for (const name of ["Itinerary", "Calendar", "Expenses", "Map"])
+        await expect(header.getByRole("button", { name, exact: true })).toBeVisible();
+    }
+  } finally {
     await db.delete(trips).where(eq(trips.id, id));
   }
 });
@@ -6333,7 +6402,7 @@ test("trip settings control language, units, default travel, and persist", async
     await page.keyboard.press("Escape");
     await expect(settings).toHaveCount(0);
     await clickPlannerAction(page, "Trip settings");
-    await page.locator(".dialog-backdrop").click({ position: { x: 4, y: 4 } });
+    await page.mouse.click(4, 4);
     await expect(settings).toHaveCount(0);
 
     await clickPlannerAction(page, "Trip settings");
@@ -6355,7 +6424,7 @@ test("trip settings control language, units, default travel, and persist", async
     ).toBeVisible();
 
     page.once("dialog", (dialog) => dialog.accept());
-    await page.locator(".dialog-backdrop").click({ position: { x: 4, y: 4 } });
+    await page.mouse.click(4, 4);
     await expect(settings).toHaveCount(0);
     await clickPlannerAction(page, "Trip settings");
     await expect(settings.getByRole("combobox", { name: "Distance units: Metric" })).toBeVisible();

@@ -3,10 +3,10 @@ import mapPinPenIcon from "@iconify-icons/lucide/map-pin-pen";
 import pencilIcon from "@iconify-icons/lucide/pencil";
 import xIcon from "@iconify-icons/lucide/x";
 import { useRef, useState } from "react";
+import { GooglePlacePicker } from "~/components/places/GooglePlacePicker";
 import type { GooglePlaceView } from "~/features/google/google";
 import { useTripText } from "~/features/trip/language";
 import type { PlaceReference } from "~/features/trip/model";
-import { GooglePlacePicker } from "./GooglePlacePicker";
 import styles from "./ItemEditor.module.css";
 
 export function EditorPlaceField({

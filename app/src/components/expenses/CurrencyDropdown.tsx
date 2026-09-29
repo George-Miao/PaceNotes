@@ -1,7 +1,7 @@
 import { Icon } from "@iconify/react";
 import coinsIcon from "@iconify-icons/lucide/coins";
+import { Dropdown, type DropdownOption, type DropdownProps } from "~/components/ui/Dropdown";
 import { currencySymbol, supportedCurrencies } from "~/features/expense/money";
-import { Dropdown, type DropdownOption, type DropdownProps } from "./Dropdown";
 
 type Props = Omit<DropdownProps, "options">;
 const majorCurrencies: readonly string[] = ["USD", "CNY", "JPY", "EUR", "GBP", "CAD", "AUD", "CHF"];

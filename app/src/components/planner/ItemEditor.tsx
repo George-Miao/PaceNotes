@@ -3,6 +3,8 @@ import calendarCheckIcon from "@iconify-icons/lucide/calendar-check-2";
 import pencilIcon from "@iconify-icons/lucide/pencil";
 import xIcon from "@iconify-icons/lucide/x";
 import { type ReactNode, type SetStateAction, useEffect, useMemo, useRef, useState } from "react";
+import { Dropdown } from "~/components/ui/Dropdown";
+import { MarkdownPreview } from "~/components/ui/MarkdownPreview";
 import type { GooglePlaceView } from "~/features/google/google";
 import { useGooglePlaceViews } from "~/features/google/use-place-views";
 import { useTripLanguage, useTripText } from "~/features/trip/language";
@@ -19,11 +21,9 @@ import {
   type TripItem,
   transportModes,
 } from "~/features/trip/model";
-import { Dropdown } from "./Dropdown";
 import { EditorPlaceField } from "./EditorPlaceField";
 import styles from "./ItemEditor.module.css";
 import { iconForTransportMode } from "./item-icon";
-import { MarkdownPreview } from "./MarkdownPreview";
 
 const markdownIcon = {
   width: 24,

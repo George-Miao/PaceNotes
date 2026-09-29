@@ -4,6 +4,7 @@
 
 - `app/` is the only JavaScript package. It contains the React 19 and TanStack Start application.
 - `app/src/routes/` contains page routes, server routes, and route loaders.
+- `app/src/components/` groups related components in domain subdirectories.
 - `app/src/features/trip/` owns trip types, validation, date rules, and server functions.
 - `app/src/features/collaboration/` owns the Yjs document interface and React synchronization hook.
 - `app/src/sync/` and `app/server/routes/sync.ts` own Hocuspocus collaboration on the web port.
@@ -36,6 +37,7 @@
 ## Interface and design rules
 
 - Use deep modules. Keep Yjs details behind `features/collaboration/document.ts`.
+- Split oversized component files at coherent state or behavior seams. Do not add thin wrappers only to reduce line count.
 - Use small radii, crisp borders, dense neutral surfaces, quiet blue accents, and white text on primary blue controls.
 - Light and dark modes follow the system. Keep WCAG 2.2 AA contrast and visible keyboard focus.
 - Desktop uses a resizable itinerary and map split. Mobile uses a draggable bottom sheet. Keep Map, List, and Split modes.

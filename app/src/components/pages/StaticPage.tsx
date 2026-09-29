@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Brand } from "./Brand";
+import { Brand } from "~/components/ui/Brand";
 
 export function StaticPage({
   title,

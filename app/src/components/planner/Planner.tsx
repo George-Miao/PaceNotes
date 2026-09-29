@@ -7,8 +7,6 @@ import eyeIcon from "@iconify-icons/lucide/eye";
 import listIcon from "@iconify-icons/lucide/list";
 import mapIcon from "@iconify-icons/lucide/map";
 import mapPinIcon from "@iconify-icons/lucide/map-pin";
-import panelLeftCloseIcon from "@iconify-icons/lucide/panel-left-close";
-import panelLeftOpenIcon from "@iconify-icons/lucide/panel-left-open";
 import plusIcon from "@iconify-icons/lucide/plus";
 import redoIcon from "@iconify-icons/lucide/redo-2";
 import routeIcon from "@iconify-icons/lucide/route";
@@ -22,16 +20,14 @@ import userIcon from "@iconify-icons/lucide/user";
 import usersIcon from "@iconify-icons/lucide/users";
 import { Temporal } from "@js-temporal/polyfill";
 import { useNavigate } from "@tanstack/react-router";
-import {
-  lazy,
-  Suspense,
-  startTransition,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Calendar } from "~/components/calendar/Calendar";
+import { ExpenseCostControl } from "~/components/expenses/ExpenseCostControl";
+import { PlaceSearch } from "~/components/places/PlaceSearch";
+import { TripmateJoinDialog } from "~/components/tripmates/TripmateJoinDialog";
+import { Brand } from "~/components/ui/Brand";
+import { Modal } from "~/components/ui/Modal";
+import modalStyles from "~/components/ui/Modal.module.css";
 import {
   addTripDay,
   addTripItem,
@@ -40,11 +36,8 @@ import {
   applyCalendarItemChanges,
   createTripmate,
   deleteTripDay,
-  initializeTripCurrency,
   moveTripItem,
   readTripDocument,
-  refreshExpenseConversion,
-  refreshSettlementConversion,
   removeTripItem,
   scheduleTripItem,
   setTripField,
@@ -54,8 +47,6 @@ import {
   validateTripSettings,
 } from "~/features/collaboration/document";
 import { useTripDocument } from "~/features/collaboration/use-trip-document";
-import { convertExpense } from "~/features/expense/exchange.functions";
-import { browserCurrency, currencyForCountry } from "~/features/expense/money";
 import { rebaseTripCurrency } from "~/features/expense/rebase.functions";
 import { financialFingerprint } from "~/features/expense/revision";
 import {
@@ -69,30 +60,16 @@ import { readGooglePlacementTravelTimes } from "~/features/google/place-placemen
 import { buildDayRouteExport, type DayRouteExportReason } from "~/features/google/route-export";
 import { useGooglePlaceViews } from "~/features/google/use-place-views";
 import { useTripTitle } from "~/features/google/use-trip-title";
-import {
-  type MapStop,
-  type MapTransport,
-  type RouteLeg,
-  useRouteLegs,
-} from "~/features/routing/route-legs";
+import type { MapStop, RouteLeg } from "~/features/routing/route-legs";
 import { calendarOrder } from "~/features/trip/calendar-layout";
-import { dayColor } from "~/features/trip/day-colors";
 import { buildDayPlans } from "~/features/trip/day-plan";
-import {
-  createTripText,
-  TripLanguageProvider,
-  UiLanguageProvider,
-  useTripText,
-} from "~/features/trip/language";
+import { createTripText, TripLanguageProvider, UiLanguageProvider } from "~/features/trip/language";
 import {
   effectiveTripLanguage,
   itemForCreate,
   type Lodging,
   lodgingForDates,
-  lodgingLeaveTime,
   reorder,
-  resolveLocalTime,
-  type TripDay,
   type TripItem,
   type TripLanguage,
   tripLanguages,
@@ -103,40 +80,41 @@ import {
   nearestPlaceDay,
 } from "~/features/trip/place-placement";
 import { deleteTrip } from "~/features/trip/trip.functions";
-import { Brand } from "./Brand";
-import { Calendar } from "./Calendar";
 import { DayAddControl, type DayAddItemType } from "./DayAddControl";
-import { ExpenseCostControl } from "./ExpenseCostControl";
 import { ItemEditorSkeleton } from "./ItemEditorSkeleton";
 import { ItineraryDragArea, type ItineraryDrop, ItineraryList } from "./ItineraryList";
-import { PlaceSearch } from "./PlaceSearch";
+import { PanelResizer, useSheetResize, type ViewMode } from "./PanelResizer";
+import { buildRouteStops, placeReferences, usePlannerRoutes } from "./planner-routes";
+import { buildScheduleWarnings, timeForPosition } from "./planner-schedule";
 import { TitleField } from "./TitleField";
-import { TripmateJoinDialog } from "./TripmateJoinDialog";
 import { TripSettingsDialog } from "./TripSettingsDialog";
+import { usePlannerNavigation } from "./usePlannerNavigation";
+import { useTripCurrency } from "./useTripCurrency";
 
 const noWarnings = new Map<string, string[]>();
 const emptyItems: TripItem[] = [];
 const emptyLegs: RouteLeg[] = [];
 const emptyStops: MapStop[] = [];
+// Editing UI loads only after selecting an item.
 const ItemEditor = lazy(async () => {
   const module = await import("./ItemEditor");
   return { default: module.ItemEditor };
 });
 // Expenses load only when the workspace opens, outside the initial planner bundle.
 const ExpensesWorkspace = lazy(async () => {
-  const module = await import("./ExpensesWorkspace");
+  const module = await import("~/components/expenses/ExpensesWorkspace");
   return { default: module.ExpensesWorkspace };
 });
+// Tripmate details stay outside the initial planner bundle.
 const TripmatesDialog = lazy(async () => {
-  const module = await import("./ExpensesWorkspace");
+  const module = await import("~/components/expenses/TripmatesDialog");
   return { default: module.TripmatesDialog };
 });
 // The map is a deliberate lazy boundary so list planning does not load its renderer.
 const TripMap = lazy(async () => {
-  const module = await import("./TripMap");
+  const module = await import("~/components/places/TripMap");
   return { default: module.TripMap };
 });
-type ViewMode = "map" | "list" | "split";
 type CalendarChange = {
   item: TripItem;
   dayId: string;
@@ -166,24 +144,14 @@ export function Planner({ tripId }: { tripId: string }) {
   } = useTripDocument(tripId);
   const [uiLanguage, setUiLanguage] = useState<TripLanguage>("en");
   const tripLanguage = effectiveTripLanguage(uiLanguage, snapshot.tripLanguage);
-  const [plannerContent, setPlannerContent] = useState<"itinerary" | "calendar" | "expenses">(
-    "itinerary",
-  );
-  const [activeDay, setActiveDay] = useState<string | null>(null);
-  const [navigationDay, setNavigationDay] = useState<string | null>(null);
-  const [calendarFocusRequest, setCalendarFocusRequest] = useState<{
-    dayId: string;
-    serial: number;
-  } | null>(null);
   const [view, setView] = useState<ViewMode>("split");
+  const { sheetHeight, resizeSheet } = useSheetResize(setView);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [identityChoice, setIdentityChoice] = useState<string | null | undefined>(undefined);
   const [focusedExpenseId, setFocusedExpenseId] = useState<string | null>(null);
   const [editorDay, setEditorDay] = useState<string | null>(null);
   const [editorBoundary, setEditorBoundary] = useState<"start" | "end" | null>(null);
   const [mapPlaceId, setMapPlaceId] = useState<string | null>(null);
-  const currentDay = navigationDay ?? activeDay;
-  const mapDestinationDay = useRef<string | null>(null);
   const [mapDayFocus, setMapDayFocus] = useState<{ dayId: string; serial: number } | null>(null);
   const [creation, setCreation] = useState<{
     dayId: string;
@@ -200,18 +168,43 @@ export function Planner({ tripId }: { tripId: string }) {
     creationEpoch.current += 1;
     setCreation(null);
   }, []);
-  const itineraryRef = useRef<HTMLDivElement>(null);
-  const inboxRef = useRef<HTMLElement>(null);
-  const dayHeights = useRef(new Map<string, { layout: string; height: number }>());
-  const [visibleDays, setVisibleDays] = useState<ReadonlySet<string>>(() => new Set());
+  const closeEditor = () => {
+    setMapPlaceId(null);
+    setSelectedId(null);
+    setEditorDay(null);
+    setEditorBoundary(null);
+  };
+  const {
+    plannerContent,
+    activeDay,
+    setActiveDay,
+    navigationDay,
+    setNavigationDay,
+    calendarFocusRequest,
+    currentDay,
+    mapDestinationDay,
+    itineraryRef,
+    inboxRef,
+    dayHeights,
+    visibleDays,
+    inboxOpen,
+    setInboxOpen,
+    inboxActive,
+    changePlannerContent,
+    selectCalendarDay,
+    resetDayJump,
+    trackVisibleDay,
+    cancelDayJump,
+    jumpToDay,
+    jumpToInbox,
+  } = usePlannerNavigation({
+    snapshot,
+    view,
+    setView,
+    closeEditor,
+    cancelCreation,
+  });
   const [itineraryDragging, setItineraryDragging] = useState(false);
-  const pendingInboxJump = useRef(false);
-  const pendingJump = useRef<string | null>(null);
-  const jumpAnimation = useRef<number | null>(null);
-  const jumpTimeout = useRef<number | null>(null);
-  const dayKey = snapshot.days.map((day) => day.id).join(",");
-  const [inboxOpen, setInboxOpen] = useState(true);
-  const [inboxActive, setInboxActive] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [headerMoreOpen, setHeaderMoreOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -221,7 +214,6 @@ export function Planner({ tripId }: { tripId: string }) {
   const [deleteText, setDeleteText] = useState("");
   const plannerRef = useRef<HTMLElement>(null);
   const headerMoreRef = useRef<HTMLDivElement>(null);
-  const [sheetHeight, setSheetHeight] = useState(48);
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const titleEdit = useRef({ initial: "", cancelled: false });
   const text = createTripText(uiLanguage);
@@ -255,24 +247,6 @@ export function Planner({ tripId }: { tripId: string }) {
 
   useEffect(() => {
     setUiLanguage(preferredUiLanguage());
-  }, []);
-
-  useEffect(
-    () => () => {
-      if (jumpAnimation.current !== null) window.cancelAnimationFrame(jumpAnimation.current);
-      if (jumpTimeout.current !== null) window.clearTimeout(jumpTimeout.current);
-    },
-    [],
-  );
-
-  useEffect(() => {
-    const readView = () => {
-      const value = new URLSearchParams(window.location.search).get("view");
-      setPlannerContent(value === "calendar" || value === "expenses" ? value : "itinerary");
-    };
-    readView();
-    window.addEventListener("popstate", readView);
-    return () => window.removeEventListener("popstate", readView);
   }, []);
 
   const selectTripmate = useCallback(
@@ -357,17 +331,6 @@ export function Planner({ tripId }: { tripId: string }) {
   }, [headerMoreOpen]);
 
   useEffect(() => {
-    const firstDay = snapshot.days[0]?.id;
-    if (!activeDay && firstDay) {
-      const fragment =
-        typeof window === "undefined" ? "" : decodeURIComponent(window.location.hash.slice(1));
-      const initial = snapshot.days.some((day) => day.id === fragment) ? fragment : firstDay;
-      mapDestinationDay.current = initial;
-      setActiveDay(initial);
-    }
-  }, [activeDay, snapshot.days]);
-
-  useEffect(() => {
     window.document.title = `${title} - PaceNotes`;
   }, [title]);
 
@@ -424,47 +387,6 @@ export function Planner({ tripId }: { tripId: string }) {
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, [undo, redo, canUndo, canRedo]);
-
-  useEffect(() => {
-    if (plannerContent !== "itinerary") return;
-    const root = itineraryRef.current;
-    if (!root || !snapshot.id || !dayKey) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        setVisibleDays((current) => {
-          const next = new Set(current);
-          let changed = false;
-          for (const entry of entries) {
-            const id = (entry.target as HTMLElement).dataset.dayId;
-            if (!id) continue;
-            if (entry.isIntersecting && !next.has(id)) {
-              next.add(id);
-              changed = true;
-            } else if (!entry.isIntersecting && next.delete(id)) changed = true;
-          }
-          return changed ? next : current;
-        });
-      },
-      { root, rootMargin: "120px" },
-    );
-    for (const section of root.querySelectorAll("[data-day-id]")) observer.observe(section);
-    const measure = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        if (!(entry.target instanceof HTMLElement) || entry.target.dataset.rendered !== "true")
-          continue;
-        const id = entry.target.dataset.dayId;
-        const height =
-          entry.borderBoxSize[0]?.blockSize ?? entry.target.getBoundingClientRect().height;
-        if (id && height > 0)
-          dayHeights.current.set(id, { layout: entry.target.dataset.layout ?? "", height });
-      }
-    });
-    for (const section of root.querySelectorAll("[data-day-id]")) measure.observe(section);
-    return () => {
-      observer.disconnect();
-      measure.disconnect();
-    };
-  }, [dayKey, plannerContent, snapshot.id]);
 
   useEffect(() => {
     if (!creation) return;
@@ -545,163 +467,15 @@ export function Planner({ tripId }: { tripId: string }) {
     [orderedItems, selected, snapshot.destination.placeId],
   );
   const { places: placeViews, error: placeViewError } = useGooglePlaceViews(placeIds, tripLanguage);
-  useEffect(() => {
-    if (!snapshot.id || snapshot.currency) return;
-    const destination = placeViews.get(snapshot.destination.placeId);
-    if (destination === undefined) return;
-    const currency =
-      (destination.countryCode && currencyForCountry(destination.countryCode)) || browserCurrency();
-    if (currency) initializeTripCurrency(document, currency);
-  }, [document, snapshot.id, snapshot.currency, snapshot.destination.placeId, placeViews]);
-  useEffect(() => {
-    const tripCurrency = snapshot.currency;
-    if (!tripCurrency || !snapshot.id) return;
-    const stale = Object.values(snapshot.expenses).filter((expense) => expense.conversion.stale);
-    const staleSettlements = Object.values(snapshot.settlements).filter(
-      (settlement) => settlement.conversion.stale,
-    );
-    if (stale.length === 0 && staleSettlements.length === 0) return;
-    let cancelled = false;
-    let retryTimer: number | undefined;
-    const retry = async () => {
-      let failed = false;
-      for (const expense of stale) {
-        if (cancelled) return;
-        try {
-          const conversion = await convertExpense(
-            expense.amountMinor,
-            expense.currency,
-            tripCurrency,
-            expense.date,
-          );
-          if (cancelled) return;
-          const current = readTripDocument(document).expenses[expense.id];
-          if (
-            current?.conversion.stale &&
-            current.amountMinor === expense.amountMinor &&
-            current.currency === expense.currency &&
-            current.date === expense.date
-          ) {
-            refreshExpenseConversion(document, { ...current, conversion });
-          }
-        } catch {
-          failed = true;
-        }
-      }
-      for (const settlement of staleSettlements) {
-        if (cancelled) return;
-        try {
-          const conversion = await convertExpense(
-            settlement.amountMinor,
-            settlement.currency,
-            tripCurrency,
-            null,
-          );
-          if (cancelled) return;
-          const current = readTripDocument(document).settlements[settlement.id];
-          if (
-            current?.conversion.stale &&
-            current.amountMinor === settlement.amountMinor &&
-            current.currency === settlement.currency &&
-            current.paidAt === settlement.paidAt
-          ) {
-            refreshSettlementConversion(document, { ...current, conversion });
-          }
-        } catch {
-          failed = true;
-        }
-      }
-      if (failed && !cancelled)
-        retryTimer = window.setTimeout(() => {
-          void retry();
-        }, 30_000);
-    };
-    void retry();
-    return () => {
-      cancelled = true;
-      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
-    };
-  }, [document, snapshot.id, snapshot.currency, snapshot.expenses, snapshot.settlements]);
-  const markerItems = useMemo(() => {
-    const entries: Array<{ item: TripItem; key: string }> = [];
-    const itemIds = new Set<string>();
-    const append = (items: readonly TripItem[]) => {
-      for (const item of items) {
-        if (itemIds.has(item.id)) continue;
-        itemIds.add(item.id);
-        entries.push({ item, key: item.id });
-      }
-    };
-    for (const plan of dayPlans) {
-      append(plan.start);
-      append(plan.items);
-      append(plan.end);
-    }
-    append(inboxItems);
-    return entries;
-  }, [dayPlans, inboxItems]);
-  const nextStops = useMemo(
-    () =>
-      buildMapStops(
-        markerItems,
-        placeViews,
-        snapshot.days.map((day) => day.id),
-        tripLanguage,
-      ),
-    [markerItems, placeViews, snapshot.days, tripLanguage],
+  useTripCurrency(document, snapshot, placeViews);
+  const { stops, routeData, routeLegs, transports } = usePlannerRoutes(
+    dayPlans,
+    inboxItems,
+    orderedItems,
+    placeViews,
+    snapshot,
+    tripLanguage,
   );
-  const stops = useStableArray(nextStops, sameMapStop);
-  const routeData = useMemo(() => {
-    const exportStops = new Map<string, MapStop[]>();
-    const predecessorDayIds = new Set<string>();
-    const plans = dayPlans.map((plan, dayIndex) => {
-      const ownedEntries = [
-        ...plan.start.map((item) => ({ item, key: `${item.id}:start` })),
-        ...plan.items.map((item) => ({ item, key: item.id })),
-        ...plan.end.map((item) => ({ item, key: `${item.id}:end` })),
-      ];
-      const ownedStops = buildRouteStops(
-        ownedEntries,
-        placeViews,
-        snapshot.days,
-        plan.day.id,
-        tripLanguage,
-        snapshot.timeZone,
-      );
-      exportStops.set(plan.day.id, ownedStops);
-      const previous = dayPlans[dayIndex - 1];
-      let predecessor: { item: TripItem; key: string } | null = null;
-      if (previous && plan.start.length === 0 && previous.end.length === 0) {
-        const entries = previous.items.map((item) => ({ item, key: item.id }));
-        for (let index = entries.length - 1; index >= 0; index -= 1) {
-          const entry = entries[index];
-          if (!entry) continue;
-          if (entry.item.type === "transport") break;
-          if (entry.item.place) {
-            predecessor = entry;
-            break;
-          }
-        }
-      }
-      if (ownedStops.length === 0) predecessor = null;
-      if (predecessor) predecessorDayIds.add(plan.day.id);
-      return {
-        id: plan.day.id,
-        stops: predecessor
-          ? buildRouteStops(
-              [predecessor, ...ownedEntries],
-              placeViews,
-              snapshot.days,
-              plan.day.id,
-              tripLanguage,
-              snapshot.timeZone,
-            )
-          : ownedStops,
-      };
-    });
-    return { plans, exportStops, predecessorDayIds };
-  }, [dayPlans, placeViews, snapshot.days, snapshot.timeZone, tripLanguage]);
-  const routeLegs = useRouteLegs(routeData.plans, tripLanguage);
   const legs = routeLegs.get(activeRouteDay ?? "") ?? emptyLegs;
   const itemWarnings = useMemo(
     () =>
@@ -715,55 +489,6 @@ export function Planner({ tripId }: { tripId: string }) {
     [activeRouteDay, dayItems, legs, snapshot.startDate, snapshot.timeZone, uiLanguage],
   );
   const editingPlace = editingPlaceId ? placeViews.get(editingPlaceId) : undefined;
-  const nextTransports = useMemo<MapTransport[]>(() => {
-    const items = orderedItems.filter((item) => item.type === "transport");
-    return items.map((item) => ({
-      id: item.id,
-      label: item.title,
-      color: dayColor(
-        Math.max(
-          0,
-          snapshot.days.findIndex((day) => day.id === item.dayId),
-        ),
-      ).background,
-      from: item.transport?.from ? (placeViews.get(item.transport.from.placeId) ?? null) : null,
-      to: item.transport?.to ? (placeViews.get(item.transport.to.placeId) ?? null) : null,
-    }));
-  }, [orderedItems, placeViews, snapshot.days]);
-  const changePlannerContent = (content: "itinerary" | "calendar" | "expenses") => {
-    if (view !== "map" && content === plannerContent) {
-      setView("map");
-      return;
-    }
-    const selectedDay = pendingJump.current ?? currentDay;
-    if (content !== plannerContent) {
-      clearJumpAnimation();
-      clearJumpTimeout();
-      if (pendingJump.current) setActiveDay(pendingJump.current);
-      pendingJump.current = null;
-      setNavigationDay(null);
-    }
-    const url = new URL(window.location.href);
-    url.searchParams.set("view", content);
-    window.history.replaceState(window.history.state, "", url);
-    if (content === "calendar" && selectedDay) {
-      setCalendarFocusRequest((request) => ({
-        dayId: selectedDay,
-        serial: (request?.serial ?? 0) + 1,
-      }));
-    }
-    if (view === "map" || (content === "expenses" && plannerContent !== "expenses"))
-      setView("split");
-    setPlannerContent(content);
-    if (plannerContent === "expenses" && content === "itinerary" && selectedDay) {
-      pendingJump.current = selectedDay;
-      setNavigationDay(selectedDay);
-      jumpAnimation.current = window.requestAnimationFrame(() => {
-        jumpAnimation.current = null;
-        finishDayJump(selectedDay);
-      });
-    }
-  };
   const focusDayRoute = (dayId: string) => {
     setMapPlaceId(null);
     setView((current) => (current === "list" ? "split" : current));
@@ -772,15 +497,6 @@ export function Planner({ tripId }: { tripId: string }) {
       serial: (request?.serial ?? 0) + 1,
     }));
   };
-  const selectCalendarDay = (id: string) => {
-    setNavigationDay(null);
-    setActiveDay(id);
-    mapDestinationDay.current = id;
-    const url = new URL(window.location.href);
-    url.hash = id;
-    window.history.replaceState(window.history.state, "", url);
-  };
-  const transports = useStableArray(nextTransports, sameMapTransport);
 
   if (!snapshot.id) {
     return (
@@ -798,12 +514,6 @@ export function Planner({ tripId }: { tripId: string }) {
     );
   }
 
-  const closeEditor = () => {
-    setMapPlaceId(null);
-    setSelectedId(null);
-    setEditorDay(null);
-    setEditorBoundary(null);
-  };
   const selectItem = (id: string, dayId?: string, boundary: "start" | "end" | null = null) => {
     const targetDay = dayId ?? snapshot.items[id]?.dayId ?? null;
     if (selectedId === id && editorDay === targetDay && editorBoundary === boundary) {
@@ -821,184 +531,6 @@ export function Planner({ tripId }: { tripId: string }) {
     const placeId = snapshot.items[id]?.place?.placeId ?? null;
     setMapPlaceId(placeId);
     if (placeId || snapshot.items[id]?.type === "transport") setView("split");
-  };
-  const clearJumpTimeout = () => {
-    if (jumpTimeout.current === null) return;
-    window.clearTimeout(jumpTimeout.current);
-    jumpTimeout.current = null;
-  };
-  const clearJumpAnimation = () => {
-    if (jumpAnimation.current === null) return;
-    window.cancelAnimationFrame(jumpAnimation.current);
-    jumpAnimation.current = null;
-  };
-  const trackVisibleDay = () => {
-    if (plannerContent === "expenses") return;
-    const panel = itineraryRef.current;
-    if (!panel || panel.clientHeight === 0) return;
-    const top = panel.getBoundingClientRect().top + 16;
-    const inbox = inboxRef.current;
-    if (inbox && inbox.getBoundingClientRect().top <= top) {
-      pendingInboxJump.current = false;
-      setInboxActive(true);
-      mapDestinationDay.current = null;
-      return;
-    }
-    if (pendingInboxJump.current) return;
-    setInboxActive(false);
-    let visible = snapshot.days[0]?.id;
-    for (const section of panel.querySelectorAll<HTMLElement>("[data-day-id]")) {
-      if (section.getBoundingClientRect().top > top) break;
-      visible = section.dataset.dayId;
-    }
-    if (visible) {
-      mapDestinationDay.current = visible;
-      setActiveDay(visible);
-    }
-  };
-  const dayScrollTop = (id: string) => {
-    const panel = itineraryRef.current;
-    const section = window.document.getElementById(`day-${id}`);
-    if (!panel || !section || !panel.contains(section)) return null;
-    const margin = Number.parseFloat(getComputedStyle(section).scrollMarginTop) || 0;
-    return Math.max(
-      0,
-      Math.min(
-        panel.scrollHeight - panel.clientHeight,
-        panel.scrollTop +
-          section.getBoundingClientRect().top -
-          panel.getBoundingClientRect().top -
-          panel.clientTop -
-          margin,
-      ),
-    );
-  };
-  const finishDayJump = (id: string) => {
-    if (pendingJump.current !== id) return;
-    clearJumpAnimation();
-    clearJumpTimeout();
-    const top = dayScrollTop(id);
-    const panel = itineraryRef.current;
-    if (!panel || top === null) {
-      pendingJump.current = null;
-      setNavigationDay((current) => (current === id ? null : current));
-      trackVisibleDay();
-      return;
-    }
-    if (Math.abs(panel.scrollTop - top) > 1) {
-      panel.scrollTo({ top, behavior: "instant" });
-    }
-    setActiveDay(id);
-    mapDestinationDay.current = id;
-    jumpTimeout.current = window.setTimeout(() => {
-      if (pendingJump.current === id) {
-        pendingJump.current = null;
-        setActiveDay(id);
-      }
-      setNavigationDay((current) => (current === id ? null : current));
-      jumpTimeout.current = null;
-    }, 100);
-  };
-  const cancelDayJump = () => {
-    const id = pendingJump.current;
-    if (!id) return;
-    clearJumpAnimation();
-    clearJumpTimeout();
-    pendingJump.current = null;
-    setActiveDay(id);
-    mapDestinationDay.current = id;
-    setNavigationDay(null);
-    const panel = itineraryRef.current;
-    panel?.scrollTo({ top: panel.scrollTop, behavior: "instant" });
-  };
-  const jumpToDay = (id: string, openItinerary = false) => {
-    closeEditor();
-    setInboxActive(false);
-    pendingInboxJump.current = false;
-    mapDestinationDay.current = id;
-    cancelCreation();
-    if (plannerContent === "expenses") {
-      selectCalendarDay(id);
-      if (!openItinerary) return;
-    }
-    if (plannerContent === "calendar") {
-      selectCalendarDay(id);
-      setCalendarFocusRequest((request) => ({
-        dayId: id,
-        serial: (request?.serial ?? 0) + 1,
-      }));
-      return;
-    }
-    if (view === "map") setView("split");
-    startTransition(() => setNavigationDay(id));
-    clearJumpAnimation();
-    clearJumpTimeout();
-    pendingJump.current = id;
-    const startAnimation = (startedAt: number) => {
-      if (pendingJump.current !== id) return;
-      const top = dayScrollTop(id);
-      const panel = itineraryRef.current;
-      if (!panel || top === null) {
-        jumpAnimation.current = null;
-        pendingJump.current = null;
-        setNavigationDay((current) => (current === id ? null : current));
-        trackVisibleDay();
-        return;
-      }
-      if (
-        Math.abs(panel.scrollTop - top) <= 1 ||
-        window.matchMedia("(prefers-reduced-motion: reduce)").matches
-      ) {
-        panel.scrollTo({ top, behavior: "instant" });
-        jumpAnimation.current = null;
-        finishDayJump(id);
-        return;
-      }
-      const start = panel.scrollTop;
-      const distance = top - start;
-      const duration = 120;
-      const animate = (now: number) => {
-        if (pendingJump.current !== id) return;
-        const progress = Math.min((now - startedAt) / duration, 1);
-        const eased = 1 - (1 - progress) ** 3;
-        panel.scrollTop = start + distance * eased;
-        if (progress < 1) {
-          jumpAnimation.current = window.requestAnimationFrame(animate);
-          return;
-        }
-        jumpAnimation.current = null;
-        finishDayJump(id);
-      };
-      animate(startedAt);
-    };
-    jumpAnimation.current = window.requestAnimationFrame(startAnimation);
-  };
-  const jumpToInbox = () => {
-    closeEditor();
-    cancelCreation();
-    cancelDayJump();
-    setNavigationDay(null);
-    setInboxOpen(true);
-    pendingInboxJump.current = true;
-    setInboxActive(true);
-    mapDestinationDay.current = null;
-    if (view === "map") setView("split");
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        const panel = itineraryRef.current;
-        const inbox = inboxRef.current;
-        if (!panel || !inbox) return;
-        const top = Math.max(
-          0,
-          panel.scrollTop +
-            inbox.getBoundingClientRect().top -
-            panel.getBoundingClientRect().top -
-            panel.clientTop -
-            8,
-        );
-        panel.scrollTo({ top, behavior: "instant" });
-      });
-    });
   };
   const renderEditor = () =>
     selected ? (
@@ -1590,9 +1122,7 @@ export function Planner({ tripId }: { tripId: string }) {
       return;
     }
     if (!confirm(text("deleteDayConfirm", { count }))) return;
-    clearJumpAnimation();
-    clearJumpTimeout();
-    pendingJump.current = null;
+    resetDayJump();
     cancelCreation();
     setAddMenuDay(null);
     deleteTripDay(document, dayId);
@@ -1608,30 +1138,6 @@ export function Planner({ tripId }: { tripId: string }) {
     setNavigationDay(null);
     setActiveDay(date);
     closeEditor();
-  };
-  const resizeSheet = (event: React.PointerEvent) => {
-    if (event.button !== 0 || !event.isPrimary) return;
-    const pointerId = event.pointerId;
-    const startY = event.clientY;
-    const startHeight = sheetHeight;
-    let moved = false;
-    const move = (pointer: PointerEvent) => {
-      if (pointer.pointerId !== pointerId) return;
-      if (Math.abs(pointer.clientY - startY) > 4) moved = true;
-      setSheetHeight(
-        Math.min(82, Math.max(22, startHeight + ((startY - pointer.clientY) / innerHeight) * 100)),
-      );
-    };
-    const stop = (pointer: PointerEvent) => {
-      if (pointer.pointerId !== pointerId) return;
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", stop);
-      window.removeEventListener("pointercancel", stop);
-      if (!moved && pointer.type === "pointerup") setView("map");
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", stop);
-    window.addEventListener("pointercancel", stop);
   };
 
   return (
@@ -2447,78 +1953,53 @@ export function Planner({ tripId }: { tripId: string }) {
             />
           ) : null}
           {shareOpen ? (
-            <div
-              className="dialog-backdrop"
-              onPointerDown={(event) => {
-                if (event.target === event.currentTarget) setShareOpen(false);
-              }}
-            >
-              <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="share-title">
-                <h2 id="share-title">{text("shareTitle")}</h2>
-                <p>{text("shareBody")}</p>
-                <div>
-                  <button
-                    type="button"
-                    className="ghost-button"
-                    onClick={() => setShareOpen(false)}
-                  >
-                    {text("cancel")}
-                  </button>
-                  <button type="button" className="primary-button" onClick={confirmShare}>
-                    {text("copyLink")}
-                  </button>
-                </div>
+            <Modal title={text("shareTitle")} onClose={() => setShareOpen(false)}>
+              <p>{text("shareBody")}</p>
+              <div className={modalStyles.actions}>
+                <button type="button" className="ghost-button" onClick={() => setShareOpen(false)}>
+                  {text("cancel")}
+                </button>
+                <button type="button" className="primary-button" onClick={confirmShare}>
+                  {text("copyLink")}
+                </button>
               </div>
-            </div>
+            </Modal>
           ) : null}
           {deleteOpen ? (
-            <div
-              className="dialog-backdrop"
-              onPointerDown={(event) => {
-                if (event.target !== event.currentTarget) return;
+            <Modal
+              title={text("deleteTripTitle")}
+              onClose={() => {
                 setDeleteOpen(false);
                 setDeleteText("");
               }}
             >
-              <div
-                className="dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="delete-title"
-              >
-                <h2 id="delete-title">{text("deleteTripTitle")}</h2>
-                <p>
-                  {deleteBodyBeforeTitle}
-                  <strong>{title}</strong>
-                  {deleteBodyAfterTitle}
-                </p>
-                <input
-                  value={deleteText}
-                  onChange={(event) => setDeleteText(event.target.value)}
-                  aria-label={text("tripTitleConfirmation")}
-                />
-                <div>
-                  <button
-                    type="button"
-                    className="ghost-button"
-                    onClick={() => setDeleteOpen(false)}
-                  >
-                    {text("cancel")}
-                  </button>
-                  <button
-                    type="button"
-                    className="danger-button"
-                    disabled={deleteText !== title}
-                    onClick={async () => {
-                      await deleteTrip({ data: { id: tripId } });
-                      await navigate({ to: "/" });
-                    }}
-                  >
-                    {text("deleteTrip")}
-                  </button>
-                </div>
+              <p>
+                {deleteBodyBeforeTitle}
+                <strong>{title}</strong>
+                {deleteBodyAfterTitle}
+              </p>
+              <input
+                value={deleteText}
+                onChange={(event) => setDeleteText(event.target.value)}
+                aria-label={text("tripTitleConfirmation")}
+              />
+              <div className={modalStyles.actions}>
+                <button type="button" className="ghost-button" onClick={() => setDeleteOpen(false)}>
+                  {text("cancel")}
+                </button>
+                <button
+                  type="button"
+                  className="danger-button"
+                  disabled={deleteText !== title}
+                  onClick={async () => {
+                    await deleteTrip({ data: { id: tripId } });
+                    await navigate({ to: "/" });
+                  }}
+                >
+                  {text("deleteTrip")}
+                </button>
               </div>
-            </div>
+            </Modal>
           ) : null}
         </main>
       </TripLanguageProvider>
@@ -2537,144 +2018,6 @@ function preferredUiLanguage(): TripLanguage {
     if (base && tripLanguages.includes(base as TripLanguage)) return base as TripLanguage;
   }
   return "en";
-}
-
-function PanelResizer({
-  plannerRef,
-  view,
-  onToggle,
-}: {
-  plannerRef: React.RefObject<HTMLElement | null>;
-  view: ViewMode;
-  onToggle: () => void;
-}) {
-  const text = useTripText();
-  const [panelWidth, setPanelWidth] = useState(44);
-  const panelWidthLive = useRef(panelWidth);
-  const resizeFrame = useRef<number | null>(null);
-  const clickSuppressed = useRef(false);
-  const drag = useRef<{
-    pointerId: number;
-    startX: number;
-    startWidth: number;
-    pendingWidth: number | null;
-    moved: boolean;
-  } | null>(null);
-
-  const applyWidth = (value: number) => {
-    panelWidthLive.current = value;
-    plannerRef.current?.style.setProperty("--panel-width", `${value}%`);
-  };
-  const flush = () => {
-    if (resizeFrame.current !== null) {
-      window.cancelAnimationFrame(resizeFrame.current);
-      resizeFrame.current = null;
-    }
-    const activeDrag = drag.current;
-    if (activeDrag?.pendingWidth === null || activeDrag?.pendingWidth === undefined) return;
-    const width = activeDrag.pendingWidth;
-    activeDrag.pendingWidth = null;
-    applyWidth(width);
-  };
-  const commit = () => {
-    flush();
-    setPanelWidth(panelWidthLive.current);
-  };
-  const schedule = (width: number) => {
-    const activeDrag = drag.current;
-    if (!activeDrag) return;
-    activeDrag.pendingWidth = width;
-    if (resizeFrame.current !== null) return;
-    resizeFrame.current = window.requestAnimationFrame(() => {
-      resizeFrame.current = null;
-      const latestDrag = drag.current;
-      if (latestDrag?.pendingWidth === null || latestDrag?.pendingWidth === undefined) return;
-      const pendingWidth = latestDrag.pendingWidth;
-      latestDrag.pendingWidth = null;
-      applyWidth(pendingWidth);
-    });
-  };
-
-  useEffect(() => {
-    plannerRef.current?.style.setProperty("--panel-width", `${panelWidth}%`);
-  }, [panelWidth, plannerRef]);
-
-  useEffect(
-    () => () => {
-      if (resizeFrame.current !== null) window.cancelAnimationFrame(resizeFrame.current);
-    },
-    [],
-  );
-
-  return (
-    <button
-      type="button"
-      className="panel-resizer"
-      aria-label={view === "map" ? text("showItinerary") : text("hideItinerary")}
-      aria-expanded={view !== "map"}
-      aria-controls="planner-itinerary"
-      title={view === "map" ? text("showItinerary") : text("hideItineraryResize")}
-      onPointerDown={(event) => {
-        if (event.button !== 0 || !event.isPrimary) return;
-        clickSuppressed.current = false;
-        drag.current = null;
-        if (view !== "split") return;
-        drag.current = {
-          pointerId: event.pointerId,
-          startX: event.clientX,
-          startWidth: panelWidthLive.current,
-          pendingWidth: null,
-          moved: false,
-        };
-        event.currentTarget.setPointerCapture(event.pointerId);
-      }}
-      onPointerMove={(event) => {
-        const activeDrag = drag.current;
-        if (!activeDrag || activeDrag.pointerId !== event.pointerId || event.buttons === 0) return;
-        const delta = event.clientX - activeDrag.startX;
-        if (!activeDrag.moved && Math.abs(delta) < 4) return;
-        activeDrag.moved = true;
-        schedule(Math.min(68, Math.max(30, activeDrag.startWidth + (delta / innerWidth) * 100)));
-      }}
-      onPointerUp={(event) => {
-        const activeDrag = drag.current;
-        if (!activeDrag || activeDrag.pointerId !== event.pointerId) return;
-        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-          event.currentTarget.releasePointerCapture(event.pointerId);
-        }
-        commit();
-        clickSuppressed.current = activeDrag.moved;
-        drag.current = null;
-      }}
-      onPointerCancel={(event) => {
-        commit();
-        drag.current = null;
-        clickSuppressed.current = false;
-        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-          event.currentTarget.releasePointerCapture(event.pointerId);
-        }
-      }}
-      onClick={() => {
-        if (clickSuppressed.current) {
-          clickSuppressed.current = false;
-          return;
-        }
-        onToggle();
-      }}
-      onKeyDown={(event) => {
-        if (view !== "split" || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
-        event.preventDefault();
-        const nextWidth = Math.max(
-          30,
-          Math.min(68, panelWidthLive.current + (event.key === "ArrowLeft" ? -2 : 2)),
-        );
-        panelWidthLive.current = nextWidth;
-        setPanelWidth(nextWidth);
-      }}
-    >
-      <Icon icon={view === "map" ? panelLeftOpenIcon : panelLeftCloseIcon} />
-    </button>
-  );
 }
 
 async function copyOrShare(title: string): Promise<void> {
@@ -2733,305 +2076,4 @@ function longDate(date: string, language: TripLanguage): string {
     day: "numeric",
     timeZone: "UTC",
   }).format(new Date(`${date}T00:00:00Z`));
-}
-function useStableArray<T>(next: T[], equal: (left: T, right: T) => boolean): T[] {
-  const current = useRef(next);
-  if (
-    current.current.length !== next.length ||
-    current.current.some((value, index) => {
-      const candidate = next[index];
-      return candidate === undefined || !equal(value, candidate);
-    })
-  ) {
-    current.current = next;
-  }
-  return current.current;
-}
-
-function sameMapStop(left: MapStop, right: MapStop): boolean {
-  return (
-    left.id === right.id &&
-    left.placeId === right.placeId &&
-    left.label === right.label &&
-    left.index === right.index &&
-    left.latitude === right.latitude &&
-    left.longitude === right.longitude &&
-    left.countryCode === right.countryCode &&
-    left.color === right.color &&
-    left.textColor === right.textColor &&
-    left.travelMode === right.travelMode &&
-    left.departureTime === right.departureTime &&
-    left.breakBefore === right.breakBefore
-  );
-}
-
-function sameMapTransport(left: MapTransport, right: MapTransport): boolean {
-  return (
-    left.id === right.id &&
-    left.label === right.label &&
-    left.color === right.color &&
-    sameTransportPlace(left.from, right.from) &&
-    sameTransportPlace(left.to, right.to)
-  );
-}
-
-function sameTransportPlace(left: GooglePlaceView | null, right: GooglePlaceView | null): boolean {
-  if (left === null || right === null) return left === right;
-  return (
-    left.placeId === right.placeId &&
-    left.displayName === right.displayName &&
-    left.latitude === right.latitude &&
-    left.longitude === right.longitude &&
-    left.countryCode === right.countryCode
-  );
-}
-
-function buildMapStops(
-  entries: Array<{ item: TripItem; key: string }>,
-  places: ReadonlyMap<string, GooglePlaceView>,
-  dayIds: string[],
-  language: TripLanguage,
-): MapStop[] {
-  let stopDayId: string | null | undefined;
-  let stopIndex = 0;
-  const text = createTripText(language);
-  const stops: MapStop[] = [];
-  const placeIds = new Set<string>();
-  const add = (item: TripItem, id: string, place: GooglePlaceView, label: string) => {
-    if (placeIds.has(place.placeId)) return;
-    placeIds.add(place.placeId);
-    if (item.dayId !== stopDayId) {
-      stopDayId = item.dayId;
-      stopIndex = 0;
-    }
-    stopIndex += 1;
-    const palette = dayColor(Math.max(0, dayIds.indexOf(item.dayId ?? "")));
-    stops.push({
-      id,
-      placeId: place.placeId,
-      label,
-      index: stopIndex,
-      latitude: place.latitude,
-      longitude: place.longitude,
-      countryCode: place.countryCode,
-      color: palette.background,
-      textColor: palette.text,
-      travelMode: item.travelMode,
-    });
-  };
-  for (const { item, key } of entries) {
-    if (item.type === "transport") {
-      const from = item.transport?.from ? places.get(item.transport.from.placeId) : undefined;
-      const to = item.transport?.to ? places.get(item.transport.to.placeId) : undefined;
-      if (from) {
-        add(item, `${key}:from`, from, from.displayName || item.title || text("transportOrigin"));
-      }
-      if (to) {
-        add(item, `${key}:to`, to, to.displayName || item.title || text("transportDestination"));
-      }
-      continue;
-    }
-    if (!item.place) continue;
-    const place = places.get(item.place.placeId);
-    if (place) add(item, key, place, itemTitle(item, places));
-  }
-  return stops;
-}
-
-function buildRouteStops(
-  entries: Array<{ item: TripItem; key: string }>,
-  places: ReadonlyMap<string, GooglePlaceView>,
-  days: TripDay[],
-  routeDayId: string,
-  language: TripLanguage,
-  timeZone: string,
-): MapStop[] {
-  const palette = dayColor(
-    Math.max(
-      0,
-      days.findIndex((day) => day.id === routeDayId),
-    ),
-  );
-  const text = createTripText(language);
-  const dateByDayId = new Map(days.map((day) => [day.id, day.date]));
-  const routeDate = dateByDayId.get(routeDayId);
-  const departureTime = (item: TripItem, key: string) => {
-    const startTime =
-      item.type === "lodging" && item.lodging && key.endsWith(":start")
-        ? lodgingLeaveTime(item.lodging, routeDayId)
-        : item.startTime;
-    if (!startTime) return null;
-    const date =
-      item.type === "lodging"
-        ? routeDate
-        : ((item.dayId ? dateByDayId.get(item.dayId) : undefined) ?? routeDate);
-    if (!date) return null;
-    try {
-      return resolveLocalTime(date, startTime, timeZone);
-    } catch {
-      return null;
-    }
-  };
-  let stopIndex = 0;
-  let breakBeforeNext = false;
-  return entries.flatMap(({ item, key }) => {
-    const itemDepartureTime = departureTime(item, key);
-    const schedule = itemDepartureTime ? { departureTime: itemDepartureTime } : {};
-    if (item.type === "transport") {
-      const from = item.transport?.from ? places.get(item.transport.from.placeId) : undefined;
-      const to = item.transport?.to ? places.get(item.transport.to.placeId) : undefined;
-      const endpoints: MapStop[] = [];
-      if (from) {
-        stopIndex += 1;
-        endpoints.push({
-          id: key,
-          placeId: from.placeId,
-          label: from.displayName || item.title || text("transportOrigin"),
-          index: stopIndex,
-          latitude: from.latitude,
-          longitude: from.longitude,
-          countryCode: from.countryCode,
-          color: palette.background,
-          textColor: palette.text,
-          travelMode: item.travelMode,
-          breakBefore: breakBeforeNext,
-          ...schedule,
-        });
-      }
-      if (to) {
-        stopIndex += 1;
-        endpoints.push({
-          id: `${key}:to`,
-          placeId: to.placeId,
-          label: to.displayName || item.title || text("transportDestination"),
-          index: stopIndex,
-          latitude: to.latitude,
-          longitude: to.longitude,
-          countryCode: to.countryCode,
-          color: palette.background,
-          textColor: palette.text,
-          travelMode: item.travelMode,
-          breakBefore: true,
-          ...schedule,
-        });
-      }
-      breakBeforeNext = !to;
-      return endpoints;
-    }
-    if (!item.place) return [];
-    const place = places.get(item.place.placeId);
-    if (!place) return [];
-    stopIndex += 1;
-    const breakBefore = breakBeforeNext;
-    breakBeforeNext = false;
-    return [
-      {
-        id: key,
-        breakBefore,
-        placeId: item.place.placeId,
-        label: itemTitle(item, places),
-        index: stopIndex,
-        latitude: place.latitude,
-        longitude: place.longitude,
-        countryCode: place.countryCode,
-        color: palette.background,
-        textColor: palette.text,
-        travelMode: item.travelMode,
-        ...schedule,
-      },
-    ];
-  });
-}
-
-function buildScheduleWarnings(
-  items: TripItem[],
-  legs: RouteLeg[],
-  date: string,
-  defaultTimeZone: string,
-  language: TripLanguage,
-): Map<string, string[]> {
-  const warnings = new Map<string, string[]>();
-  const text = createTripText(language);
-  const add = (id: string, message: string) =>
-    warnings.set(id, [...(warnings.get(id) ?? []), message]);
-  const epochMinute = (item: TripItem): number => {
-    const value = resolveLocalTime(date, item.startTime ?? "00:00", defaultTimeZone);
-    return Date.parse(value.replace(/\[[^\]]+\]$/, "")) / 60_000;
-  };
-  let previous: TripItem | null = null;
-  for (const item of items) {
-    if (!item.startTime) continue;
-    let itemMinute: number;
-    try {
-      itemMinute = epochMinute(item);
-    } catch {
-      add(item.id, text("invalidLocalTime"));
-      continue;
-    }
-    if (previous?.startTime) {
-      try {
-        const previousEnd = epochMinute(previous) + (previous.durationMinutes ?? 0);
-        if (previousEnd > itemMinute) add(item.id, text("overlapsItem", { title: previous.title }));
-      } catch {
-        // The prior item reports its own invalid local time.
-      }
-    }
-    previous = item;
-  }
-  for (const leg of legs) {
-    if (leg.durationMinutes === null) continue;
-    const from = items.find((item) => item.id === leg.fromId);
-    const to = items.find((item) => item.id === leg.toId);
-    if (!from?.startTime || !to?.startTime) continue;
-    try {
-      const arrival = epochMinute(from) + (from.durationMinutes ?? 0) + leg.durationMinutes;
-      if (arrival > epochMinute(to)) {
-        add(to.id, text("travelCannotFinish", { title: from.title }));
-      }
-    } catch {
-      // Invalid local times are reported by the item pass above.
-    }
-  }
-  return warnings;
-}
-
-function timeForPosition(items: TripItem[], position: number): string {
-  const moved = items[position];
-  if (!moved?.startTime) return "12:00";
-
-  const previous = items
-    .slice(0, position)
-    .toReversed()
-    .find((item) => item.startTime);
-  const next = items.slice(position + 1).find((item) => item.startTime);
-  const previousMinute = previous?.startTime ? parseTime(previous.startTime) : null;
-  const nextMinute = next?.startTime ? parseTime(next.startTime) : null;
-  if (previousMinute !== null && nextMinute !== null) {
-    return formatTime(previousMinute + Math.max(1, Math.floor((nextMinute - previousMinute) / 2)));
-  }
-  if (previousMinute !== null) {
-    return formatTime(previousMinute + Math.max(1, previous?.durationMinutes ?? 1));
-  }
-  if (nextMinute !== null) {
-    return formatTime(nextMinute - Math.max(1, moved.durationMinutes ?? 1));
-  }
-  return moved.startTime;
-}
-
-function parseTime(time: string): number {
-  const [hour = "0", minute = "0"] = time.split(":");
-  return Number(hour) * 60 + Number(minute);
-}
-
-function formatTime(minutes: number): string {
-  const bounded = Math.max(0, Math.min(23 * 60 + 59, minutes));
-  return `${String(Math.floor(bounded / 60)).padStart(2, "0")}:${String(bounded % 60).padStart(2, "0")}`;
-}
-
-function placeReferences(item: TripItem): string[] {
-  const ids: string[] = [];
-  if (item.place) ids.push(item.place.placeId);
-  if (item.transport?.from) ids.push(item.transport.from.placeId);
-  if (item.transport?.to) ids.push(item.transport.to.placeId);
-  return ids;
 }

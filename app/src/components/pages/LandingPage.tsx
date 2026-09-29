@@ -9,11 +9,11 @@ import trashIcon from "@iconify-icons/lucide/trash-2";
 import usersIcon from "@iconify-icons/lucide/users";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
+import { DestinationPicker } from "~/components/places/DestinationPicker";
+import { Brand } from "~/components/ui/Brand";
 import type { GooglePlaceSelection } from "~/features/google/google";
 import { useTripTitle } from "~/features/google/use-trip-title";
 import { createTrip, deleteTrip, getExistingTripIds } from "~/features/trip/trip.functions";
-import { Brand } from "./Brand";
-import { DestinationPicker } from "./DestinationPicker";
 
 type RecentTrip = {
   id: string;

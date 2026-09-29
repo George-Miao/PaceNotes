@@ -11,6 +11,7 @@ import {
   type ReactNode,
   useRef,
 } from "react";
+import { Dropdown } from "~/components/ui/Dropdown";
 import type { GooglePlaceView } from "~/features/google/google";
 import { itemTitle } from "~/features/google/item-title";
 import { googleMapsRouteUrl } from "~/features/google/route-export";
@@ -31,7 +32,6 @@ import {
   type TripLanguage,
   travelModes,
 } from "~/features/trip/model";
-import { Dropdown } from "./Dropdown";
 import { iconForItem, iconForTravelMode } from "./item-icon";
 
 export type ItineraryDrop = {

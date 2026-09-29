@@ -3,7 +3,7 @@
 import { registerSW } from "virtual:pwa-register";
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { IconButtonTooltips } from "~/components/IconButtonTooltips";
+import { IconButtonTooltips } from "~/components/ui/IconButtonTooltips";
 import { getPublicConfig } from "~/features/config/public-config";
 import appCss from "~/styles/app.css?url";
 
