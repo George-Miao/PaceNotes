@@ -37,7 +37,7 @@ Run `pnpm --dir app test:e2e` after the web process and PostgreSQL are ready. Ru
 
 ## Deployment
 
-`compose.yaml` runs published application and MOTIS images with PostgreSQL 18.6. `compose.dev.yaml` builds the application from local files and uses the published MOTIS image. Each application service applies database migrations before it starts serving HTTP and the `/sync` WebSocket route. The image workflow builds the Nix image for AMD64. A push to `main` publishes `main-SHA` and `latest-unstable`. A `vMAJOR.MINOR.PATCH` tag publishes the version and `latest`, then creates a GitHub release.
+`compose.yaml` runs published application and MOTIS images with PostgreSQL 18.6. `compose.dev.yaml` builds the application from local files and uses the published MOTIS image. Each application service applies database migrations before it starts serving HTTP and the `/sync` WebSocket route. The image workflow builds the Nix image for AMD64. An ordinary push to `main` publishes `main-SHA` and `latest-unstable`. A release commit named `chore(release): vMAJOR.MINOR.PATCH` skips that image build. Push its matching tag with `main`. The tag run publishes the version and `latest` from one build, then creates a GitHub release. CI runs on pushes to `main` and on pull requests, not on tag pushes.
 
 The Nix image is available as `.#docker` on Linux. Set these runtime values:
 
