@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
+import type { Expense, Friend, Settlement } from "../expense/model";
 import { createInitialSnapshot, itemForCreate, lodgingForDates } from "../trip/model";
 import {
   addTripDay,
@@ -11,8 +12,16 @@ import {
   moveTripItem,
   normalizeTripDocument,
   readTripDocument,
+  removeExpense,
+  removeSettlement,
+  removeTripItem,
+  setTripCurrency,
   setTripSettings,
   updateTripItem,
+  upsertExpense,
+  upsertFriend,
+  upsertFriends,
+  upsertSettlement,
 } from "./document";
 
 const destination = {
@@ -31,6 +40,61 @@ function seedDocument(): Y.Doc {
       timeZone: "Asia/Tokyo",
     }),
   );
+  return document;
+}
+
+const financeIds = {
+  alice: "00000000-0000-4000-8000-000000000001",
+  bob: "00000000-0000-4000-8000-000000000002",
+  meal: "00000000-0000-4000-8000-000000000003",
+  historical: "00000000-0000-4000-8000-000000000004",
+  other: "00000000-0000-4000-8000-000000000005",
+  newPayer: "00000000-0000-4000-8000-000000000006",
+  newShare: "00000000-0000-4000-8000-000000000007",
+  shared: "00000000-0000-4000-8000-000000000008",
+  first: "00000000-0000-4000-8000-000000000009",
+  second: "00000000-0000-4000-8000-00000000000a",
+  manualDate: "00000000-0000-4000-8000-00000000000b",
+  linked: "00000000-0000-4000-8000-00000000000c",
+  manual: "00000000-0000-4000-8000-00000000000d",
+  attached: "00000000-0000-4000-8000-00000000000e",
+  zExpense: "00000000-0000-4000-8000-000000000010",
+  aExpense: "00000000-0000-4000-8000-00000000000f",
+  payment: "00000000-0000-4000-8000-000000000011",
+} as const;
+
+function friendFor(id: string, name: string, archived = false): Friend {
+  return { id, name, color: "#397257", archived };
+}
+
+function expenseFor(id: string, itemId: string | null = null): Expense {
+  return {
+    id,
+    description: "Lunch",
+    category: "food",
+    amountMinor: 1000,
+    currency: "EUR",
+    payerId: financeIds.alice,
+    split: { kind: "equal", friendIds: [financeIds.alice, financeIds.bob] },
+    itemId,
+    date: "2027-01-01",
+    followsItemDate: itemId !== null,
+    conversion: {
+      amountMinor: 1000,
+      rate: 1,
+      requestedDate: null,
+      observedDate: "2027-01-01",
+      source: "identity",
+      stale: false,
+    },
+  };
+}
+
+function financialDocument(): Y.Doc {
+  const document = seedDocument();
+  setTripCurrency(document, "EUR");
+  upsertFriend(document, friendFor(financeIds.alice, "Alice"));
+  upsertFriend(document, friendFor(financeIds.bob, "Bob"));
   return document;
 }
 
@@ -487,5 +551,311 @@ describe("collaboration document", () => {
       },
     });
     document.destroy();
+  });
+});
+
+describe("financial document records", () => {
+  it("reads legacy trips with empty finance defaults without erasing existing records", () => {
+    const document = financialDocument();
+    upsertExpense(document, expenseFor(financeIds.meal));
+    document.getMap("metadata").delete("currency");
+
+    expect(readTripDocument(document)).toMatchObject({
+      currency: null,
+      friends: { [financeIds.alice]: { name: "Alice" } },
+      expenses: { [financeIds.meal]: { description: "Lunch" } },
+      settlements: {},
+    });
+    normalizeTripDocument(document);
+    expect(readTripDocument(document).expenses[financeIds.meal]?.amountMinor).toBe(1000);
+    expect(readTripDocument(new Y.Doc())).toMatchObject({
+      currency: null,
+      friends: {},
+      expenses: {},
+      settlements: {},
+    });
+  });
+
+  it("keeps names unique across archived friends and prevents new archived participation", () => {
+    const document = financialDocument();
+    upsertExpense(document, expenseFor(financeIds.historical));
+    upsertFriend(document, friendFor(financeIds.bob, "Bob", true));
+
+    expect(() => upsertFriend(document, friendFor(financeIds.other, " bOb "))).toThrow(
+      "already exists",
+    );
+    expect(() =>
+      upsertExpense(document, { ...expenseFor(financeIds.newPayer), payerId: financeIds.bob }),
+    ).toThrow();
+    expect(() =>
+      upsertExpense(document, {
+        ...expenseFor(financeIds.newShare),
+        split: { kind: "equal", friendIds: [financeIds.bob] },
+      }),
+    ).toThrow();
+    upsertExpense(document, { ...expenseFor(financeIds.historical), description: "Dinner" });
+    expect(readTripDocument(document).expenses[financeIds.historical]?.description).toBe("Dinner");
+    expect(() => setTripCurrency(document, "USD")).toThrow("Rebase");
+    expect(readTripDocument(document).currency).toBe("EUR");
+  });
+
+  it("applies valid tripmate renames together and rejects an invalid set without changes", () => {
+    const document = financialDocument();
+    const alice = friendFor(financeIds.alice, "Alice");
+    const bob = friendFor(financeIds.bob, "Bob");
+
+    upsertFriends(document, [
+      { ...alice, name: "Bob" },
+      { ...bob, name: "Alice" },
+    ]);
+    expect(readTripDocument(document).friends[alice.id]?.name).toBe("Bob");
+    expect(readTripDocument(document).friends[bob.id]?.name).toBe("Alice");
+
+    expect(() =>
+      upsertFriends(document, [
+        { ...alice, name: "Same" },
+        { ...bob, name: "Same" },
+      ]),
+    ).toThrow("A tripmate with this name already exists");
+    expect(readTripDocument(document).friends[alice.id]?.name).toBe("Bob");
+    expect(readTripDocument(document).friends[bob.id]?.name).toBe("Alice");
+    document.destroy();
+  });
+
+  it("resolves concurrent case-insensitive friend names, including archived reservations", () => {
+    const source = financialDocument();
+    upsertFriend(source, friendFor(financeIds.manual, "Casey (2)", true));
+    const seed = Y.encodeStateAsUpdate(source);
+    const first = new Y.Doc();
+    const second = new Y.Doc();
+    Y.applyUpdate(first, seed);
+    Y.applyUpdate(second, seed);
+    upsertFriend(first, friendFor(financeIds.other, "cAsEy", true));
+    upsertFriend(second, friendFor(financeIds.newPayer, "Casey"));
+    const firstUpdate = Y.encodeStateAsUpdate(first);
+    const secondUpdate = Y.encodeStateAsUpdate(second);
+    Y.applyUpdate(first, secondUpdate);
+    Y.applyUpdate(second, firstUpdate);
+
+    expect(readTripDocument(first).friends[financeIds.other]?.name).toBe("cAsEy");
+    expect(readTripDocument(first).friends[financeIds.newPayer]?.name).toBe("Casey (3)");
+    expect(readTripDocument(second).friends).toEqual(readTripDocument(first).friends);
+    expect(() => upsertFriend(first, friendFor(financeIds.newShare, "casey (3)"))).toThrow(
+      "already exists",
+    );
+    normalizeTripDocument(first);
+    normalizeTripDocument(second);
+    expect(first.getMap<Y.Map<unknown>>("friends").get(financeIds.newPayer)?.get("name")).toBe(
+      "Casey (3)",
+    );
+    expect(readTripDocument(second).friends).toEqual(readTripDocument(first).friends);
+  });
+
+  it("preserves independent concurrent edits to different expense fields", () => {
+    const source = financialDocument();
+    upsertExpense(source, expenseFor(financeIds.shared));
+    const seed = Y.encodeStateAsUpdate(source);
+    const first = new Y.Doc();
+    const second = new Y.Doc();
+    Y.applyUpdate(first, seed);
+    Y.applyUpdate(second, seed);
+
+    upsertExpense(first, {
+      ...expenseFor(financeIds.shared),
+      description: "Edited lunch",
+    });
+    upsertExpense(second, {
+      ...expenseFor(financeIds.shared),
+      category: "transport",
+    });
+    const firstUpdate = Y.encodeStateAsUpdate(first);
+    const secondUpdate = Y.encodeStateAsUpdate(second);
+    Y.applyUpdate(first, secondUpdate);
+    Y.applyUpdate(second, firstUpdate);
+
+    expect(readTripDocument(first).expenses[financeIds.shared]).toMatchObject({
+      description: "Edited lunch",
+      category: "transport",
+    });
+    expect(readTripDocument(second).expenses[financeIds.shared]).toEqual(
+      readTripDocument(first).expenses[financeIds.shared],
+    );
+  });
+
+  it("rejects an occupied item, follows item dates, and detaches on deletion", () => {
+    const document = financialDocument();
+    addTripItem(document, itemForCreate("note", "2027-01-01", { id: "visit" }));
+    const foreign = {
+      ...expenseFor(financeIds.first, "visit"),
+      currency: "USD",
+      conversion: {
+        amountMinor: 900,
+        rate: 0.9,
+        requestedDate: "2027-01-01",
+        observedDate: "2027-01-01",
+        source: "frankfurter",
+        stale: false,
+      },
+    } satisfies Expense;
+    upsertExpense(document, foreign);
+    expect(() => upsertExpense(document, expenseFor(financeIds.second, "visit"))).toThrow(
+      "already has",
+    );
+
+    updateTripItem(document, "visit", { dayId: "2027-01-02" });
+    expect(readTripDocument(document).expenses[financeIds.first]).toMatchObject({
+      date: "2027-01-02",
+      conversion: { stale: true },
+    });
+    removeTripItem(document, "visit");
+    expect(readTripDocument(document).expenses[financeIds.first]).toMatchObject({
+      itemId: null,
+      followsItemDate: false,
+      date: null,
+      category: "food",
+      conversion: { stale: true },
+    });
+    addTripItem(document, itemForCreate("note", "2027-01-01", { id: "other-visit" }));
+    upsertExpense(document, {
+      ...expenseFor(financeIds.manualDate, "other-visit"),
+      date: "2027-01-04",
+      followsItemDate: false,
+      category: "lodging",
+    });
+    removeTripItem(document, "other-visit");
+    expect(readTripDocument(document).expenses[financeIds.manualDate]).toMatchObject({
+      itemId: null,
+      date: "2027-01-04",
+      category: "lodging",
+    });
+  });
+
+  it("clears a followed date on explicit detachment and stales its conversion", () => {
+    const document = financialDocument();
+    addTripItem(document, itemForCreate("note", "2027-01-01", { id: "visit" }));
+    const linkedExpense: Expense = {
+      ...expenseFor(financeIds.linked, "visit"),
+      currency: "USD",
+      conversion: {
+        amountMinor: 900,
+        rate: 0.9,
+        requestedDate: "2027-01-01",
+        observedDate: "2027-01-01",
+        source: "frankfurter",
+        stale: false,
+      },
+    };
+    upsertExpense(document, linkedExpense);
+    upsertExpense(document, {
+      ...linkedExpense,
+      itemId: null,
+      followsItemDate: false,
+    });
+    expect(readTripDocument(document).expenses[financeIds.linked]).toMatchObject({
+      itemId: null,
+      date: null,
+      followsItemDate: false,
+      conversion: { stale: true },
+    });
+  });
+
+  it("keeps manual and inbox-attached expenses undated until an item receives a date", () => {
+    const document = financialDocument();
+    addTripItem(document, itemForCreate("note", null, { id: "inbox" }));
+    upsertExpense(document, { ...expenseFor(financeIds.manual), date: null });
+    upsertExpense(document, expenseFor(financeIds.attached, "inbox"));
+    expect(readTripDocument(document).expenses[financeIds.manual]?.date).toBeNull();
+    expect(readTripDocument(document).expenses[financeIds.attached]?.date).toBeNull();
+
+    updateTripItem(document, "inbox", { dayId: "2027-01-03" });
+    expect(readTripDocument(document).expenses[financeIds.attached]?.date).toBe("2027-01-03");
+    updateTripItem(document, "inbox", { dayId: null });
+    expect(readTripDocument(document).expenses[financeIds.attached]?.date).toBeNull();
+    expect(readTripDocument(document).expenses[financeIds.manual]?.date).toBeNull();
+  });
+
+  it("resolves concurrent attachments by the lowest expense ID and persists the loser as manual", () => {
+    const source = financialDocument();
+    addTripItem(source, itemForCreate("note", "2027-01-01", { id: "visit" }));
+    const seed = Y.encodeStateAsUpdate(source);
+    const first = new Y.Doc();
+    const second = new Y.Doc();
+    Y.applyUpdate(first, seed);
+    Y.applyUpdate(second, seed);
+    upsertExpense(first, expenseFor(financeIds.zExpense, "visit"));
+    upsertExpense(second, expenseFor(financeIds.aExpense, "visit"));
+    const firstUpdate = Y.encodeStateAsUpdate(first);
+    const secondUpdate = Y.encodeStateAsUpdate(second);
+    Y.applyUpdate(first, secondUpdate);
+    Y.applyUpdate(second, firstUpdate);
+
+    expect(readTripDocument(first).expenses[financeIds.zExpense]).toMatchObject({
+      itemId: null,
+      followsItemDate: false,
+      date: null,
+    });
+    normalizeTripDocument(first);
+    normalizeTripDocument(second);
+    expect(
+      first.getMap<Y.Map<unknown>>("expenses").get(financeIds.zExpense)?.get("itemId"),
+    ).toBeNull();
+    expect(readTripDocument(first).expenses[financeIds.aExpense]?.itemId).toBe("visit");
+    expect(readTripDocument(second).expenses).toEqual(readTripDocument(first).expenses);
+  });
+
+  it("undoes a local field edit without reversing another editor's field on the same expense", () => {
+    const source = financialDocument();
+    upsertExpense(source, expenseFor(financeIds.shared));
+    const seed = Y.encodeStateAsUpdate(source);
+    const local = new Y.Doc();
+    const remote = new Y.Doc();
+    Y.applyUpdate(local, seed);
+    Y.applyUpdate(remote, seed);
+    const undo = new Y.UndoManager(local.getMap("expenses"), {
+      trackedOrigins: new Set(["upsert-expense"]),
+      captureTimeout: 0,
+    });
+    upsertExpense(local, { ...expenseFor(financeIds.shared), description: "Local description" });
+    upsertExpense(remote, { ...expenseFor(financeIds.shared), category: "transport" });
+    Y.applyUpdate(local, Y.encodeStateAsUpdate(remote));
+
+    undo.undo();
+
+    expect(readTripDocument(local).expenses[financeIds.shared]).toMatchObject({
+      description: "Lunch",
+      category: "transport",
+    });
+    undo.destroy();
+  });
+
+  it("rejects invalid settlements and requires an empty ledger to change currency", () => {
+    const document = financialDocument();
+    const settlement: Settlement = {
+      id: financeIds.payment,
+      fromId: financeIds.bob,
+      toId: financeIds.alice,
+      amountMinor: 300,
+      currency: "EUR",
+      conversion: {
+        amountMinor: 300,
+        rate: 1,
+        requestedDate: null,
+        observedDate: "2027-01-02",
+        source: "identity",
+        stale: false,
+      },
+      note: "",
+      paidAt: "2027-01-02T12:00:00Z",
+    };
+    expect(() => upsertSettlement(document, { ...settlement, toId: financeIds.bob })).toThrow();
+    expect(() => upsertSettlement(document, { ...settlement, amountMinor: -1 })).toThrow();
+    upsertSettlement(document, settlement);
+    expect(readTripDocument(document).settlements[financeIds.payment]?.amountMinor).toBe(300);
+    expect(() => setTripCurrency(document, "USD")).toThrow("Rebase");
+    removeSettlement(document, settlement.id);
+    upsertExpense(document, expenseFor(financeIds.meal));
+    removeExpense(document, financeIds.meal);
+    setTripCurrency(document, "USD");
+    expect(readTripDocument(document).currency).toBe("USD");
   });
 });

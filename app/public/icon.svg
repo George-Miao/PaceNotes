@@ -10,9 +10,9 @@
       <use href="#route" fill="#000" transform="translate(0 -30)"/>
     </mask>
     <linearGradient id="blue" x1="43" y1="250" x2="430" y2="250" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#008fc7"/>
-      <stop offset=".55" stop-color="#0589bf"/>
-      <stop offset="1" stop-color="#0783b8"/>
+      <stop stop-color="#51c5ef"/>
+      <stop offset=".55" stop-color="#39b4e6"/>
+      <stop offset="1" stop-color="#219fd8"/>
     </linearGradient>
   </defs>
   <g transform="translate(24.5)">

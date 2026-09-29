@@ -4,6 +4,7 @@
 
 - `app/` is the only JavaScript package. It contains the React 19 and TanStack Start application.
 - `app/src/routes/` contains page routes, server routes, and route loaders.
+- `app/src/components/` groups related components in domain subdirectories.
 - `app/src/features/trip/` owns trip types, validation, date rules, and server functions.
 - `app/src/features/collaboration/` owns the Yjs document interface and React synchronization hook.
 - `app/src/sync/` and `app/server/routes/sync.ts` own Hocuspocus collaboration on the web port.
@@ -36,11 +37,15 @@
 ## Interface and design rules
 
 - Use deep modules. Keep Yjs details behind `features/collaboration/document.ts`.
+- Split oversized component files at coherent state or behavior seams. Do not add thin wrappers only to reduce line count.
 - Use small radii, crisp borders, dense neutral surfaces, quiet blue accents, and white text on primary blue controls.
 - Light and dark modes follow the system. Keep WCAG 2.2 AA contrast and visible keyboard focus.
 - Desktop uses a resizable itinerary and map split. Mobile uses a draggable bottom sheet. Keep Map, List, and Split modes.
 - Timed itinerary entries show time first, then a type icon, title, optional status, and details. Transport legs are grey and borderless between bordered entry cards.
 - Use Iconify Lucide icons for actions and item types. Give icon-only controls an accessible name.
+- Empty states use a centered icon and short text. Do not use long instructional copy.
+- All user-visible UI text, including labels, placeholders, errors, and accessible names, must use i18n through `useTripText()` or `createTripText()`. Add each key and its translations for all supported languages in `app/src/features/trip/language.tsx`. Do not hard-code UI text in components.
+- In forms, never put a border around a subsection or fieldset. Use spacing and a plain label or legend instead. Borders belong on controls and the outer dialog.
 
 ## Development commands
 

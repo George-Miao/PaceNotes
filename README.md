@@ -1,6 +1,6 @@
 # PaceNotes
 
-PaceNotes is an open source, high-performance web itinerary planner. Several people can edit one fixed-date trip in real time without an account.
+PaceNotes is an open source, high-performance web itinerary planner. Several people can edit one fixed-date trip in real time without an account. The Expenses tab tracks shared costs, balances, and payments in the trip currency. Anyone with the trip URL can edit these records.
 
 ![PaceNotes trip planner showing a Maine itinerary and route map](assets/pacenotes-trip.webp)
 
@@ -47,6 +47,7 @@ The Nix image is available as `.#docker` on Linux. Set these runtime values:
 - `GOOGLE_MAP_ID`
 - `MOTIS_URL` (optional, server-only)
 - `MOTIS_TIMEOUT_MS` (optional, server-only)
+- `FRANKFURTER_URL` (optional, server-only exchange-rate endpoint; defaults to `https://api.frankfurter.dev`)
 
 ## Documentation
 

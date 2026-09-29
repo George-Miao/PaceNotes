@@ -37,12 +37,15 @@ export function useRouteLegs(
   plans: RouteLegPlan[],
   language: TripLanguage,
 ): ReadonlyMap<string, RouteLeg[]> {
-  const [legsByPlan, setLegsByPlan] = useState<ReadonlyMap<string, RouteLeg[]>>(() => new Map());
+  const routeKey = routePlansInputKey(plans, language);
+  const [routeState, setRouteState] = useState<{
+    key: string;
+    legs: ReadonlyMap<string, RouteLeg[]>;
+  }>(() => ({ key: routeKey, legs: new Map() }));
   const plansRef = useRef(plans);
   const completedKey = useRef<string | null>(null);
   const task = useRef<{ key: string; cancel: () => void } | null>(null);
   plansRef.current = plans;
-  const routeKey = routePlansInputKey(plans, language);
   const colorKey = routePlansColorKey(plans);
 
   useEffect(
@@ -57,10 +60,15 @@ export function useRouteLegs(
     if (routeKey !== routePlansInputKey(plansRef.current, language)) return;
     if (completedKey.current === routeKey || task.current?.key === routeKey) return;
     task.current?.cancel();
+    completedKey.current = null;
 
-    const activePlanIds = new Set(plansRef.current.map((plan) => plan.id));
-    const pairs = routePairs(plansRef.current);
-    setLegsByPlan((current) => initializeLegs(current, plansRef.current, activePlanIds));
+    const activePlans = plansRef.current;
+    const activePlanIds = new Set(activePlans.map((plan) => plan.id));
+    const pairs = routePairs(activePlans);
+    setRouteState((current) => ({
+      key: routeKey,
+      legs: initializeLegs(current.legs, activePlans, activePlanIds),
+    }));
     if (pairs.length === 0) {
       completedKey.current = routeKey;
       task.current = null;
@@ -120,7 +128,10 @@ export function useRouteLegs(
         legs.push(leg);
         byPlan.set(pair.planId, legs);
       }
-      setLegsByPlan((current) => mergeComputedLegs(current, plansRef.current, byPlan));
+      setRouteState((current) => ({
+        key: routeKey,
+        legs: mergeComputedLegs(current.legs, plansRef.current, byPlan),
+      }));
       completedKey.current = routeKey;
       task.current = null;
     }, 450);
@@ -142,11 +153,11 @@ export function useRouteLegs(
         new Map(plan.stops.map((stop) => [stop.id, stop.color])),
       ]),
     );
-    setLegsByPlan((current) => {
+    setRouteState((current) => {
       let changed = false;
-      const next = new Map(current);
+      const next = new Map(current.legs);
       for (const [planId, colors] of colorsByPlan) {
-        const legs = current.get(planId);
+        const legs = current.legs.get(planId);
         if (!legs) continue;
         let planChanged = false;
         const nextLegs = legs.map((leg) => {
@@ -158,11 +169,15 @@ export function useRouteLegs(
         });
         if (planChanged) next.set(planId, nextLegs);
       }
-      return changed ? next : current;
+      return changed ? { ...current, legs: next } : current;
     });
   }, [colorKey]);
 
   const activePlanIds = new Set(plans.map((plan) => plan.id));
+  const legsByPlan =
+    routeState.key === routeKey
+      ? routeState.legs
+      : initializeLegs(routeState.legs, plans, activePlanIds);
   if ([...legsByPlan.keys()].every((planId) => activePlanIds.has(planId))) return legsByPlan;
   return new Map([...legsByPlan].filter(([planId]) => activePlanIds.has(planId)));
 }
