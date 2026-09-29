@@ -20,5 +20,5 @@ export const Route = createFileRoute("/trips/$tripId")({
 
 function TripRoute() {
   const { tripId } = Route.useParams();
-  return <Planner tripId={tripId} />;
+  return <Planner key={tripId} tripId={tripId} />;
 }
