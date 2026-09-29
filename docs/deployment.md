@@ -141,6 +141,21 @@ The stack starts PostgreSQL and waits for it to become healthy. The web service 
 
 Use a reverse proxy with TLS. Route normal requests and WebSocket upgrades for `/sync` to port 3000. Keep PostgreSQL private.
 
+## Outbound HTTPS certificates
+
+The Nix web image gives Node a public CA bundle for outbound HTTPS requests. If a proxy signs these requests with a private CA, get the root CA certificate from the network operator. Add a local `compose.override.yaml` next to `compose.yaml`:
+
+```yaml
+services:
+  web:
+    environment:
+      NODE_EXTRA_CA_CERTS: /run/certs/egress-ca.pem
+    volumes:
+      - /path/to/egress-ca.pem:/run/certs/egress-ca.pem:ro
+```
+
+Replace the host path with the path to the PEM file. Restart the web service so Node reads the file. Keep TLS certificate checks enabled.
+
 ## Backups
 
 Back up PostgreSQL with a tool that supports PostgreSQL 18. Test restore steps on a separate database.

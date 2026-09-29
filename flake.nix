@@ -85,6 +85,7 @@
               ];
               pathsToLink = [
                 "/bin"
+                "/etc/ssl/certs"
                 "/lib/pacenotes"
               ];
             };
@@ -92,6 +93,9 @@
               WorkingDir = "/lib/pacenotes";
               Env = [
                 "NODE_ENV=production"
+                "NODE_USE_SYSTEM_CA=1"
+                "SSL_CERT_DIR=/etc/ssl/certs"
+                "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
                 "PORT=3000"
               ];
               Cmd = [
