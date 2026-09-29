@@ -41,6 +41,9 @@
 - Desktop uses a resizable itinerary and map split. Mobile uses a draggable bottom sheet. Keep Map, List, and Split modes.
 - Timed itinerary entries show time first, then a type icon, title, optional status, and details. Transport legs are grey and borderless between bordered entry cards.
 - Use Iconify Lucide icons for actions and item types. Give icon-only controls an accessible name.
+- Empty states use a centered icon and short text. Do not use long instructional copy.
+- All user-visible UI text, including labels, placeholders, errors, and accessible names, must use i18n through `useTripText()` or `createTripText()`. Add each key and its translations for all supported languages in `app/src/features/trip/language.tsx`. Do not hard-code UI text in components.
+- In forms, never put a border around a subsection or fieldset. Use spacing and a plain label or legend instead. Borders belong on controls and the outer dialog.
 
 ## Development commands
 
