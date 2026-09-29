@@ -26,7 +26,7 @@
           pnpm = pkgs.pnpm_11;
           app = pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
             pname = "pacenotes";
-            version = "0.3.0";
+            version = "0.3.1";
             src = lib.cleanSourceWith {
               src = ./app;
               filter =
