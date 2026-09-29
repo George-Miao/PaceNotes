@@ -41,19 +41,20 @@ Copy the output to `RATE_LIMIT_SALT` in `.env`. Use a different value in product
 
 1. Open [Google Maps Platform](https://console.cloud.google.com/google/maps-apis/start).
 2. Create or select a Google Cloud project.
-3. Link a billing account. Google requires billing for the production Maps JavaScript, Routes, Places API, and Places UI Kit interfaces.
+3. Link a billing account. Google requires billing for the production Maps JavaScript API, Routes API, Directions API (Legacy), Places API (New), and Places UI Kit.
 4. Use separate projects for development and production.
 
 ### 3. Enable the Google interfaces
 
-Enable these four interfaces in the selected project:
+Enable these five interfaces in the selected project:
 
 1. [Maps JavaScript API](https://console.cloud.google.com/apis/library/maps-backend.googleapis.com)
 2. [Routes API](https://console.cloud.google.com/apis/library/routes.googleapis.com)
-3. [Places API (New)](https://console.cloud.google.com/apis/library/places-backend.googleapis.com)
-4. [Places UI Kit](https://console.cloud.google.com/apis/library/placewidgets.googleapis.com)
+3. [Directions API (Legacy)](https://console.cloud.google.com/apis/library/directions-backend.googleapis.com)
+4. [Places API (New)](https://console.cloud.google.com/apis/library/places-backend.googleapis.com)
+5. [Places UI Kit](https://console.cloud.google.com/apis/library/placewidgets.googleapis.com)
 
-PaceNotes uses the Maps JavaScript `maps`, `marker`, `places`, and `routes` libraries. The Place class and new autocomplete need Places API (New). Place details need Places UI Kit. Route computation needs Routes API.
+PaceNotes uses the Maps JavaScript `maps`, `marker`, `places`, and `routes` libraries. The Place class and new autocomplete need Places API (New). Place details need Places UI Kit. Route computation needs Routes API. When Routes API returns no transit route, PaceNotes tries the Directions service, which needs Directions API (Legacy).
 
 ### 4. Create and restrict the browser key
 
@@ -64,7 +65,7 @@ PaceNotes uses the Maps JavaScript `maps`, `marker`, `places`, and `routes` libr
 5. For development, add `http://localhost:3000/*` and `http://127.0.0.1:3000/*`.
 6. For production, add only the exact HTTPS site, such as `https://trips.example.com/*`.
 7. Under **API restrictions**, select **Restrict key**.
-8. Select Maps JavaScript API, Routes API, Places API (New), and Places UI Kit.
+8. Select Maps JavaScript API, Routes API, Directions API (Legacy), Places API (New), and Places UI Kit.
 9. Save the key and copy it to `GOOGLE_MAPS_API_KEY`.
 
 The browser key is visible to browser users. The website and interface restrictions control its use. Do not reuse it for server requests.
@@ -94,7 +95,7 @@ HTTP and WebSocket traffic use the same origin and port. Browsers connect to `/s
 ### 7. Add cost controls and test the setup
 
 1. Create a [Cloud Billing budget and alert](https://cloud.google.com/billing/docs/how-to/budgets).
-2. Review the quotas for Maps JavaScript API, Routes API, Places API (New), and Places UI Kit.
+2. Review the quotas for Maps JavaScript API, Routes API, Directions API (Legacy), Places API (New), and Places UI Kit.
 3. Run `docker compose config --quiet` to check the environment.
 4. Run `docker compose up -d`.
 5. Open the app and confirm that place search, place details, the map, markers, and route legs load.
@@ -104,6 +105,7 @@ Google setup references:
 
 - [Maps JavaScript API setup](https://developers.google.com/maps/documentation/javascript/get-api-key)
 - [Routes Library setup](https://developers.google.com/maps/documentation/javascript/routes/start)
+- [Directions Service setup](https://developers.google.com/maps/documentation/javascript/legacy/directions)
 - [Places UI Kit setup](https://developers.google.com/maps/documentation/javascript/places-ui-kit/get-started)
 - [Map ID setup](https://developers.google.com/maps/documentation/javascript/map-ids/get-map-id)
 - [API key security](https://developers.google.com/maps/api-security-best-practices)
