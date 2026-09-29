@@ -2,7 +2,7 @@ import { Icon } from "@iconify/react";
 import calendarCheckIcon from "@iconify-icons/lucide/calendar-check-2";
 import pencilIcon from "@iconify-icons/lucide/pencil";
 import xIcon from "@iconify-icons/lucide/x";
-import { type SetStateAction, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, type SetStateAction, useEffect, useMemo, useRef, useState } from "react";
 import type { GooglePlaceView } from "~/features/google/google";
 import { useGooglePlaceViews } from "~/features/google/use-place-views";
 import { useTripLanguage, useTripText } from "~/features/trip/language";
@@ -19,8 +19,10 @@ import {
   type TripItem,
   transportModes,
 } from "~/features/trip/model";
+import { Dropdown } from "./Dropdown";
 import { EditorPlaceField } from "./EditorPlaceField";
 import styles from "./ItemEditor.module.css";
+import { iconForTransportMode } from "./item-icon";
 import { MarkdownPreview } from "./MarkdownPreview";
 
 const markdownIcon = {
@@ -43,6 +45,7 @@ export function ItemEditor({
   lodgingDate,
   defaultTitle,
   places,
+  costControl,
   onSave,
   onClose,
   onActivate,
@@ -51,6 +54,7 @@ export function ItemEditor({
   days: TripDay[];
   lodgingDate: string | null;
   defaultTitle: string;
+  costControl: ReactNode;
   places: ReadonlyMap<string, GooglePlaceView>;
   onSave: (patch: Partial<TripItem>) => void;
   onClose: () => void;
@@ -151,6 +155,7 @@ export function ItemEditor({
 
   useEffect(() => {
     editor.current?.scrollIntoView({ block: "nearest" });
+    editor.current?.focus({ preventScroll: true });
   }, []);
 
   useEffect(
@@ -219,9 +224,22 @@ export function ItemEditor({
   return (
     <aside
       ref={editor}
+      tabIndex={-1}
       className="item-editor"
       aria-labelledby="item-editor-title"
       onFocusCapture={onActivate}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || event.defaultPrevented || event.nativeEvent.isComposing)
+          return;
+        if (
+          event.target instanceof Element &&
+          event.target.closest('[role="combobox"][aria-expanded="true"]')
+        )
+          return;
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+      }}
     >
       <div className="section-heading">
         <div className={styles.title}>
@@ -314,6 +332,7 @@ export function ItemEditor({
           </div>
         </div>
       </div>
+      {costControl}
       <div className="editor-grid">
         {(draft.type === "place" || draft.type === "reservation" || draft.type === "lodging") &&
         !draft.place ? (
@@ -326,24 +345,24 @@ export function ItemEditor({
         ) : null}
         {draft.type === "transport" ? (
           <>
-            <label className="field field-wide">
+            <div className="field field-wide">
               <span>{text("travelMethod")}</span>
-              <select
+              <Dropdown
+                label={text("travelMethod")}
                 value={transport.mode}
-                onChange={(event) =>
+                options={transportModes.map((mode) => ({
+                  value: mode,
+                  label: text(mode),
+                  icon: <Icon icon={iconForTransportMode(mode)} />,
+                }))}
+                onChange={(mode) =>
                   setDraft({
                     ...draft,
-                    transport: { ...transport, mode: event.target.value as Transport["mode"] },
+                    transport: { ...transport, mode: mode as Transport["mode"] },
                   })
                 }
-              >
-                {transportModes.map((mode) => (
-                  <option key={mode} value={mode}>
-                    {text(mode)}
-                  </option>
-                ))}
-              </select>
-            </label>
+              />
+            </div>
             {transport.mode === "custom" ? (
               <label className="field field-wide">
                 <span>{text("customTravelMethod")}</span>

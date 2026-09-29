@@ -10,27 +10,29 @@ import routeIcon from "@iconify-icons/lucide/route";
 import shipIcon from "@iconify-icons/lucide/ship";
 import stickyNoteIcon from "@iconify-icons/lucide/sticky-note";
 import trainFrontIcon from "@iconify-icons/lucide/train-front";
-import type { TravelMode, TripItem } from "~/features/trip/model";
+import type { TransportMode, TravelMode, TripItem } from "~/features/trip/model";
 
 export function iconForItem(item: TripItem) {
   if (item.type === "note") return stickyNoteIcon;
   if (item.type === "lodging") return bedDoubleIcon;
   if (item.type === "reservation") return calendarCheckIcon;
-  if (item.type === "transport") {
-    switch (item.transport?.mode) {
-      case "plane":
-        return planeIcon;
-      case "bus":
-        return busIcon;
-      case "ferry":
-        return shipIcon;
-      case "custom":
-        return routeIcon;
-      default:
-        return trainFrontIcon;
-    }
-  }
+  if (item.type === "transport") return iconForTransportMode(item.transport?.mode ?? "train");
   return item.place ? mapPinIcon : clockIcon;
+}
+
+export function iconForTransportMode(mode: TransportMode) {
+  switch (mode) {
+    case "plane":
+      return planeIcon;
+    case "bus":
+      return busIcon;
+    case "ferry":
+      return shipIcon;
+    case "custom":
+      return routeIcon;
+    default:
+      return trainFrontIcon;
+  }
 }
 
 export function iconForTravelMode(mode: TravelMode) {

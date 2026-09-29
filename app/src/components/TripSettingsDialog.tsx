@@ -1,3 +1,4 @@
+import { Icon } from "@iconify/react";
 import { Temporal } from "@js-temporal/polyfill";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { travelModeLabel, useTripText, useUiLanguage } from "~/features/trip/language";
@@ -13,6 +14,9 @@ import {
   tripLanguages,
   tripSettingsSchema,
 } from "~/features/trip/model";
+import { CurrencyDropdown } from "./CurrencyDropdown";
+import { Dropdown, type DropdownOption } from "./Dropdown";
+import { iconForTravelMode } from "./item-icon";
 
 const languageLabels: Record<TripLanguage, string> = {
   en: "English",
@@ -40,22 +44,33 @@ function settingsMatch(left: TripSettingsForm, right: TripSettingsForm): boolean
 
 export function TripSettingsDialog({
   settings,
+  currency,
+  onCurrencyChange,
   onSave,
   onClose,
 }: {
   settings: TripSettingsForm;
-  onSave: (settings: TripSettingsForm) => void;
+  currency: string | null;
+  onCurrencyChange: (currency: string, settings: TripSettings) => Promise<boolean>;
+  onSave: (settings: TripSettingsForm, currencyChanged: boolean) => void;
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState(settings);
+  const [nextCurrency, setNextCurrency] = useState(currency ?? "");
+  const [currencyBusy, setCurrencyBusy] = useState(false);
+  const [currencyError, setCurrencyError] = useState<string | null>(null);
   const language = useUiLanguage();
   const text = useTripText();
   const backdropRef = useRef<HTMLDivElement>(null);
   const valid = tripSettingsSchema.safeParse(settingsForDocument(draft)).success;
   const requestClose = useCallback(() => {
-    if (!settingsMatch(draft, settings) && !window.confirm(text("discardTripSettings"))) return;
+    if (
+      (!settingsMatch(draft, settings) || nextCurrency !== (currency ?? "")) &&
+      !window.confirm(text("discardTripSettings"))
+    )
+      return;
     onClose();
-  }, [draft, onClose, settings, text]);
+  }, [currency, draft, nextCurrency, onClose, settings, text]);
 
   useEffect(() => {
     const backdrop = backdropRef.current;
@@ -64,6 +79,11 @@ export function TripSettingsDialog({
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      if (
+        event.target instanceof Element &&
+        event.target.closest('[role="combobox"][aria-expanded="true"]')
+      )
+        return;
       event.preventDefault();
       event.stopPropagation();
       requestClose();
@@ -85,7 +105,32 @@ export function TripSettingsDialog({
         aria-labelledby="trip-settings-title"
         onSubmit={(event) => {
           event.preventDefault();
-          onSave(draft);
+          if (!valid || currencyBusy) return;
+          const save = async () => {
+            const currencyChanged = Boolean(nextCurrency && nextCurrency !== currency);
+            if (
+              currencyChanged &&
+              currency &&
+              !window.confirm(text("settingsCurrencyChangeConfirm", { currency: nextCurrency }))
+            )
+              return;
+            setCurrencyBusy(true);
+            setCurrencyError(null);
+            try {
+              if (currencyChanged) {
+                if (!(await onCurrencyChange(nextCurrency, settingsForDocument(draft)))) {
+                  setCurrencyError(text("settingsCurrencyChanged"));
+                  return;
+                }
+              }
+              onSave(draft, currencyChanged);
+            } catch {
+              setCurrencyError(text("settingsSaveFailed"));
+            } finally {
+              setCurrencyBusy(false);
+            }
+          };
+          void save();
         }}
       >
         <h2 id="trip-settings-title">{text("tripSettings")}</h2>
@@ -119,106 +164,124 @@ export function TripSettingsDialog({
           </label>
         </fieldset>
         <div className="settings-language-row">
-          <label className="field">
+          <div className="field">
             <span>{text("uiLanguage")}</span>
-            <select
+            <Dropdown
+              label={text("uiLanguage")}
               value={draft.uiLanguage}
-              onChange={(event) =>
+              options={tripLanguages.map(
+                (language): DropdownOption => ({
+                  value: language,
+                  label: languageLabels[language],
+                }),
+              )}
+              onChange={(value) =>
                 setDraft((current) => ({
                   ...current,
-                  uiLanguage: event.target.value as TripLanguage,
+                  uiLanguage: value as TripLanguage,
                 }))
               }
-            >
-              {tripLanguages.map((language) => (
-                <option key={language} value={language}>
-                  {languageLabels[language]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
+            />
+          </div>
+          <div className="field">
             <span>{text("tripLanguage")}</span>
-            <select
+            <Dropdown
+              label={text("tripLanguage")}
               value={draft.tripLanguage ?? ""}
-              onChange={(event) =>
+              options={[
+                {
+                  value: "",
+                  label: text("followUiLanguage", {
+                    language: languageLabels[draft.uiLanguage],
+                  }),
+                },
+                ...tripLanguages.map((language) => ({
+                  value: language,
+                  label: languageLabels[language],
+                })),
+              ]}
+              onChange={(value) =>
                 setDraft((current) => ({
                   ...current,
-                  tripLanguage: event.target.value ? (event.target.value as TripLanguage) : null,
+                  tripLanguage: value ? (value as TripLanguage) : null,
                 }))
               }
-            >
-              <option value="">
-                {text("followUiLanguage", { language: languageLabels[draft.uiLanguage] })}
-              </option>
-              {tripLanguages.map((language) => (
-                <option key={language} value={language}>
-                  {languageLabels[language]}
-                </option>
-              ))}
-            </select>
-          </label>
+            />
+          </div>
         </div>
-        <label className="field">
+        <div className="field">
           <span>{text("distanceUnits")}</span>
-          <select
+          <Dropdown
+            label={text("distanceUnits")}
             value={draft.distanceUnit}
-            onChange={(event) =>
+            options={distanceUnits.map((unit) => ({
+              value: unit,
+              label: text(unit === "metric" ? "metricUnits" : "imperialUnits"),
+            }))}
+            onChange={(value) =>
               setDraft((current) => ({
                 ...current,
-                distanceUnit: event.target.value as DistanceUnit,
+                distanceUnit: value as DistanceUnit,
               }))
             }
-          >
-            {distanceUnits.map((unit) => (
-              <option key={unit} value={unit}>
-                {text(unit === "metric" ? "metricUnits" : "imperialUnits")}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
+          />
+        </div>
+        <div className="field">
           <span>{text("defaultTransport")}</span>
-          <select
+          <Dropdown
+            label={text("defaultTransport")}
             value={draft.defaultTravelMode}
-            onChange={(event) =>
+            options={travelModes.map((mode) => ({
+              value: mode,
+              label: travelModeLabel(language, mode),
+              icon: <Icon icon={iconForTravelMode(mode)} />,
+            }))}
+            onChange={(value) =>
               setDraft((current) => ({
                 ...current,
-                defaultTravelMode: event.target.value as TravelMode,
+                defaultTravelMode: value as TravelMode,
               }))
             }
-          >
-            {travelModes.map((mode) => (
-              <option key={mode} value={mode}>
-                {travelModeLabel(language, mode)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
+          />
+        </div>
+        <div className="field">
           <span>{text("calendarDayStart")}</span>
-          <select
-            value={draft.calendarStartHour}
-            onChange={(event) =>
+          <Dropdown
+            label={text("calendarDayStart")}
+            value={String(draft.calendarStartHour)}
+            options={calendarStartHourOptions.map((hour) => ({
+              value: String(hour),
+              label: `${String(hour).padStart(2, "0")}:00`,
+            }))}
+            onChange={(value) =>
               setDraft((current) => ({
                 ...current,
-                calendarStartHour: Number(event.target.value) as CalendarStartHour,
+                calendarStartHour: Number(value) as CalendarStartHour,
               }))
             }
-          >
-            {calendarStartHourOptions.map((hour) => (
-              <option key={hour} value={hour}>
-                {String(hour).padStart(2, "0")}:00
-              </option>
-            ))}
-          </select>
-        </label>
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="trip-currency">{text("tripCurrency")}</label>
+          <CurrencyDropdown
+            id="trip-currency"
+            label={text("tripCurrency")}
+            value={nextCurrency}
+            placeholder={text("settingsChooseCurrency")}
+            onChange={setNextCurrency}
+          />
+          {currencyError ? (
+            <p className="field-error" role="alert">
+              {currencyError}
+            </p>
+          ) : null}
+        </div>
         <div>
           <button type="button" className="ghost-button" onClick={requestClose}>
             {text("cancel")}
           </button>
-          <button type="submit" className="primary-button" disabled={!valid}>
-            {text("saveSettings")}
+          <button type="submit" className="primary-button" disabled={!valid || currencyBusy}>
+            {currencyBusy ? text("settingsSaving") : text("saveSettings")}
           </button>
         </div>
       </form>

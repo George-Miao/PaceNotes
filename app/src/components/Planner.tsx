@@ -1,6 +1,8 @@
 import { Icon } from "@iconify/react";
 import calendarIcon from "@iconify-icons/lucide/calendar";
 import calendarDeleteIcon from "@iconify-icons/lucide/calendar-x-2";
+import coinsIcon from "@iconify-icons/lucide/coins";
+import ellipsisIcon from "@iconify-icons/lucide/ellipsis";
 import eyeIcon from "@iconify-icons/lucide/eye";
 import listIcon from "@iconify-icons/lucide/list";
 import mapIcon from "@iconify-icons/lucide/map";
@@ -16,6 +18,8 @@ import shareIcon from "@iconify-icons/lucide/share-2";
 import trashIcon from "@iconify-icons/lucide/trash-2";
 import triangleAlertIcon from "@iconify-icons/lucide/triangle-alert";
 import undoIcon from "@iconify-icons/lucide/undo-2";
+import userIcon from "@iconify-icons/lucide/user";
+import usersIcon from "@iconify-icons/lucide/users";
 import { Temporal } from "@js-temporal/polyfill";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -34,17 +38,26 @@ import {
   addTripItemWithNextTravelMode,
   applyCalendarItemChange,
   applyCalendarItemChanges,
+  createTripmate,
   deleteTripDay,
+  initializeTripCurrency,
   moveTripItem,
   readTripDocument,
+  refreshExpenseConversion,
+  refreshSettlementConversion,
   removeTripItem,
   scheduleTripItem,
   setTripField,
   setTripOrder,
   setTripSettings,
   updateTripItem,
+  validateTripSettings,
 } from "~/features/collaboration/document";
 import { useTripDocument } from "~/features/collaboration/use-trip-document";
+import { convertExpense } from "~/features/expense/exchange.functions";
+import { browserCurrency, currencyForCountry } from "~/features/expense/money";
+import { rebaseTripCurrency } from "~/features/expense/rebase.functions";
+import { financialFingerprint } from "~/features/expense/revision";
 import {
   type GooglePlaceSelection,
   type GooglePlaceView,
@@ -93,9 +106,12 @@ import { deleteTrip } from "~/features/trip/trip.functions";
 import { Brand } from "./Brand";
 import { Calendar } from "./Calendar";
 import { DayAddControl, type DayAddItemType } from "./DayAddControl";
+import { ExpenseCostControl } from "./ExpenseCostControl";
 import { ItemEditorSkeleton } from "./ItemEditorSkeleton";
 import { ItineraryDragArea, type ItineraryDrop, ItineraryList } from "./ItineraryList";
 import { PlaceSearch } from "./PlaceSearch";
+import { TitleField } from "./TitleField";
+import { TripmateJoinDialog } from "./TripmateJoinDialog";
 import { TripSettingsDialog } from "./TripSettingsDialog";
 
 const noWarnings = new Map<string, string[]>();
@@ -105,6 +121,15 @@ const emptyStops: MapStop[] = [];
 const ItemEditor = lazy(async () => {
   const module = await import("./ItemEditor");
   return { default: module.ItemEditor };
+});
+// Expenses load only when the workspace opens, outside the initial planner bundle.
+const ExpensesWorkspace = lazy(async () => {
+  const module = await import("./ExpensesWorkspace");
+  return { default: module.ExpensesWorkspace };
+});
+const TripmatesDialog = lazy(async () => {
+  const module = await import("./ExpensesWorkspace");
+  return { default: module.TripmatesDialog };
 });
 // The map is a deliberate lazy boundary so list planning does not load its renderer.
 const TripMap = lazy(async () => {
@@ -123,6 +148,7 @@ type CalendarChange = {
 
 const emphasizedTitleToken = "\uE000";
 const uiLanguageStorageKey = "pacenotes-ui-language";
+const guestIdentity = "guest";
 
 export function Planner({ tripId }: { tripId: string }) {
   const navigate = useNavigate();
@@ -130,18 +156,19 @@ export function Planner({ tripId }: { tripId: string }) {
     document,
     snapshot,
     syncState,
+    hasSynced,
     collaborators,
+    setPresenceIdentity,
     undo,
     redo,
     canUndo,
     canRedo,
-    displayNamePrompt,
-    setDisplayNamePrompt,
-    saveDisplayName,
   } = useTripDocument(tripId);
   const [uiLanguage, setUiLanguage] = useState<TripLanguage>("en");
   const tripLanguage = effectiveTripLanguage(uiLanguage, snapshot.tripLanguage);
-  const [plannerContent, setPlannerContent] = useState<"itinerary" | "calendar">("itinerary");
+  const [plannerContent, setPlannerContent] = useState<"itinerary" | "calendar" | "expenses">(
+    "itinerary",
+  );
   const [activeDay, setActiveDay] = useState<string | null>(null);
   const [navigationDay, setNavigationDay] = useState<string | null>(null);
   const [calendarFocusRequest, setCalendarFocusRequest] = useState<{
@@ -150,6 +177,8 @@ export function Planner({ tripId }: { tripId: string }) {
   } | null>(null);
   const [view, setView] = useState<ViewMode>("split");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [identityChoice, setIdentityChoice] = useState<string | null | undefined>(undefined);
+  const [focusedExpenseId, setFocusedExpenseId] = useState<string | null>(null);
   const [editorDay, setEditorDay] = useState<string | null>(null);
   const [editorBoundary, setEditorBoundary] = useState<"start" | "end" | null>(null);
   const [mapPlaceId, setMapPlaceId] = useState<string | null>(null);
@@ -171,7 +200,7 @@ export function Planner({ tripId }: { tripId: string }) {
     creationEpoch.current += 1;
     setCreation(null);
   }, []);
-  const itineraryRef = useRef<HTMLElement>(null);
+  const itineraryRef = useRef<HTMLDivElement>(null);
   const inboxRef = useRef<HTMLElement>(null);
   const dayHeights = useRef(new Map<string, { layout: string; height: number }>());
   const [visibleDays, setVisibleDays] = useState<ReadonlySet<string>>(() => new Set());
@@ -184,18 +213,45 @@ export function Planner({ tripId }: { tripId: string }) {
   const [inboxOpen, setInboxOpen] = useState(true);
   const [inboxActive, setInboxActive] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [headerMoreOpen, setHeaderMoreOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [tripmatesOpen, setTripmatesOpen] = useState(false);
+  const [joinOpen, setJoinOpen] = useState(false);
   const [deleteText, setDeleteText] = useState("");
   const plannerRef = useRef<HTMLElement>(null);
+  const headerMoreRef = useRef<HTMLDivElement>(null);
   const [sheetHeight, setSheetHeight] = useState(48);
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const titleEdit = useRef({ initial: "", cancelled: false });
   const text = createTripText(uiLanguage);
   const title = useTripTitle(snapshot.title, snapshot.destination.placeId, tripLanguage);
+  const onlineTripmates = [...new Set(collaborators.map((person) => person.tripmateId))].flatMap(
+    (id) => {
+      const friend = snapshot.friends[id];
+      return friend && !friend.archived ? [friend] : [];
+    },
+  );
+  const selectedFriendId =
+    identityChoice && identityChoice !== guestIdentity ? identityChoice : null;
+  const identityLoaded = identityChoice !== undefined;
+  const selectedTripmate = selectedFriendId ? snapshot.friends[selectedFriendId] : null;
+  const tripmateId = selectedTripmate?.id;
+  const tripmateName = selectedTripmate?.name;
+  const tripmateColor = selectedTripmate?.color;
+  const tripmateArchived = selectedTripmate?.archived;
+  const needsIdentity =
+    hasSynced &&
+    identityLoaded &&
+    identityChoice !== guestIdentity &&
+    (!selectedTripmate || selectedTripmate.archived);
   const [deleteBodyBeforeTitle, deleteBodyAfterTitle] = text("deleteTripBody", {
     title: emphasizedTitleToken,
   }).split(emphasizedTitleToken);
+
+  useEffect(() => {
+    if (needsIdentity) setTripmatesOpen(false);
+  }, [needsIdentity]);
 
   useEffect(() => {
     setUiLanguage(preferredUiLanguage());
@@ -212,12 +268,93 @@ export function Planner({ tripId }: { tripId: string }) {
   useEffect(() => {
     const readView = () => {
       const value = new URLSearchParams(window.location.search).get("view");
-      setPlannerContent(value === "calendar" ? "calendar" : "itinerary");
+      setPlannerContent(value === "calendar" || value === "expenses" ? value : "itinerary");
     };
     readView();
     window.addEventListener("popstate", readView);
     return () => window.removeEventListener("popstate", readView);
   }, []);
+
+  const selectTripmate = useCallback(
+    (id: string | null) => {
+      const choice = id ?? guestIdentity;
+      setIdentityChoice(choice);
+      localStorage.setItem(`pacenotes-tripmate:${tripId}`, choice);
+    },
+    [tripId],
+  );
+
+  useEffect(() => {
+    setIdentityChoice(localStorage.getItem(`pacenotes-tripmate:${tripId}`));
+  }, [tripId]);
+
+  useEffect(() => {
+    if (!hasSynced || !identityLoaded) return;
+    if (selectedFriendId && (!tripmateId || tripmateArchived)) {
+      setPresenceIdentity(null);
+      localStorage.removeItem(`pacenotes-tripmate:${tripId}`);
+      setIdentityChoice(null);
+      return;
+    }
+    setPresenceIdentity(
+      tripmateId && tripmateName && tripmateColor
+        ? { tripmateId, name: tripmateName, color: tripmateColor }
+        : null,
+    );
+  }, [
+    hasSynced,
+    identityLoaded,
+    selectedFriendId,
+    tripmateId,
+    tripmateName,
+    tripmateColor,
+    tripmateArchived,
+    tripId,
+    setPresenceIdentity,
+  ]);
+  useEffect(() => {
+    if (!shareOpen && !deleteOpen) return;
+    const dismiss = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (
+        event.target instanceof Element &&
+        event.target.closest('[role="combobox"][aria-expanded="true"]')
+      )
+        return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (deleteOpen) {
+        setDeleteOpen(false);
+        setDeleteText("");
+      } else if (shareOpen) {
+        setShareOpen(false);
+      }
+    };
+    window.document.addEventListener("keydown", dismiss, true);
+    return () => window.document.removeEventListener("keydown", dismiss, true);
+  }, [deleteOpen, shareOpen]);
+  useEffect(() => {
+    if (!headerMoreOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !headerMoreRef.current?.contains(event.target)) {
+        setHeaderMoreOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setHeaderMoreOpen(false);
+        headerMoreRef.current
+          ?.querySelector<HTMLButtonElement>(".planner-header-more-trigger")
+          ?.focus();
+      }
+    };
+    window.document.addEventListener("pointerdown", closeOutside);
+    window.document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.document.removeEventListener("pointerdown", closeOutside);
+      window.document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [headerMoreOpen]);
 
   useEffect(() => {
     const firstDay = snapshot.days[0]?.id;
@@ -289,6 +426,7 @@ export function Planner({ tripId }: { tripId: string }) {
   }, [undo, redo, canUndo, canRedo]);
 
   useEffect(() => {
+    if (plannerContent !== "itinerary") return;
     const root = itineraryRef.current;
     if (!root || !snapshot.id || !dayKey) return;
     const observer = new IntersectionObserver(
@@ -326,7 +464,7 @@ export function Planner({ tripId }: { tripId: string }) {
       observer.disconnect();
       measure.disconnect();
     };
-  }, [dayKey, snapshot.id]);
+  }, [dayKey, plannerContent, snapshot.id]);
 
   useEffect(() => {
     if (!creation) return;
@@ -343,6 +481,11 @@ export function Planner({ tripId }: { tripId: string }) {
     };
     const dismissOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      if (
+        event.target instanceof Element &&
+        event.target.closest('[role="combobox"][aria-expanded="true"]')
+      )
+        return;
       event.preventDefault();
       event.stopPropagation();
       cancelCreation();
@@ -402,6 +545,83 @@ export function Planner({ tripId }: { tripId: string }) {
     [orderedItems, selected, snapshot.destination.placeId],
   );
   const { places: placeViews, error: placeViewError } = useGooglePlaceViews(placeIds, tripLanguage);
+  useEffect(() => {
+    if (!snapshot.id || snapshot.currency) return;
+    const destination = placeViews.get(snapshot.destination.placeId);
+    if (destination === undefined) return;
+    const currency =
+      (destination.countryCode && currencyForCountry(destination.countryCode)) || browserCurrency();
+    if (currency) initializeTripCurrency(document, currency);
+  }, [document, snapshot.id, snapshot.currency, snapshot.destination.placeId, placeViews]);
+  useEffect(() => {
+    const tripCurrency = snapshot.currency;
+    if (!tripCurrency || !snapshot.id) return;
+    const stale = Object.values(snapshot.expenses).filter((expense) => expense.conversion.stale);
+    const staleSettlements = Object.values(snapshot.settlements).filter(
+      (settlement) => settlement.conversion.stale,
+    );
+    if (stale.length === 0 && staleSettlements.length === 0) return;
+    let cancelled = false;
+    let retryTimer: number | undefined;
+    const retry = async () => {
+      let failed = false;
+      for (const expense of stale) {
+        if (cancelled) return;
+        try {
+          const conversion = await convertExpense(
+            expense.amountMinor,
+            expense.currency,
+            tripCurrency,
+            expense.date,
+          );
+          if (cancelled) return;
+          const current = readTripDocument(document).expenses[expense.id];
+          if (
+            current?.conversion.stale &&
+            current.amountMinor === expense.amountMinor &&
+            current.currency === expense.currency &&
+            current.date === expense.date
+          ) {
+            refreshExpenseConversion(document, { ...current, conversion });
+          }
+        } catch {
+          failed = true;
+        }
+      }
+      for (const settlement of staleSettlements) {
+        if (cancelled) return;
+        try {
+          const conversion = await convertExpense(
+            settlement.amountMinor,
+            settlement.currency,
+            tripCurrency,
+            null,
+          );
+          if (cancelled) return;
+          const current = readTripDocument(document).settlements[settlement.id];
+          if (
+            current?.conversion.stale &&
+            current.amountMinor === settlement.amountMinor &&
+            current.currency === settlement.currency &&
+            current.paidAt === settlement.paidAt
+          ) {
+            refreshSettlementConversion(document, { ...current, conversion });
+          }
+        } catch {
+          failed = true;
+        }
+      }
+      if (failed && !cancelled)
+        retryTimer = window.setTimeout(() => {
+          void retry();
+        }, 30_000);
+    };
+    void retry();
+    return () => {
+      cancelled = true;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+    };
+  }, [document, snapshot.id, snapshot.currency, snapshot.expenses, snapshot.settlements]);
   const markerItems = useMemo(() => {
     const entries: Array<{ item: TripItem; key: string }> = [];
     const itemIds = new Set<string>();
@@ -510,17 +730,39 @@ export function Planner({ tripId }: { tripId: string }) {
       to: item.transport?.to ? (placeViews.get(item.transport.to.placeId) ?? null) : null,
     }));
   }, [orderedItems, placeViews, snapshot.days]);
-  const changePlannerContent = (content: "itinerary" | "calendar") => {
+  const changePlannerContent = (content: "itinerary" | "calendar" | "expenses") => {
+    if (view !== "map" && content === plannerContent) {
+      setView("map");
+      return;
+    }
+    const selectedDay = pendingJump.current ?? currentDay;
+    if (content !== plannerContent) {
+      clearJumpAnimation();
+      clearJumpTimeout();
+      if (pendingJump.current) setActiveDay(pendingJump.current);
+      pendingJump.current = null;
+      setNavigationDay(null);
+    }
     const url = new URL(window.location.href);
     url.searchParams.set("view", content);
     window.history.replaceState(window.history.state, "", url);
-    if (content === "calendar" && currentDay) {
+    if (content === "calendar" && selectedDay) {
       setCalendarFocusRequest((request) => ({
-        dayId: currentDay,
+        dayId: selectedDay,
         serial: (request?.serial ?? 0) + 1,
       }));
     }
+    if (view === "map" || (content === "expenses" && plannerContent !== "expenses"))
+      setView("split");
     setPlannerContent(content);
+    if (plannerContent === "expenses" && content === "itinerary" && selectedDay) {
+      pendingJump.current = selectedDay;
+      setNavigationDay(selectedDay);
+      jumpAnimation.current = window.requestAnimationFrame(() => {
+        jumpAnimation.current = null;
+        finishDayJump(selectedDay);
+      });
+    }
   };
   const focusDayRoute = (dayId: string) => {
     setMapPlaceId(null);
@@ -591,6 +833,7 @@ export function Planner({ tripId }: { tripId: string }) {
     jumpAnimation.current = null;
   };
   const trackVisibleDay = () => {
+    if (plannerContent === "expenses") return;
     const panel = itineraryRef.current;
     if (!panel || panel.clientHeight === 0) return;
     const top = panel.getBoundingClientRect().top + 16;
@@ -668,12 +911,16 @@ export function Planner({ tripId }: { tripId: string }) {
     const panel = itineraryRef.current;
     panel?.scrollTo({ top: panel.scrollTop, behavior: "instant" });
   };
-  const jumpToDay = (id: string) => {
+  const jumpToDay = (id: string, openItinerary = false) => {
     closeEditor();
     setInboxActive(false);
     pendingInboxJump.current = false;
     mapDestinationDay.current = id;
     cancelCreation();
+    if (plannerContent === "expenses") {
+      selectCalendarDay(id);
+      if (!openItinerary) return;
+    }
     if (plannerContent === "calendar") {
       selectCalendarDay(id);
       setCalendarFocusRequest((request) => ({
@@ -764,6 +1011,16 @@ export function Planner({ tripId }: { tripId: string }) {
           places={placeViews}
           defaultTitle={
             selected.place ? editingPlace?.displayName || text("placeFallback") : selected.title
+          }
+          costControl={
+            <ExpenseCostControl
+              document={document}
+              snapshot={snapshot}
+              places={placeViews}
+              itemId={selected.id}
+              entryLabel={itemTitle(selected, placeViews)}
+              selectedFriendId={selectedFriendId}
+            />
           }
           onSave={(patch) => {
             updateTripItem(document, selected.id, patch);
@@ -1004,7 +1261,6 @@ export function Planner({ tripId }: { tripId: string }) {
   const searchPlaces = () => {
     const dayId = currentDay ?? snapshot.days[0]?.id;
     if (!dayId) return;
-    if (view === "map") setView("split");
     beginPlace("place", dayId, "", true, "top");
   };
   const addDayItem = (type: DayAddItemType, dayId: string) => {
@@ -1354,18 +1610,28 @@ export function Planner({ tripId }: { tripId: string }) {
     closeEditor();
   };
   const resizeSheet = (event: React.PointerEvent) => {
+    if (event.button !== 0 || !event.isPrimary) return;
+    const pointerId = event.pointerId;
     const startY = event.clientY;
     const startHeight = sheetHeight;
-    const move = (pointer: PointerEvent) =>
+    let moved = false;
+    const move = (pointer: PointerEvent) => {
+      if (pointer.pointerId !== pointerId) return;
+      if (Math.abs(pointer.clientY - startY) > 4) moved = true;
       setSheetHeight(
         Math.min(82, Math.max(22, startHeight + ((startY - pointer.clientY) / innerHeight) * 100)),
       );
-    const stop = () => {
+    };
+    const stop = (pointer: PointerEvent) => {
+      if (pointer.pointerId !== pointerId) return;
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      if (!moved && pointer.type === "pointerup") setView("map");
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
   };
 
   return (
@@ -1377,10 +1643,10 @@ export function Planner({ tripId }: { tripId: string }) {
           style={{ "--sheet-height": `${sheetHeight}dvh` } as React.CSSProperties}
         >
           <header className="planner-header">
-            <Brand compact />
-            <label className="title-field">
-              <span className="sr-only">{text("tripTitle")}</span>
-              <input
+            <div className="planner-header-title">
+              <Brand compact />
+              <TitleField
+                label={text("tripTitle")}
                 value={titleDraft ?? title}
                 maxLength={200}
                 onFocus={() => {
@@ -1407,72 +1673,178 @@ export function Planner({ tripId }: { tripId: string }) {
                   }
                 }}
               />
-            </label>
-            <span className={`sync-state state-${syncState}`}>
-              <i aria-hidden="true" />
-              {syncState === "synced"
-                ? text("allSynced")
-                : syncState === "unsynced"
-                  ? text("saving")
-                  : syncState === "connecting"
-                    ? text("connecting")
-                    : text("offline")}
-            </span>
-            <div
-              className="presence-stack"
-              role="status"
-              aria-label={text("editorsOnline", { count: collaborators.length })}
-            >
-              {collaborators.slice(0, 4).map((person) => (
-                <span
-                  key={person.clientId}
-                  style={{ "--person-color": person.color } as React.CSSProperties}
-                  title={person.name}
-                >
-                  {initials(person.name)}
-                </span>
-              ))}
             </div>
-            <button
-              type="button"
-              className="icon-button"
-              aria-label={text("undo")}
-              aria-keyshortcuts="Control+Z Meta+Z"
-              disabled={!canUndo}
-              onClick={undo}
-            >
-              <Icon icon={undoIcon} />
-            </button>
-            <button
-              type="button"
-              className="icon-button"
-              aria-label={text("redo")}
-              aria-keyshortcuts="Control+Y Control+Shift+Z Meta+Shift+Z"
-              disabled={!canRedo}
-              onClick={redo}
-            >
-              <Icon icon={redoIcon} />
-            </button>
-            <button
-              type="button"
-              className="icon-button"
-              aria-label={text("tripSettings")}
-              onClick={() => setSettingsOpen(true)}
-            >
-              <Icon icon={settingsIcon} />
-            </button>
-            <button
-              type="button"
-              className="icon-button danger-icon"
-              aria-label={text("deleteTrip")}
-              onClick={() => setDeleteOpen(true)}
-            >
-              <Icon icon={trashIcon} />
-            </button>
-            <button type="button" className="secondary-button" onClick={share}>
-              <Icon icon={shareIcon} />
-              {text("share")}
-            </button>
+            <div className="planner-view-tools">
+              <fieldset
+                className="content-tabs"
+                aria-label={`${text("itinerary")} / ${text("calendar")} / ${text("expenses")}`}
+              >
+                <legend>{text("plannerView")}</legend>
+                <button
+                  type="button"
+                  aria-pressed={view !== "map" && plannerContent === "itinerary"}
+                  onClick={() => changePlannerContent("itinerary")}
+                >
+                  <Icon icon={listIcon} />
+                  {text("itinerary")}
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={view !== "map" && plannerContent === "calendar"}
+                  onClick={() => changePlannerContent("calendar")}
+                >
+                  <Icon icon={calendarIcon} />
+                  {text("calendar")}
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={view !== "map" && plannerContent === "expenses"}
+                  onClick={() => changePlannerContent("expenses")}
+                >
+                  <Icon icon={coinsIcon} />
+                  {text("expenses")}
+                </button>
+              </fieldset>
+              <span className="planner-view-separator" aria-hidden="true" />
+              <fieldset className="view-tabs">
+                <legend>{text("plannerView")}</legend>
+                <button
+                  type="button"
+                  aria-label={text("map")}
+                  title={text("map")}
+                  aria-pressed={view !== "list"}
+                  disabled={view === "map"}
+                  onClick={() => setView((current) => (current === "split" ? "list" : "split"))}
+                >
+                  <Icon icon={mapIcon} />
+                  <span className="map-view-label">{text("map")}</span>
+                </button>
+              </fieldset>
+            </div>
+            <div className="planner-header-actions">
+              <span className={`sync-state state-${syncState}`}>
+                <i aria-hidden="true" />
+                <span className="sync-state-label">
+                  {syncState === "synced"
+                    ? text("connected")
+                    : syncState === "connecting"
+                      ? text("connecting")
+                      : text("offline")}
+                </span>
+              </span>
+              <div className="presence-stack">
+                {identityChoice === guestIdentity ? (
+                  <button
+                    type="button"
+                    className="guest-presence"
+                    aria-label={text("tripmateGuest")}
+                    title={text("tripmateGuest")}
+                    aria-haspopup="dialog"
+                    onClick={() => setJoinOpen(true)}
+                  >
+                    <Icon icon={userIcon} aria-hidden="true" />
+                  </button>
+                ) : null}
+                {onlineTripmates.slice(0, 4).map((person) => (
+                  <span
+                    key={person.id}
+                    style={{ "--person-color": person.color } as React.CSSProperties}
+                    title={person.name}
+                  >
+                    {initials(person.name)}
+                  </span>
+                ))}
+              </div>
+              <span className="sr-only" role="status">
+                {text("tripmatesOnline", { count: onlineTripmates.length })}
+              </span>
+              <div ref={headerMoreRef} className="planner-header-more">
+                <button
+                  type="button"
+                  className="icon-button planner-header-more-trigger"
+                  aria-label={text("moreActions")}
+                  aria-expanded={headerMoreOpen}
+                  aria-controls="planner-header-menu"
+                  onClick={() => setHeaderMoreOpen((open) => !open)}
+                >
+                  <Icon icon={ellipsisIcon} />
+                </button>
+                <div
+                  id="planner-header-menu"
+                  className={`planner-header-more-menu${headerMoreOpen ? " is-open" : ""}`}
+                >
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={text("undo")}
+                    aria-keyshortcuts="Control+Z Meta+Z"
+                    disabled={!canUndo}
+                    onClick={() => {
+                      undo();
+                      setHeaderMoreOpen(false);
+                    }}
+                  >
+                    <Icon icon={undoIcon} />
+                    <span className="planner-header-action-label">{text("undo")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={text("redo")}
+                    aria-keyshortcuts="Control+Y Control+Shift+Z Meta+Shift+Z"
+                    disabled={!canRedo}
+                    onClick={() => {
+                      redo();
+                      setHeaderMoreOpen(false);
+                    }}
+                  >
+                    <Icon icon={redoIcon} />
+                    <span className="planner-header-action-label">{text("redo")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={text("tripmates")}
+                    disabled={!hasSynced || !identityLoaded || needsIdentity}
+                    onClick={() => {
+                      setTripmatesOpen(true);
+                      setHeaderMoreOpen(false);
+                    }}
+                  >
+                    <Icon icon={usersIcon} aria-hidden="true" />
+                    <span className="planner-header-action-label">{text("tripmates")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={text("tripSettings")}
+                    onClick={() => {
+                      setSettingsOpen(true);
+                      setHeaderMoreOpen(false);
+                    }}
+                  >
+                    <Icon icon={settingsIcon} />
+                    <span className="planner-header-action-label">{text("tripSettings")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button danger-icon"
+                    aria-label={text("deleteTrip")}
+                    onClick={() => {
+                      setDeleteOpen(true);
+                      setHeaderMoreOpen(false);
+                    }}
+                  >
+                    <Icon icon={trashIcon} />
+                    <span className="planner-header-action-label">{text("deleteTrip")}</span>
+                  </button>
+                </div>
+              </div>
+              <button type="button" className="secondary-button" onClick={share}>
+                <Icon icon={shareIcon} />
+                {text("share")}
+              </button>
+            </div>
           </header>
 
           <div className="planner-tabs">
@@ -1502,58 +1874,17 @@ export function Planner({ tripId }: { tripId: string }) {
                 <Icon icon={mapPinIcon} />
               </button>
             </nav>
-            <div className="planner-view-tools">
-              <fieldset className="view-tabs">
-                <legend>{text("plannerView")}</legend>
-                <button
-                  type="button"
-                  aria-label={text("list")}
-                  title={text("list")}
-                  aria-pressed={view !== "map"}
-                  disabled={view === "list"}
-                  onClick={() => setView((current) => (current === "split" ? "map" : "split"))}
-                >
-                  <Icon icon={listIcon} />
-                </button>
-                <button
-                  type="button"
-                  aria-label={text("map")}
-                  title={text("map")}
-                  aria-pressed={view !== "list"}
-                  disabled={view === "map"}
-                  onClick={() => setView((current) => (current === "split" ? "list" : "split"))}
-                >
-                  <Icon icon={mapIcon} />
-                </button>
-              </fieldset>
-              <button
-                type="button"
-                className="secondary-button planner-search-button"
-                data-place-trigger
-                aria-label={text("searchGooglePlaces")}
-                title={text("searchGooglePlaces")}
-                aria-expanded={creation?.type === "place" && creation.anchor === "top"}
-                onClick={searchPlaces}
-              >
-                <Icon icon={searchIcon} />
-              </button>
-            </div>
           </div>
 
           <div
             className={`planner-body view-${view}${mapPlaceId ? " has-map-details" : ""}${selected ? " has-item-editor" : ""}`}
           >
             <section
-              ref={itineraryRef}
               id="planner-itinerary"
               className="planner-panel"
               aria-label={text("itinerary")}
               aria-busy={navigationDay !== null}
-              onScroll={trackVisibleDay}
               onWheelCapture={cancelDayJump}
-              onPointerDownCapture={(event) => {
-                if (event.target === event.currentTarget) cancelDayJump();
-              }}
               onTouchMoveCapture={cancelDayJump}
               onKeyDownCapture={(event) => {
                 if (
@@ -1564,369 +1895,397 @@ export function Planner({ tripId }: { tripId: string }) {
                   cancelDayJump();
               }}
             >
-              <div className="mobile-sheet-handle" onPointerDown={resizeSheet}>
+              <button
+                type="button"
+                className="mobile-sheet-handle"
+                aria-label={text("hideItinerary")}
+                aria-controls="planner-itinerary"
+                aria-expanded="true"
+                title={text("hideItinerary")}
+                onPointerDown={resizeSheet}
+                onClick={(event) => {
+                  if (event.detail === 0) setView("map");
+                }}
+              >
                 <span />
-              </div>
-              <div className="planner-sticky-tools">
-                <div className="planner-content-toolbar">
-                  <fieldset
-                    className="content-tabs"
-                    aria-label={`${text("itinerary")} / ${text("calendar")}`}
+              </button>
+              <div
+                ref={itineraryRef}
+                className="planner-scroll"
+                onScroll={trackVisibleDay}
+                onPointerDownCapture={(event) => {
+                  if (event.target === event.currentTarget) cancelDayJump();
+                }}
+              >
+                {plannerContent === "expenses" ? (
+                  <Suspense
+                    fallback={
+                      <div className="planner-loading">
+                        <span className="spinner" />
+                      </div>
+                    }
                   >
-                    <legend>{text("plannerView")}</legend>
-                    <button
-                      type="button"
-                      aria-pressed={plannerContent === "itinerary"}
-                      onClick={() => changePlannerContent("itinerary")}
-                    >
-                      <Icon icon={listIcon} />
-                      {text("itinerary")}
-                    </button>
-                    <button
-                      type="button"
-                      aria-pressed={plannerContent === "calendar"}
-                      onClick={() => changePlannerContent("calendar")}
-                    >
-                      <Icon icon={calendarIcon} />
-                      {text("calendar")}
-                    </button>
-                  </fieldset>
-                </div>
-                {creation?.anchor === "top" ? (
-                  <div className="planner-global-search">{renderCreationSearch()}</div>
+                    <ExpensesWorkspace
+                      document={document}
+                      snapshot={snapshot}
+                      places={placeViews}
+                      selectedFriendId={selectedFriendId}
+                      onOpenItem={(id) => {
+                        changePlannerContent("itinerary");
+                        const dayId = snapshot.items[id]?.dayId;
+                        if (dayId) jumpToDay(dayId, true);
+                        else jumpToInbox();
+                        selectItem(id, dayId ?? undefined);
+                      }}
+                      focusExpenseId={focusedExpenseId}
+                      onFocusExpense={setFocusedExpenseId}
+                    />
+                  </Suspense>
                 ) : null}
-              </div>
-              {plannerContent === "calendar" ? (
-                <Calendar
-                  days={snapshot.days}
-                  orderedItems={orderedItems}
-                  legsByDay={routeLegs}
-                  places={placeViews}
-                  language={uiLanguage}
-                  calendarStartHour={snapshot.calendarStartHour}
-                  editor={renderEditor()}
-                  creationPanel={
-                    plannerContent === "calendar" && creation?.anchor === "day"
-                      ? renderCreationSearch()
-                      : null
-                  }
-                  focusRequest={calendarFocusRequest}
-                  selectedId={selectedId}
-                  onSelect={(item, dayId) =>
-                    selectItem(
-                      item.id,
-                      dayId ?? item.dayId ?? undefined,
-                      item.type === "lodging" && dayId ? "start" : null,
-                    )
-                  }
-                  onClearSelection={closeEditor}
-                  onChangeItems={changeCalendarItems}
-                  onChangeItem={changeCalendarItem}
-                  onMoveNote={moveCalendarNote}
-                  canReorderItem={canMoveCalendarItem}
-                  onReorderItem={moveCalendarItem}
-                  onDuplicateItem={duplicateCalendarItem}
-                  onMakeFlexible={makeCalendarItemFlexible}
-                  onDeleteItem={removeItem}
-                  onAddItem={addCalendarItem}
-                  onChangeLodging={changeCalendarLodging}
-                />
-              ) : null}
-              <div className={plannerContent === "calendar" ? "calendar-mobile-itinerary" : ""}>
-                <ItineraryDragArea onDrop={applyDayDrop} onDragStateChange={setItineraryDragging}>
-                  <div className="planner-days">
-                    {dayPlans.map((plan, dayIndex) => {
-                      const dateLabel = longDate(plan.day.date, uiLanguage);
-                      const editing =
-                        selected && selected.dayId !== null && editorDay === plan.day.id;
-                      const rendered =
-                        itineraryDragging ||
-                        visibleDays.has(plan.day.id) ||
-                        plan.day.id === currentDay ||
-                        Boolean(editing);
-                      const count = plan.items.length + plan.start.length + plan.end.length;
-                      const itemCount =
-                        plan.items.length +
-                        new Set([...plan.start, ...plan.end].map((item) => item.id)).size;
-                      const dayOrder = rendered
-                        ? [
-                            ...plan.start.map((item) => `${item.id}:start`),
-                            ...plan.items.map((item) => item.id),
-                            ...plan.end.map((item) => `${item.id}:end`),
-                          ]
-                        : [];
-                      const layout = `${count}:${editing ? selected.id : ""}:${
-                        creation?.dayId === plan.day.id ? creation.type : ""
-                      }`;
-                      const measured = dayHeights.current.get(plan.day.id);
-                      const height =
-                        measured?.layout === layout
-                          ? `${measured.height}px`
-                          : `${4.5 + 4 * count + (count ? 0 : 2)}rem`;
-                      const dayLegs = routeLegs.get(plan.day.id) ?? emptyLegs;
-                      const ownedRouteIds = new Set([
-                        ...plan.start.map((item) => `${item.id}:start`),
-                        ...plan.items.map((item) => item.id),
-                        ...plan.end.map((item) => `${item.id}:end`),
-                      ]);
-                      const firstItem = plan.items[0];
-                      const firstEnd = plan.end[0];
-                      const firstVisibleRouteId =
-                        firstItem?.id ?? (firstEnd ? `${firstEnd.id}:end` : null);
-                      const hasLeadingTransportLeg =
-                        firstVisibleRouteId !== null &&
-                        dayLegs.some(
-                          (leg) =>
-                            leg.toId === firstVisibleRouteId && !ownedRouteIds.has(leg.fromId),
-                        );
-                      const dayRoute = buildDayRouteExport(
-                        routeData.exportStops.get(plan.day.id) ?? emptyStops,
-                        dayLegs,
-                      );
-                      const warnings =
-                        plan.day.id === activeRouteDay
-                          ? itemWarnings
-                          : rendered
-                            ? buildScheduleWarnings(
-                                plan.items,
-                                dayLegs,
-                                plan.day.date,
-                                snapshot.timeZone,
-                                uiLanguage,
-                              )
-                            : noWarnings;
-                      return (
-                        <section
-                          key={plan.day.id}
-                          id={`day-${plan.day.id}`}
-                          data-day-id={plan.day.id}
-                          data-rendered={rendered}
-                          data-layout={layout}
-                          className="day-section"
-                          style={{
-                            minHeight: rendered ? undefined : height,
-                          }}
-                          aria-label={dateLabel}
-                        >
-                          <header className="day-heading">
-                            <h2>
-                              <span>{dateLabel}</span>
-                              {dayIndex < dayPlans.length - 1 && plan.end.length === 0 ? (
-                                <small className="missing-lodging">
-                                  <Icon
-                                    className="missing-lodging-icon"
-                                    icon={triangleAlertIcon}
-                                    aria-hidden="true"
-                                  />
-                                  {text("noLodging")}
-                                </small>
-                              ) : null}
-                            </h2>
-                            <div className="day-actions">
-                              <b>{itemCount}</b>
-                              <button
-                                type="button"
-                                className="icon-button day-map-focus"
-                                aria-label={text("showDayRouteOnMap", { date: dateLabel })}
-                                title={text("showDayRouteOnMap", { date: dateLabel })}
-                                disabled={
-                                  (routeData.exportStops.get(plan.day.id)?.length ?? 0) === 0
-                                }
-                                onClick={() => focusDayRoute(plan.day.id)}
-                              >
-                                <Icon icon={eyeIcon} />
-                              </button>
-                              {dayRoute.url ? (
-                                <a
-                                  className="icon-button day-route-export"
-                                  href={dayRoute.url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  aria-label={text("openDayGoogleMaps")}
-                                >
-                                  <Icon icon={routeIcon} />
-                                </a>
-                              ) : (
-                                <button
-                                  type="button"
-                                  className="icon-button day-route-export"
-                                  aria-disabled="true"
-                                  aria-label={dayRouteDisabledText(
-                                    uiLanguage,
-                                    dayRoute.reason ?? "routes-unavailable",
-                                  )}
-                                >
-                                  <Icon icon={routeIcon} />
-                                </button>
-                              )}
-                              {dayIndex === 0 ? (
-                                <button
-                                  type="button"
-                                  className="icon-button"
-                                  aria-label={text("addDayBefore", { date: dateLabel })}
-                                  disabled={snapshot.days.length >= 30}
-                                  onClick={() => addDayAtEdge("before")}
-                                >
-                                  <Icon icon={plusIcon} />
-                                </button>
-                              ) : null}
-                              {dayIndex === snapshot.days.length - 1 ? (
-                                <button
-                                  type="button"
-                                  className="icon-button"
-                                  aria-label={text("addDayAfter", { date: dateLabel })}
-                                  disabled={snapshot.days.length >= 30}
-                                  onClick={() => addDayAtEdge("after")}
-                                >
-                                  <Icon icon={plusIcon} />
-                                </button>
-                              ) : null}
-                              {dayIndex === 0 || dayIndex === snapshot.days.length - 1 ? (
-                                <button
-                                  type="button"
-                                  className="icon-button danger-icon"
-                                  aria-label={text("deleteDay", { date: dateLabel })}
-                                  disabled={snapshot.days.length <= 1}
-                                  onClick={() => removeDay(plan.day.id, itemCount)}
-                                >
-                                  <Icon icon={calendarDeleteIcon} />
-                                </button>
-                              ) : null}
-                              <DayAddControl
-                                dayId={plan.day.id}
-                                dayLabel={dateLabel}
-                                menuOpen={addMenuDay === plan.day.id}
-                                onMenuOpenChange={(open) => {
-                                  setAddMenuDay(open ? plan.day.id : null);
-                                  if (open) cancelCreation();
-                                }}
-                                onPlace={() => beginPlace("place", plan.day.id)}
-                                onAdd={(type) => addDayItem(type, plan.day.id)}
-                              />
-                            </div>
-                          </header>
-                          {plannerContent !== "calendar" &&
-                          creation?.anchor === "day" &&
-                          creation.dayId === plan.day.id
-                            ? renderCreationSearch()
-                            : null}
-                          {rendered ? (
-                            <>
-                              <ItineraryList
-                                droppableId={`day:${plan.day.id}:start`}
-                                boundary="start"
-                                endpointMode={
-                                  routeData.predecessorDayIds.has(plan.day.id)
-                                    ? hasLeadingTransportLeg
-                                      ? "transport"
-                                      : "loose"
-                                    : null
-                                }
-                                boundaryDate={plan.day.date}
-                                items={plan.start}
-                                order={dayOrder}
-                                places={placeViews}
-                                legs={dayLegs}
-                                distanceUnit={snapshot.distanceUnit}
-                                warnings={noWarnings}
-                                selectedId={selectedId}
-                                onSelect={(id) => selectItem(id, plan.day.id, "start")}
-                                renderAfter={(item) =>
-                                  renderEditorAfter(item, plan.day.id, "start")
-                                }
-                                onDelete={removeItem}
-                                onTravelMode={(id, travelMode) =>
-                                  updateTripItem(document, id, { travelMode })
-                                }
-                              />
-                              <ItineraryList
-                                droppableId={`day:${plan.day.id}`}
-                                items={plan.items}
-                                order={dayOrder}
-                                places={placeViews}
-                                legs={dayLegs}
-                                warnings={warnings}
-                                distanceUnit={snapshot.distanceUnit}
-                                selectedId={selectedId}
-                                onSelect={(id) => selectItem(id, plan.day.id)}
-                                renderAfter={(item) => renderEditorAfter(item, plan.day.id)}
-                                onDelete={removeItem}
-                                onMove={(id, delta) => moveVisible(id, delta, plan.items)}
-                                empty={
-                                  count === 0 ? (
-                                    <div
-                                      className="day-empty"
-                                      role="img"
-                                      aria-label={text("noItems")}
-                                      title={text("noItems")}
-                                    >
-                                      <Icon icon={calendarIcon} aria-hidden="true" />
-                                    </div>
-                                  ) : (
-                                    <div
-                                      className={`day-drop-target${plan.end.length > 0 ? " day-drop-target-compact" : ""}`}
-                                    />
-                                  )
-                                }
-                                onTravelMode={(id, travelMode) =>
-                                  updateTripItem(document, id, { travelMode })
-                                }
-                              />
-                              <ItineraryList
-                                droppableId={`day:${plan.day.id}:end`}
-                                boundary="end"
-                                items={plan.end}
-                                boundaryDate={plan.day.date}
-                                places={placeViews}
-                                order={dayOrder}
-                                legs={dayLegs}
-                                distanceUnit={snapshot.distanceUnit}
-                                warnings={noWarnings}
-                                selectedId={selectedId}
-                                onSelect={(id) => selectItem(id, plan.day.id, "end")}
-                                renderAfter={(item) => renderEditorAfter(item, plan.day.id, "end")}
-                                onDelete={removeItem}
-                                onTravelMode={(id, travelMode) =>
-                                  updateTripItem(document, id, { travelMode })
-                                }
-                              />
-                            </>
-                          ) : null}
-                        </section>
-                      );
-                    })}
-                  </div>
-                  <section id="places-to-visit" ref={inboxRef} className="inbox-section">
-                    <button
-                      type="button"
-                      className="inbox-heading"
-                      onClick={() => setInboxOpen((value) => !value)}
-                      aria-expanded={inboxOpen}
-                    >
-                      <span>{text("placesToVisit")}</span>
-                      <b>{inboxItems.length}</b>
-                    </button>
-                    {inboxOpen ? (
-                      <ItineraryList
-                        droppableId="inbox"
-                        items={inboxItems}
+                {plannerContent !== "expenses" ? (
+                  <>
+                    {plannerContent === "calendar" ? (
+                      <Calendar
+                        days={snapshot.days}
+                        orderedItems={orderedItems}
+                        legsByDay={routeLegs}
                         places={placeViews}
-                        legs={[]}
-                        distanceUnit={snapshot.distanceUnit}
-                        warnings={noWarnings}
-                        selectedId={selectedId}
-                        onSelect={selectItem}
-                        renderAfter={(item) => renderEditorAfter(item, null)}
-                        onDelete={removeItem}
-                        empty={<div className="day-drop-target" />}
-                        onMove={(id, delta) => moveVisible(id, delta, inboxItems)}
-                        onTravelMode={(id, travelMode) =>
-                          updateTripItem(document, id, { travelMode })
+                        language={uiLanguage}
+                        calendarStartHour={snapshot.calendarStartHour}
+                        editor={renderEditor()}
+                        creationPanel={
+                          plannerContent === "calendar" && creation?.anchor === "day"
+                            ? renderCreationSearch()
+                            : null
                         }
+                        focusRequest={calendarFocusRequest}
+                        selectedId={selectedId}
+                        onSelect={(item, dayId) =>
+                          selectItem(
+                            item.id,
+                            dayId ?? item.dayId ?? undefined,
+                            item.type === "lodging" && dayId ? "start" : null,
+                          )
+                        }
+                        onClearSelection={closeEditor}
+                        onChangeItems={changeCalendarItems}
+                        onChangeItem={changeCalendarItem}
+                        onMoveNote={moveCalendarNote}
+                        canReorderItem={canMoveCalendarItem}
+                        onReorderItem={moveCalendarItem}
+                        onDuplicateItem={duplicateCalendarItem}
+                        onMakeFlexible={makeCalendarItemFlexible}
+                        onDeleteItem={removeItem}
+                        onAddItem={addCalendarItem}
+                        onChangeLodging={changeCalendarLodging}
                       />
                     ) : null}
-                  </section>
-                </ItineraryDragArea>
+                    <div
+                      className={plannerContent === "calendar" ? "calendar-mobile-itinerary" : ""}
+                    >
+                      <ItineraryDragArea
+                        onDrop={applyDayDrop}
+                        onDragStateChange={setItineraryDragging}
+                      >
+                        <div className="planner-days">
+                          {dayPlans.map((plan, dayIndex) => {
+                            const dateLabel = longDate(plan.day.date, uiLanguage);
+                            const editing =
+                              selected && selected.dayId !== null && editorDay === plan.day.id;
+                            const rendered =
+                              itineraryDragging ||
+                              visibleDays.has(plan.day.id) ||
+                              plan.day.id === currentDay ||
+                              Boolean(editing);
+                            const count = plan.items.length + plan.start.length + plan.end.length;
+                            const itemCount =
+                              plan.items.length +
+                              new Set([...plan.start, ...plan.end].map((item) => item.id)).size;
+                            const dayOrder = rendered
+                              ? [
+                                  ...plan.start.map((item) => `${item.id}:start`),
+                                  ...plan.items.map((item) => item.id),
+                                  ...plan.end.map((item) => `${item.id}:end`),
+                                ]
+                              : [];
+                            const layout = `${count}:${editing ? selected.id : ""}:${
+                              creation?.dayId === plan.day.id ? creation.type : ""
+                            }`;
+                            const measured = dayHeights.current.get(plan.day.id);
+                            const height =
+                              measured?.layout === layout
+                                ? `${measured.height}px`
+                                : `${4.5 + 4 * count + (count ? 0 : 2)}rem`;
+                            const dayLegs = routeLegs.get(plan.day.id) ?? emptyLegs;
+                            const ownedRouteIds = new Set([
+                              ...plan.start.map((item) => `${item.id}:start`),
+                              ...plan.items.map((item) => item.id),
+                              ...plan.end.map((item) => `${item.id}:end`),
+                            ]);
+                            const firstItem = plan.items[0];
+                            const firstEnd = plan.end[0];
+                            const firstVisibleRouteId =
+                              firstItem?.id ?? (firstEnd ? `${firstEnd.id}:end` : null);
+                            const hasLeadingTransportLeg =
+                              firstVisibleRouteId !== null &&
+                              dayLegs.some(
+                                (leg) =>
+                                  leg.toId === firstVisibleRouteId &&
+                                  !ownedRouteIds.has(leg.fromId),
+                              );
+                            const dayRoute = buildDayRouteExport(
+                              routeData.exportStops.get(plan.day.id) ?? emptyStops,
+                              dayLegs,
+                            );
+                            const warnings =
+                              plan.day.id === activeRouteDay
+                                ? itemWarnings
+                                : rendered
+                                  ? buildScheduleWarnings(
+                                      plan.items,
+                                      dayLegs,
+                                      plan.day.date,
+                                      snapshot.timeZone,
+                                      uiLanguage,
+                                    )
+                                  : noWarnings;
+                            return (
+                              <section
+                                key={plan.day.id}
+                                id={`day-${plan.day.id}`}
+                                data-day-id={plan.day.id}
+                                data-rendered={rendered}
+                                data-layout={layout}
+                                className="day-section"
+                                style={{
+                                  minHeight: rendered ? undefined : height,
+                                }}
+                                aria-label={dateLabel}
+                              >
+                                <header className="day-heading">
+                                  <h2>
+                                    <span>{dateLabel}</span>
+                                    {dayIndex < dayPlans.length - 1 && plan.end.length === 0 ? (
+                                      <small className="missing-lodging">
+                                        <Icon
+                                          className="missing-lodging-icon"
+                                          icon={triangleAlertIcon}
+                                          aria-hidden="true"
+                                        />
+                                        {text("noLodging")}
+                                      </small>
+                                    ) : null}
+                                  </h2>
+                                  <div className="day-actions">
+                                    <b>{itemCount}</b>
+                                    <button
+                                      type="button"
+                                      className="icon-button day-map-focus"
+                                      aria-label={text("showDayRouteOnMap", { date: dateLabel })}
+                                      title={text("showDayRouteOnMap", { date: dateLabel })}
+                                      disabled={
+                                        (routeData.exportStops.get(plan.day.id)?.length ?? 0) === 0
+                                      }
+                                      onClick={() => focusDayRoute(plan.day.id)}
+                                    >
+                                      <Icon icon={eyeIcon} />
+                                    </button>
+                                    {dayRoute.url ? (
+                                      <a
+                                        className="icon-button day-route-export"
+                                        href={dayRoute.url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        aria-label={text("openDayGoogleMaps")}
+                                      >
+                                        <Icon icon={routeIcon} />
+                                      </a>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        className="icon-button day-route-export"
+                                        aria-disabled="true"
+                                        aria-label={dayRouteDisabledText(
+                                          uiLanguage,
+                                          dayRoute.reason ?? "routes-unavailable",
+                                        )}
+                                      >
+                                        <Icon icon={routeIcon} />
+                                      </button>
+                                    )}
+                                    {dayIndex === 0 ? (
+                                      <button
+                                        type="button"
+                                        className="icon-button"
+                                        aria-label={text("addDayBefore", { date: dateLabel })}
+                                        disabled={snapshot.days.length >= 30}
+                                        onClick={() => addDayAtEdge("before")}
+                                      >
+                                        <Icon icon={plusIcon} />
+                                      </button>
+                                    ) : null}
+                                    {dayIndex === snapshot.days.length - 1 ? (
+                                      <button
+                                        type="button"
+                                        className="icon-button"
+                                        aria-label={text("addDayAfter", { date: dateLabel })}
+                                        disabled={snapshot.days.length >= 30}
+                                        onClick={() => addDayAtEdge("after")}
+                                      >
+                                        <Icon icon={plusIcon} />
+                                      </button>
+                                    ) : null}
+                                    {dayIndex === 0 || dayIndex === snapshot.days.length - 1 ? (
+                                      <button
+                                        type="button"
+                                        className="icon-button danger-icon"
+                                        aria-label={text("deleteDay", { date: dateLabel })}
+                                        disabled={snapshot.days.length <= 1}
+                                        onClick={() => removeDay(plan.day.id, itemCount)}
+                                      >
+                                        <Icon icon={calendarDeleteIcon} />
+                                      </button>
+                                    ) : null}
+                                    <DayAddControl
+                                      dayId={plan.day.id}
+                                      dayLabel={dateLabel}
+                                      menuOpen={addMenuDay === plan.day.id}
+                                      onMenuOpenChange={(open) => {
+                                        setAddMenuDay(open ? plan.day.id : null);
+                                        if (open) cancelCreation();
+                                      }}
+                                      onPlace={() => beginPlace("place", plan.day.id)}
+                                      onAdd={(type) => addDayItem(type, plan.day.id)}
+                                    />
+                                  </div>
+                                </header>
+                                {plannerContent !== "calendar" &&
+                                creation?.anchor === "day" &&
+                                creation.dayId === plan.day.id
+                                  ? renderCreationSearch()
+                                  : null}
+                                {rendered ? (
+                                  <>
+                                    <ItineraryList
+                                      droppableId={`day:${plan.day.id}:start`}
+                                      boundary="start"
+                                      endpointMode={
+                                        routeData.predecessorDayIds.has(plan.day.id)
+                                          ? hasLeadingTransportLeg
+                                            ? "transport"
+                                            : "loose"
+                                          : null
+                                      }
+                                      boundaryDate={plan.day.date}
+                                      items={plan.start}
+                                      order={dayOrder}
+                                      places={placeViews}
+                                      legs={dayLegs}
+                                      distanceUnit={snapshot.distanceUnit}
+                                      warnings={noWarnings}
+                                      selectedId={selectedId}
+                                      onSelect={(id) => selectItem(id, plan.day.id, "start")}
+                                      renderAfter={(item) =>
+                                        renderEditorAfter(item, plan.day.id, "start")
+                                      }
+                                      onDelete={removeItem}
+                                      onTravelMode={(id, travelMode) =>
+                                        updateTripItem(document, id, { travelMode })
+                                      }
+                                    />
+                                    <ItineraryList
+                                      droppableId={`day:${plan.day.id}`}
+                                      items={plan.items}
+                                      order={dayOrder}
+                                      places={placeViews}
+                                      legs={dayLegs}
+                                      warnings={warnings}
+                                      distanceUnit={snapshot.distanceUnit}
+                                      selectedId={selectedId}
+                                      onSelect={(id) => selectItem(id, plan.day.id)}
+                                      renderAfter={(item) => renderEditorAfter(item, plan.day.id)}
+                                      onDelete={removeItem}
+                                      onMove={(id, delta) => moveVisible(id, delta, plan.items)}
+                                      empty={
+                                        count === 0 ? (
+                                          <div
+                                            className="day-empty"
+                                            role="img"
+                                            aria-label={text("noItems")}
+                                            title={text("noItems")}
+                                          >
+                                            <Icon icon={calendarIcon} aria-hidden="true" />
+                                          </div>
+                                        ) : (
+                                          <div
+                                            className={`day-drop-target${plan.end.length > 0 ? " day-drop-target-compact" : ""}`}
+                                          />
+                                        )
+                                      }
+                                      onTravelMode={(id, travelMode) =>
+                                        updateTripItem(document, id, { travelMode })
+                                      }
+                                    />
+                                    <ItineraryList
+                                      droppableId={`day:${plan.day.id}:end`}
+                                      boundary="end"
+                                      items={plan.end}
+                                      boundaryDate={plan.day.date}
+                                      places={placeViews}
+                                      order={dayOrder}
+                                      legs={dayLegs}
+                                      distanceUnit={snapshot.distanceUnit}
+                                      warnings={noWarnings}
+                                      selectedId={selectedId}
+                                      onSelect={(id) => selectItem(id, plan.day.id, "end")}
+                                      renderAfter={(item) =>
+                                        renderEditorAfter(item, plan.day.id, "end")
+                                      }
+                                      onDelete={removeItem}
+                                      onTravelMode={(id, travelMode) =>
+                                        updateTripItem(document, id, { travelMode })
+                                      }
+                                    />
+                                  </>
+                                ) : null}
+                              </section>
+                            );
+                          })}
+                        </div>
+                        <section id="places-to-visit" ref={inboxRef} className="inbox-section">
+                          <button
+                            type="button"
+                            className="inbox-heading"
+                            onClick={() => setInboxOpen((value) => !value)}
+                            aria-expanded={inboxOpen}
+                          >
+                            <span>{text("placesToVisit")}</span>
+                            <b>{inboxItems.length}</b>
+                          </button>
+                          {inboxOpen ? (
+                            <ItineraryList
+                              droppableId="inbox"
+                              items={inboxItems}
+                              places={placeViews}
+                              legs={[]}
+                              distanceUnit={snapshot.distanceUnit}
+                              warnings={noWarnings}
+                              selectedId={selectedId}
+                              onSelect={selectItem}
+                              renderAfter={(item) => renderEditorAfter(item, null)}
+                              onDelete={removeItem}
+                              empty={<div className="day-drop-target" />}
+                              onMove={(id, delta) => moveVisible(id, delta, inboxItems)}
+                              onTravelMode={(id, travelMode) =>
+                                updateTripItem(document, id, { travelMode })
+                              }
+                            />
+                          ) : null}
+                        </section>
+                      </ItineraryDragArea>
+                    </div>
+                  </>
+                ) : null}
               </div>
             </section>
             <PanelResizer
@@ -1935,6 +2294,22 @@ export function Planner({ tripId }: { tripId: string }) {
               onToggle={() => setView((current) => (current === "map" ? "split" : "map"))}
             />
             <section className="map-panel" aria-label={text("map")}>
+              <div className="map-search-tools">
+                <button
+                  type="button"
+                  className="secondary-button planner-search-button"
+                  data-place-trigger
+                  aria-label={text("searchGooglePlaces")}
+                  title={text("searchGooglePlaces")}
+                  aria-expanded={creation?.type === "place" && creation.anchor === "top"}
+                  onClick={searchPlaces}
+                >
+                  <Icon icon={searchIcon} />
+                </button>
+                {creation?.anchor === "top" ? (
+                  <div className="map-global-search">{renderCreationSearch()}</div>
+                ) : null}
+              </div>
               {placeViewError ? <p className="map-error">{placeViewError}</p> : null}
               <Suspense
                 fallback={
@@ -1956,6 +2331,29 @@ export function Planner({ tripId }: { tripId: string }) {
                   selectedPlaceId={mapPlaceId}
                   mapPlacement={mapPlacement}
                   onSelectPlace={(placeId) => {
+                    if (plannerContent === "expenses" && placeId) {
+                      const item = orderedItems.find(
+                        (candidate) =>
+                          candidate.place?.placeId === placeId ||
+                          candidate.transport?.from?.placeId === placeId ||
+                          candidate.transport?.to?.placeId === placeId,
+                      );
+                      const linked =
+                        item &&
+                        Object.values(snapshot.expenses).find(
+                          (expense) => expense.itemId === item.id,
+                        );
+                      if (linked) {
+                        setFocusedExpenseId(linked.id);
+                        if (view === "map") setView("split");
+                        return;
+                      }
+                      if (item) {
+                        changePlannerContent("itinerary");
+                        selectItem(item.id);
+                        return;
+                      }
+                    }
                     if (placeId && placeId !== mapPlaceId) closeEditor();
                     setMapPlaceId(placeId);
                   }}
@@ -1977,14 +2375,29 @@ export function Planner({ tripId }: { tripId: string }) {
                 defaultTravelMode: snapshot.defaultTravelMode,
                 calendarStartHour: snapshot.calendarStartHour,
               }}
+              currency={snapshot.currency}
+              onCurrencyChange={async (currency, settings) => {
+                validateTripSettings(document, settings);
+                const result = await rebaseTripCurrency({
+                  data: {
+                    tripId,
+                    currency,
+                    expected: financialFingerprint(snapshot),
+                    settings,
+                  },
+                });
+                return result.changed;
+              }}
               onClose={() => setSettingsOpen(false)}
-              onSave={(settings) => {
+              onSave={(settings, currencyChanged) => {
                 const { uiLanguage: nextUiLanguage, ...documentSettings } = settings;
-                try {
-                  setTripSettings(document, documentSettings);
-                } catch {
-                  alert(text("tripDatesBlocked"));
-                  return;
+                if (!currencyChanged) {
+                  try {
+                    setTripSettings(document, documentSettings);
+                  } catch {
+                    alert(text("tripDatesBlocked"));
+                    return;
+                  }
                 }
                 localStorage.setItem(uiLanguageStorageKey, nextUiLanguage);
                 setUiLanguage(nextUiLanguage);
@@ -2000,44 +2413,46 @@ export function Planner({ tripId }: { tripId: string }) {
               }}
             />
           ) : null}
-          {displayNamePrompt !== null ? (
-            <div className="dialog-backdrop">
-              <form
-                className="dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="display-name-title"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  saveDisplayName();
+          {tripmatesOpen && hasSynced && identityLoaded && !needsIdentity ? (
+            <Suspense fallback={null}>
+              <TripmatesDialog
+                document={document}
+                snapshot={snapshot}
+                selectedFriendId={selectedFriendId}
+                onSelectFriend={(id) => {
+                  selectTripmate(id);
+                  if (!id) setTripmatesOpen(false);
                 }}
-              >
-                <h2 id="display-name-title">{text("displayNameTitle")}</h2>
-                <p>{text("displayNameBody")}</p>
-                <label className="field">
-                  <span>{text("yourName")}</span>
-                  <input
-                    required
-                    maxLength={80}
-                    placeholder={text("yourName")}
-                    value={displayNamePrompt}
-                    onChange={(event) => setDisplayNamePrompt(event.target.value)}
-                  />
-                </label>
-                <div>
-                  <button
-                    type="submit"
-                    className="primary-button"
-                    disabled={!displayNamePrompt.trim()}
-                  >
-                    {text("continue")}
-                  </button>
-                </div>
-              </form>
-            </div>
+                onClose={() => setTripmatesOpen(false)}
+              />
+            </Suspense>
+          ) : null}
+          {needsIdentity || (identityChoice === guestIdentity && joinOpen) ? (
+            <TripmateJoinDialog
+              friends={snapshot.friends}
+              onSelect={(id) => {
+                selectTripmate(id);
+                setJoinOpen(false);
+              }}
+              onCreate={(name, color) => {
+                const id = crypto.randomUUID();
+                createTripmate(document, { id, name, color, archived: false });
+                selectTripmate(id);
+                setJoinOpen(false);
+              }}
+              onLater={() => {
+                selectTripmate(null);
+                setJoinOpen(false);
+              }}
+            />
           ) : null}
           {shareOpen ? (
-            <div className="dialog-backdrop">
+            <div
+              className="dialog-backdrop"
+              onPointerDown={(event) => {
+                if (event.target === event.currentTarget) setShareOpen(false);
+              }}
+            >
               <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="share-title">
                 <h2 id="share-title">{text("shareTitle")}</h2>
                 <p>{text("shareBody")}</p>
@@ -2057,7 +2472,14 @@ export function Planner({ tripId }: { tripId: string }) {
             </div>
           ) : null}
           {deleteOpen ? (
-            <div className="dialog-backdrop">
+            <div
+              className="dialog-backdrop"
+              onPointerDown={(event) => {
+                if (event.target !== event.currentTarget) return;
+                setDeleteOpen(false);
+                setDeleteText("");
+              }}
+            >
               <div
                 className="dialog"
                 role="dialog"

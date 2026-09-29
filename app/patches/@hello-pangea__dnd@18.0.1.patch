@@ -1,0 +1,221 @@
+diff --git a/dist/dnd.cjs.js b/dist/dnd.cjs.js
+index 0f169907715258b9733439e9aec05abb378326cd..d29059f10604041a8edbb227705c52497d56860c 100644
+--- a/dist/dnd.cjs.js
++++ b/dist/dnd.cjs.js
+@@ -4975,7 +4975,7 @@ const supportedEventName = (() => {
+ })();
+ 
+ const primaryButton = 0;
+-const sloppyClickThreshold = 5;
++const sloppyClickThreshold = 2;
+ function isSloppyClickThresholdExceeded(original, current) {
+   return Math.abs(current.x - original.x) >= sloppyClickThreshold || Math.abs(current.y - original.y) >= sloppyClickThreshold;
+ }
+@@ -5015,7 +5015,7 @@ function getCaptureBindings({
+         return;
+       }
+       event.preventDefault();
+-      const actions = phase.actions.fluidLift(point);
++      const actions = phase.actions.fluidLift(point, true);
+       setPhase({
+         type: 'DRAGGING',
+         actions
+@@ -5857,19 +5857,21 @@ function tryStart({
+       ...args.actions
+     };
+   }
+-  function fluidLift(clientSelection) {
+-    const move$1 = rafSchd(client => {
++  function fluidLift(clientSelection, immediateMove = false) {
++    const dispatchMove = client => {
+       tryDispatchWhenDragging(() => move({
+         client
+       }));
+-    });
++    };
++    const scheduledMove = immediateMove ? null : rafSchd(dispatchMove);
++    const move$1 = scheduledMove ?? dispatchMove;
+     const api = lift({
+       liftActionArgs: {
+         id: draggableId,
+         clientSelection,
+         movementMode: 'FLUID'
+       },
+-      cleanup: () => move$1.cancel(),
++      cleanup: () => scheduledMove?.cancel(),
+       actions: {
+         move: move$1
+       }
+diff --git a/dist/dnd.d.ts b/dist/dnd.d.ts
+index 7bac28498d285f5dc276cf3999b05b9100a59844..d046bb1b79c5762e1ffd21c6d92606548dec458b 100644
+--- a/dist/dnd.d.ts
++++ b/dist/dnd.d.ts
+@@ -80,7 +80,7 @@ interface SnapDragActions extends DragActions {
+ interface PreDragActions {
+     isActive: () => boolean;
+     shouldRespectForcePress: () => boolean;
+-    fluidLift: (clientSelection: Position) => FluidDragActions;
++    fluidLift: (clientSelection: Position, immediateMove?: boolean) => FluidDragActions;
+     snapLift: () => SnapDragActions;
+     abort: () => void;
+ }
+diff --git a/dist/dnd.esm.js b/dist/dnd.esm.js
+index 87a2110409cbc0fb96e102b42bcef5dc63cbb3c9..6c1b524a6af2dddca504cd478c158d78096b5265 100644
+--- a/dist/dnd.esm.js
++++ b/dist/dnd.esm.js
+@@ -4973,7 +4973,7 @@ const supportedEventName = (() => {
+ })();
+ 
+ const primaryButton = 0;
+-const sloppyClickThreshold = 5;
++const sloppyClickThreshold = 2;
+ function isSloppyClickThresholdExceeded(original, current) {
+   return Math.abs(current.x - original.x) >= sloppyClickThreshold || Math.abs(current.y - original.y) >= sloppyClickThreshold;
+ }
+@@ -5013,7 +5013,7 @@ function getCaptureBindings({
+         return;
+       }
+       event.preventDefault();
+-      const actions = phase.actions.fluidLift(point);
++      const actions = phase.actions.fluidLift(point, true);
+       setPhase({
+         type: 'DRAGGING',
+         actions
+@@ -5855,19 +5855,21 @@ function tryStart({
+       ...args.actions
+     };
+   }
+-  function fluidLift(clientSelection) {
+-    const move$1 = rafSchd(client => {
++  function fluidLift(clientSelection, immediateMove = false) {
++    const dispatchMove = client => {
+       tryDispatchWhenDragging(() => move({
+         client
+       }));
+-    });
++    };
++    const scheduledMove = immediateMove ? null : rafSchd(dispatchMove);
++    const move$1 = scheduledMove ?? dispatchMove;
+     const api = lift({
+       liftActionArgs: {
+         id: draggableId,
+         clientSelection,
+         movementMode: 'FLUID'
+       },
+-      cleanup: () => move$1.cancel(),
++      cleanup: () => scheduledMove?.cancel(),
+       actions: {
+         move: move$1
+       }
+diff --git a/dist/dnd.js b/dist/dnd.js
+index b27398a1b705966b7e0f958380d948714067bb93..ca6e45a000ae6b3507a8da92102fc0b9edbf498d 100644
+--- a/dist/dnd.js
++++ b/dist/dnd.js
+@@ -6441,7 +6441,7 @@ ${latestSubscriptionCallbackError.current.stack}
+   })();
+ 
+   const primaryButton = 0;
+-  const sloppyClickThreshold = 5;
++  const sloppyClickThreshold = 2;
+   function isSloppyClickThresholdExceeded(original, current) {
+     return Math.abs(current.x - original.x) >= sloppyClickThreshold || Math.abs(current.y - original.y) >= sloppyClickThreshold;
+   }
+@@ -6481,7 +6481,7 @@ ${latestSubscriptionCallbackError.current.stack}
+           return;
+         }
+         event.preventDefault();
+-        const actions = phase.actions.fluidLift(point);
++        const actions = phase.actions.fluidLift(point, true);
+         setPhase({
+           type: 'DRAGGING',
+           actions
+@@ -7323,19 +7323,21 @@ ${latestSubscriptionCallbackError.current.stack}
+         ...args.actions
+       };
+     }
+-    function fluidLift(clientSelection) {
+-      const move$1 = rafSchd(client => {
++    function fluidLift(clientSelection, immediateMove = false) {
++      const dispatchMove = client => {
+         tryDispatchWhenDragging(() => move({
+           client
+         }));
+-      });
++      };
++      const scheduledMove = immediateMove ? null : rafSchd(dispatchMove);
++      const move$1 = scheduledMove ?? dispatchMove;
+       const api = lift({
+         liftActionArgs: {
+           id: draggableId,
+           clientSelection,
+           movementMode: 'FLUID'
+         },
+-        cleanup: () => move$1.cancel(),
++        cleanup: () => scheduledMove?.cancel(),
+         actions: {
+           move: move$1
+         }
+diff --git a/src/types.ts b/src/types.ts
+index 145d14439ee050365299d7b9bcc873a20922f7e0..fe839e1a0b1fd95df5c533822f675ff809208c96 100644
+--- a/src/types.ts
++++ b/src/types.ts
+@@ -482,7 +482,7 @@ export interface PreDragActions {
+   // whether it has been indicated if force press should be respected
+   shouldRespectForcePress: () => boolean;
+   // lift the current item
+-  fluidLift: (clientSelection: Position) => FluidDragActions;
++  fluidLift: (clientSelection: Position, immediateMove?: boolean) => FluidDragActions;
+   snapLift: () => SnapDragActions;
+   // cancel the pre drag without starting a drag. Releases the lock
+   abort: () => void;
+diff --git a/src/view/use-sensor-marshal/sensors/use-mouse-sensor.ts b/src/view/use-sensor-marshal/sensors/use-mouse-sensor.ts
+index f35f81273bb6301ae376172b4330a622e6edd21b..d0921663ad7f5fdd0e4b8585b5d34aaca0392b93 100644
+--- a/src/view/use-sensor-marshal/sensors/use-mouse-sensor.ts
++++ b/src/view/use-sensor-marshal/sensors/use-mouse-sensor.ts
+@@ -24,7 +24,7 @@ import { noop } from '../../../empty';
+ 
+ // https://developer.mozilla.org/en-US/docs/Web/API/MouseEvent/button
+ export const primaryButton = 0;
+-export const sloppyClickThreshold = 5;
++export const sloppyClickThreshold = 2;
+ 
+ function isSloppyClickThresholdExceeded(
+   original: Position,
+@@ -106,7 +106,7 @@ function getCaptureBindings({
+ 
+         // Lifting at the current point to prevent the draggable item from
+         // jumping by the sloppyClickThreshold
+-        const actions: FluidDragActions = phase.actions.fluidLift(point);
++        const actions: FluidDragActions = phase.actions.fluidLift(point, true);
+ 
+         setPhase({
+           type: 'DRAGGING',
+diff --git a/src/view/use-sensor-marshal/use-sensor-marshal.ts b/src/view/use-sensor-marshal/use-sensor-marshal.ts
+index 4494644a406e5b9dc17e876a850e3ad29e9d707e..3efc5941a81e77b54ebc7bcad55d277d99c33220 100644
+--- a/src/view/use-sensor-marshal/use-sensor-marshal.ts
++++ b/src/view/use-sensor-marshal/use-sensor-marshal.ts
+@@ -279,10 +279,12 @@ function tryStart({
+     };
+   }
+ 
+-  function fluidLift(clientSelection: Position): FluidDragActions {
+-    const move = rafSchd((client: Position) => {
++  function fluidLift(clientSelection: Position, immediateMove = false): FluidDragActions {
++    const dispatchMove = (client: Position) => {
+       tryDispatchWhenDragging(() => moveAction({ client }));
+-    });
++    };
++    const scheduledMove = immediateMove ? null : rafSchd(dispatchMove);
++    const move = scheduledMove ?? dispatchMove;
+ 
+     const api = lift({
+       liftActionArgs: {
+@@ -290,7 +292,7 @@ function tryStart({
+         clientSelection,
+         movementMode: 'FLUID',
+       },
+-      cleanup: () => move.cancel(),
++      cleanup: () => scheduledMove?.cancel(),
+       actions: { move },
+     });
+ 

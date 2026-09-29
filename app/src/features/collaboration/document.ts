@@ -157,7 +157,7 @@ export function setTripField(
   document.transact(() => document.getMap(metadataKey).set(field, value), "trip-field");
 }
 
-export function setTripCurrency(document: Y.Doc, currency: string): void {
+function writeTripCurrency(document: Y.Doc, currency: string, origin: string): void {
   const parsed = currencySchema.parse(currency);
   const metadata = document.getMap<unknown>(metadataKey);
   const current = metadata.get("currency");
@@ -170,11 +170,19 @@ export function setTripCurrency(document: Y.Doc, currency: string): void {
     throw new Error("Rebase expenses and settlements before changing the trip currency");
   }
   if (current !== parsed) {
-    document.transact(() => metadata.set("currency", parsed), "trip-currency");
+    document.transact(() => metadata.set("currency", parsed), origin);
   }
 }
 
-export function upsertFriends(document: Y.Doc, updates: readonly Friend[]): void {
+export function setTripCurrency(document: Y.Doc, currency: string): void {
+  writeTripCurrency(document, currency, "trip-currency");
+}
+
+export function initializeTripCurrency(document: Y.Doc, currency: string): void {
+  writeTripCurrency(document, currency, "initialize-trip-currency");
+}
+
+function writeFriends(document: Y.Doc, updates: readonly Friend[], origin: string): void {
   if (!updates.length) return;
   const parsed = updates.map((friend) => friendSchema.parse(friend));
   const friends = document.getMap<Y.Map<unknown>>(friendsKey);
@@ -190,14 +198,22 @@ export function upsertFriends(document: Y.Doc, updates: readonly Friend[]): void
   }
   document.transact(() => {
     for (const friend of parsed) upsertRecord(friends, friend);
-  }, "upsert-friend");
+  }, origin);
+}
+
+export function upsertFriends(document: Y.Doc, updates: readonly Friend[]): void {
+  writeFriends(document, updates, "upsert-friend");
 }
 
 export function upsertFriend(document: Y.Doc, friend: Friend): void {
   upsertFriends(document, [friend]);
 }
 
-export function upsertExpense(document: Y.Doc, expense: Expense): void {
+export function createTripmate(document: Y.Doc, friend: Friend): void {
+  writeFriends(document, [friend], "create-tripmate");
+}
+
+function writeExpense(document: Y.Doc, expense: Expense, origin: string): void {
   const parsed = expenseSchema.parse(expense);
   if (!currencySchema.safeParse(document.getMap(metadataKey).get("currency")).success) {
     throw new Error("Choose a trip currency before adding expenses");
@@ -250,7 +266,15 @@ export function upsertExpense(document: Y.Doc, expense: Expense): void {
   ) {
     next = { ...next, conversion: { ...next.conversion, stale: true } };
   }
-  document.transact(() => upsertRecord(expenses, next), "upsert-expense");
+  document.transact(() => upsertRecord(expenses, next), origin);
+}
+
+export function upsertExpense(document: Y.Doc, expense: Expense): void {
+  writeExpense(document, expense, "upsert-expense");
+}
+
+export function refreshExpenseConversion(document: Y.Doc, expense: Expense): void {
+  writeExpense(document, expense, "refresh-expense-conversion");
 }
 
 export function removeExpense(document: Y.Doc, id: string): void {
@@ -258,7 +282,7 @@ export function removeExpense(document: Y.Doc, id: string): void {
   document.transact(() => document.getMap(expensesKey).delete(parsed), "remove-expense");
 }
 
-export function upsertSettlement(document: Y.Doc, settlement: Settlement): void {
+function writeSettlement(document: Y.Doc, settlement: Settlement, origin: string): void {
   const parsed = settlementSchema.parse(settlement);
   if (!currencySchema.safeParse(document.getMap(metadataKey).get("currency")).success) {
     throw new Error("Choose a trip currency before recording settlements");
@@ -272,8 +296,16 @@ export function upsertSettlement(document: Y.Doc, settlement: Settlement): void 
   }
   document.transact(
     () => upsertRecord(document.getMap<Y.Map<unknown>>(settlementsKey), parsed),
-    "upsert-settlement",
+    origin,
   );
+}
+
+export function upsertSettlement(document: Y.Doc, settlement: Settlement): void {
+  writeSettlement(document, settlement, "upsert-settlement");
+}
+
+export function refreshSettlementConversion(document: Y.Doc, settlement: Settlement): void {
+  writeSettlement(document, settlement, "refresh-settlement-conversion");
 }
 
 export function removeSettlement(document: Y.Doc, id: string): void {
@@ -281,7 +313,7 @@ export function removeSettlement(document: Y.Doc, id: string): void {
   document.transact(() => document.getMap(settlementsKey).delete(parsed), "remove-settlement");
 }
 
-export function setTripSettings(document: Y.Doc, settings: TripSettings): void {
+function prepareTripSettings(document: Y.Doc, settings: TripSettings) {
   const parsed = tripSettingsSchema.parse(settings);
   const nextDays = tripDates(parsed.startDate, parsed.endDate).map((date) => ({
     id: date,
@@ -299,6 +331,15 @@ export function setTripSettings(document: Y.Doc, settings: TripSettings): void {
     }
     return { item, next: itemForTripRange(current, parsed.startDate, parsed.endDate) };
   });
+  return { parsed, nextDays, nextItems };
+}
+
+export function validateTripSettings(document: Y.Doc, settings: TripSettings): void {
+  prepareTripSettings(document, settings);
+}
+
+export function setTripSettings(document: Y.Doc, settings: TripSettings): void {
+  const { parsed, nextDays, nextItems } = prepareTripSettings(document, settings);
   document.transact(() => {
     const metadata = document.getMap(metadataKey);
     metadata.set("startDate", parsed.startDate);

@@ -1,0 +1,21 @@
+.titleField {
+  min-width: 0;
+  flex: 1;
+}
+
+.titleField input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.25rem 0.375rem;
+  border: var(--line) solid transparent;
+  border-radius: var(--radius-s);
+  background: transparent;
+  font-size: 0.875rem;
+  font-weight: 750;
+}
+
+.titleField input:hover,
+.titleField input:focus {
+  border-color: var(--border);
+  background: var(--surface);
+}

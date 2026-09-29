@@ -1,0 +1,37 @@
+.row {
+  display: grid;
+  grid-template-columns: 1.75rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.colorControl {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+}
+
+.colorButton {
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 2px solid var(--raised);
+  border-radius: 50%;
+  outline: var(--line) solid var(--border-strong);
+}
+
+.colorButton:hover {
+  outline-color: var(--ink);
+}
+
+.nativeColorInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+}

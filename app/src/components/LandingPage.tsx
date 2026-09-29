@@ -186,7 +186,7 @@ export function LandingPage() {
         <article>
           <Icon icon={sparkIcon} />
           <h2>Stay fast at scale</h2>
-          <p>Built for all your friends and families.</p>
+          <p>Built for all your tripmates.</p>
         </article>
       </section>
 

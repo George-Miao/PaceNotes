@@ -1,0 +1,32 @@
+.choices {
+  display: grid;
+  max-height: 12rem;
+  gap: var(--space-2);
+  overflow-y: auto;
+}
+
+.choices button {
+  justify-content: flex-start;
+}
+
+.create {
+  display: grid;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: var(--line) solid var(--border);
+}
+
+.createTitle {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.create :global(.field-error) {
+  margin: 0;
+}

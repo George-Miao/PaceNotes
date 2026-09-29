@@ -5,7 +5,8 @@ import { z } from "zod";
 import { db } from "../../db/client";
 import { trips } from "../../db/schema";
 import { hocuspocus } from "../../sync/hocuspocus";
-import { readTripDocument } from "../collaboration/document";
+import { readTripDocument, setTripSettings, validateTripSettings } from "../collaboration/document";
+import { tripSettingsSchema } from "../trip/model";
 import { conversionFor } from "./exchange.server";
 import { currencySchema } from "./model";
 import { financialFingerprint } from "./revision";
@@ -14,6 +15,7 @@ const inputSchema = z.object({
   tripId: z.string().regex(/^[A-Za-z0-9_-]{20,32}$/),
   currency: z.string().regex(/^[A-Z]{3}$/),
   expected: z.string(),
+  settings: tripSettingsSchema,
 });
 
 const pending = new Map<string, Promise<void>>();
@@ -34,7 +36,7 @@ async function serialize<T>(tripId: string, action: () => Promise<T>): Promise<T
   }
 }
 
-/** Reprice all records in one live Yjs transaction, or leave all records unchanged. */
+/** Save settings and reprice every record in one live Yjs transaction, or leave all unchanged. */
 export const rebaseTripCurrency = createServerFn({ method: "POST" })
   .validator(inputSchema)
   .handler(async ({ data }) => {
@@ -53,6 +55,7 @@ export const rebaseTripCurrency = createServerFn({ method: "POST" })
         const before = readTripDocument(live);
         if (financialFingerprint(before) !== data.expected)
           throw new Error("Expenses changed. Review the ledger and try again.");
+        validateTripSettings(live, data.settings);
         if (before.currency === data.currency) return { changed: false };
         const [expenses, settlements] = await Promise.all([
           Promise.all(
@@ -93,6 +96,7 @@ export const rebaseTripCurrency = createServerFn({ method: "POST" })
         await connection.transact((document) => {
           if (financialFingerprint(readTripDocument(document)) !== data.expected)
             throw new Error("Expenses changed. Review the ledger and try again.");
+          validateTripSettings(document, data.settings);
           const expenseMap = document.getMap<Y.Map<unknown>>("expenses");
           const settlementMap = document.getMap<Y.Map<unknown>>("settlements");
           for (const [id, conversion] of expenses)
@@ -100,6 +104,7 @@ export const rebaseTripCurrency = createServerFn({ method: "POST" })
           for (const [id, conversion] of settlements)
             settlementMap.get(id)?.set("conversion", conversion);
           document.getMap("metadata").set("currency", data.currency);
+          setTripSettings(document, data.settings);
         });
         return { changed: true };
       } finally {

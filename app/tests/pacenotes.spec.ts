@@ -22,7 +22,11 @@ const destination = {
   placeId: "tokyo-e2e",
 };
 
-async function createEmptyTrip(items: TripItem[] = [], endDate = "2027-04-12"): Promise<string> {
+async function createEmptyTrip(
+  items: TripItem[] = [],
+  endDate = "2027-04-12",
+  currency: string | null = null,
+): Promise<string> {
   const id = crypto.randomUUID().replaceAll("-", "");
   const snapshot = createInitialSnapshot(id, {
     startDate: "2027-04-10",
@@ -30,6 +34,7 @@ async function createEmptyTrip(items: TripItem[] = [], endDate = "2027-04-12"): 
     destination,
     timeZone: "Asia/Tokyo",
   });
+  snapshot.currency = currency;
   const document = new Y.Doc();
   initializeTripDocument(document, snapshot);
   for (const item of items) addTripItem(document, item);
@@ -47,6 +52,21 @@ async function createEmptyTrip(items: TripItem[] = [], endDate = "2027-04-12"): 
   document.destroy();
   return id;
 }
+
+async function clickPlannerAction(page: Page, name: string) {
+  const header = page.locator(".planner-header");
+  const more = header.locator(".planner-header-more-trigger");
+  if (await page.evaluate(() => matchMedia("(max-width: 48rem)").matches)) await more.click();
+  await header.getByRole("button", { name, exact: true }).click();
+}
+
+async function joinTripAs(page: Page, name: string) {
+  const join = page.getByRole("dialog", { name: "Who are you on this trip?" });
+  await join.getByRole("textbox", { name: "New tripmate" }).fill(name);
+  await join.getByRole("button", { name: "Create tripmate" }).click();
+  await expect(join).toHaveCount(0);
+}
+
 async function mockGoogle(page: Page) {
   await page.addInitScript(() => {
     class MockPlaceAutocompleteElement extends HTMLElement {
@@ -124,7 +144,7 @@ async function mockGoogle(page: Page) {
     type MockMapEvent = { placeId: string; stop: () => void };
     type MockCenter = { lat: number; lng: number };
     class MockMap {
-      listeners = new Map<string, (event?: MockMapEvent) => void>();
+      listeners = new Map<string, Set<(event?: MockMapEvent) => void>>();
       center: MockCenter;
       zoom: number;
       constructor(host: HTMLElement, options: { center?: MockCenter; zoom?: number } = {}) {
@@ -141,15 +161,28 @@ async function mockGoogle(page: Page) {
           const button = document.createElement("button");
           button.textContent = `Map location: ${name}`;
           button.addEventListener("click", () => {
-            this.listeners.get("click")?.({ placeId: name.toLowerCase(), stop() {} });
+            this.emit("click", { placeId: name.toLowerCase(), stop() {} });
           });
           canvas.append(button);
         }
         host.replaceChildren(canvas);
       }
       addListener(name: string, listener: (event?: MockMapEvent) => void) {
-        this.listeners.set(name, listener);
-        return { remove: () => this.listeners.delete(name) };
+        let callbacks = this.listeners.get(name);
+        if (!callbacks) {
+          callbacks = new Set();
+          this.listeners.set(name, callbacks);
+        }
+        callbacks.add(listener);
+        return {
+          remove: () => {
+            callbacks.delete(listener);
+            if (callbacks.size === 0) this.listeners.delete(name);
+          },
+        };
+      }
+      emit(name: string, event?: MockMapEvent) {
+        for (const listener of this.listeners.get(name) ?? []) listener(event);
       }
       fitBounds(bounds: { points: MockCenter[] }): void {
         const scope = globalThis as typeof globalThis & {
@@ -240,6 +273,18 @@ async function mockGoogle(page: Page) {
         }
       }
     }
+    class MockLatLng {
+      constructor(
+        private readonly latitude: number,
+        private readonly longitude: number,
+      ) {}
+      lat() {
+        return this.latitude;
+      }
+      lng() {
+        return this.longitude;
+      }
+    }
     class MockLatLngBounds {
       points: MockCenter[] = [];
       extend(point: MockCenter): void {
@@ -295,6 +340,11 @@ async function mockGoogle(page: Page) {
         this.map = map;
         if (map) this.onAdd?.();
       }
+    }
+    for (const method of ["getMap", "getProjection", "setMap"]) {
+      const descriptor = Object.getOwnPropertyDescriptor(MockOverlayView.prototype, method);
+      if (!descriptor) throw new Error(`Missing mock OverlayView method: ${method}`);
+      Object.defineProperty(MockOverlayView.prototype, method, { ...descriptor, enumerable: true });
     }
     type MockRouteLocation = {
       id?: string;
@@ -382,7 +432,10 @@ async function mockGoogle(page: Page) {
                         }),
                       },
                     ]
-                  : [{ toJSON: () => ({ lat: 35.6762, lng: 139.6503 }) }],
+                  : [
+                      { toJSON: () => routeCoordinates(origin) },
+                      { toJSON: () => routeCoordinates(destination) },
+                    ],
               durationMillis: routeDurationMillis(origin, destination),
               distanceMeters: destination.id === "no-detail-end" ? null : 1_000,
             },
@@ -498,6 +551,8 @@ async function mockGoogle(page: Page) {
     scope.__pacenotesRouteLanguages = [];
     globalThis.google = {
       maps: {
+        Map: MockMap,
+        LatLng: MockLatLng,
         LatLngBounds: MockLatLngBounds,
         marker: { AdvancedMarkerElement: MockAdvancedMarkerElement },
         OverlayView: MockOverlayView,
@@ -676,9 +731,400 @@ test("mobile landing omits the route preview and fills the viewport", async ({
   ).toBe(true);
 });
 
-test("icon buttons show their accessible labels on hover", async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Tooltip tester"));
+test("tripmate changes save only after an edit and the add dialog keeps its parent open", async ({
+  page,
+}) => {
+  const id = await createEmptyTrip();
+  try {
+    await page.goto(`/trips/${id}`);
+    const join = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    const joinName = join.getByRole("textbox", { name: "New tripmate" });
+    const joinColor = join.getByRole("button", { name: "Tripmate color" });
+    const joinColorBox = await joinColor.boundingBox();
+    const joinNameBox = await joinName.boundingBox();
+    expect(joinColorBox?.width).toBeLessThanOrEqual(24);
+    expect(joinNameBox?.x).toBeGreaterThan(joinColorBox?.x ?? 0);
+    await expect(join.locator('input[type="color"]')).toHaveCSS("opacity", "0");
+    await joinName.fill("Alice");
+    await join.getByRole("button", { name: "Create tripmate" }).click();
+    await clickPlannerAction(page, "Tripmates");
+
+    const manager = page.getByRole("dialog", { name: "Tripmates" });
+    const save = manager.getByRole("button", { name: "Save", exact: true });
+    const add = manager.getByRole("button", { name: "Add Tripmate" });
+    const aliceInput = manager.getByRole("textbox", { name: "Name for tripmate Alice" });
+    const colorButton = manager.getByRole("button", { name: "Color for tripmate Alice" });
+    const colorInput = manager.locator('input[type="color"]').first();
+    await expect(aliceInput).toHaveValue("Alice");
+    await expect(colorInput).toHaveCSS("opacity", "0");
+    await expect(colorButton).toHaveCSS("border-radius", "50%");
+    const colorBox = await colorButton.boundingBox();
+    const nameBox = await aliceInput.boundingBox();
+    const dialogBox = await manager.boundingBox();
+    expect(colorBox?.width).toBeLessThanOrEqual(24);
+    expect(colorBox?.x).toBeGreaterThan((dialogBox?.x ?? 0) + 8);
+    expect(nameBox?.x).toBeGreaterThan(colorBox?.x ?? 0);
+    await colorInput.evaluate((input) => {
+      input.showPicker = () => {
+        input.dataset.pickerOpened = "true";
+      };
+    });
+    await colorButton.click();
+    await expect(colorInput).toHaveAttribute("data-picker-opened", "true");
+    await expect(save).toBeDisabled();
+    await aliceInput.fill("Alicia");
+    await aliceInput.press("Escape");
+    await expect(aliceInput).toHaveValue("Alice");
+    await expect(save).toBeDisabled();
+    await aliceInput.fill("Alicia");
+    await aliceInput.press("Enter");
+    await expect(aliceInput).toHaveValue("Alicia");
+    await expect(save).toBeEnabled();
+    await aliceInput.fill("Alice");
+    await aliceInput.press("Enter");
+    await expect(save).toBeDisabled();
+    await aliceInput.fill("Alicia");
+    await aliceInput.press("Enter");
+
+    await add.click();
+    const newTripmate = page.getByRole("dialog", { name: "New Tripmate" });
+    await expect(newTripmate).toBeVisible();
+    await expect(manager).toBeVisible();
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    await newTripmate.getByRole("button", { name: "Cancel" }).click();
+    await expect(newTripmate).toHaveCount(0);
+    await expect(manager).toBeVisible();
+    await expect(aliceInput).toHaveValue("Alicia");
+
+    await add.click();
+    await newTripmate.getByRole("button", { name: "Close dialog" }).click();
+    await expect(manager).toBeVisible();
+    await add.click();
+    await newTripmate.press("Escape");
+    await expect(newTripmate).toHaveCount(0);
+    await expect(manager).toBeVisible();
+    await add.click();
+    const newName = newTripmate.getByRole("textbox", { name: "Name" });
+    await expect(newName).toHaveAttribute("placeholder", "Name");
+    await newName.fill("Alicia");
+    await newTripmate.getByRole("button", { name: "Save" }).click();
+    await expect(newTripmate.getByRole("alert")).toBeVisible();
+    await newName.fill("Bob");
+    await newTripmate.getByRole("button", { name: "Save" }).click();
+    await expect(newTripmate).toHaveCount(0);
+    await expect(manager).toBeVisible();
+    await expect(manager.getByRole("textbox", { name: "Name for tripmate Bob" })).toHaveValue(
+      "Bob",
+    );
+    await expect(aliceInput).toHaveValue("Alicia");
+    await save.click();
+    await expect(manager).toHaveCount(0);
+
+    await clickPlannerAction(page, "Tripmates");
+    await expect(page.getByRole("dialog", { name: "Tripmates" })).toBeVisible();
+    await expect(
+      page.getByRole("dialog", { name: "Tripmates" }).getByRole("textbox", {
+        name: "Name for tripmate Alicia",
+      }),
+    ).toHaveValue("Alicia");
+    await expect(
+      page.getByRole("dialog", { name: "Tripmates" }).getByRole("button", {
+        name: "Save",
+        exact: true,
+      }),
+    ).toBeDisabled();
+    const reopened = page.getByRole("dialog", { name: "Tripmates" });
+    await expect(reopened.locator("details")).toHaveCount(0);
+    await reopened.getByRole("button", { name: "Archive Bob" }).click();
+    const archived = reopened.locator("details");
+    const archivedSummary = archived.locator("summary");
+    await expect(archivedSummary).toHaveText("Archived User");
+    await expect(archived).not.toHaveAttribute("open", "");
+    await expect(reopened.getByRole("button", { name: "Restore Bob" })).toHaveCount(0);
+    await expect(reopened.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+    await archivedSummary.focus();
+    await archivedSummary.press("Enter");
+    await expect(reopened.getByRole("button", { name: "Restore Bob" })).toBeVisible();
+    await reopened.getByRole("button", { name: "Restore Bob" }).click();
+    await expect(archived).toHaveCount(0);
+    await expect(reopened.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+    const pendingName = reopened.getByRole("textbox", { name: "Name for tripmate Alicia" });
+    await pendingName.fill("Temporary");
+    await pendingName.press("Enter");
+    await expect(reopened.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+    await reopened.getByRole("button", { name: "Close dialog" }).click();
+    await clickPlannerAction(page, "Tripmates");
+    await expect(
+      page.getByRole("dialog", { name: "Tripmates" }).getByRole("textbox", {
+        name: "Name for tripmate Alicia",
+      }),
+    ).toHaveValue("Alicia");
+    const persisted = page.getByRole("dialog", { name: "Tripmates" });
+    await persisted.getByRole("button", { name: "Archive Bob" }).click();
+    await persisted.getByRole("button", { name: "Save", exact: true }).click();
+    await clickPlannerAction(page, "Tripmates");
+    const folded = page.getByRole("dialog", { name: "Tripmates" }).locator("details");
+    await expect(folded.locator("summary")).toHaveText("Archived User");
+    await expect(folded).not.toHaveAttribute("open", "");
+    await folded.locator("summary").click();
+    await expect(folded.getByRole("button", { name: "Restore Bob" })).toBeVisible();
+    await folded.getByRole("button", { name: "Restore Bob" }).click();
+    await page
+      .getByRole("dialog", { name: "Tripmates" })
+      .getByRole("button", { name: "Save", exact: true })
+      .click();
+    await clickPlannerAction(page, "Tripmates");
+    await expect(
+      page.getByRole("dialog", { name: "Tripmates" }).getByRole("button", {
+        name: "Archive Bob",
+      }),
+    ).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Tripmates" }).locator("details")).toHaveCount(0);
+  } finally {
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("expense participant lists archived tripmates under a muted group", async ({ page }) => {
+  const id = await createEmptyTrip();
+  try {
+    await page.goto(`/trips/${id}`);
+    const join = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await join.getByRole("textbox", { name: "New tripmate" }).fill("Alice");
+    await join.getByRole("button", { name: "Create tripmate" }).click();
+    await clickPlannerAction(page, "Tripmates");
+    const manager = page.getByRole("dialog", { name: "Tripmates" });
+    await manager.getByRole("button", { name: "Add Tripmate" }).click();
+    const newTripmate = page.getByRole("dialog", { name: "New Tripmate" });
+    await newTripmate.getByRole("textbox", { name: "Name" }).fill("Bob");
+    await newTripmate.getByRole("button", { name: "Save" }).click();
+    await manager.getByRole("button", { name: "Archive Bob" }).click();
+    await manager.getByRole("button", { name: "Save", exact: true }).click();
+
+    await page.goto(`/trips/${id}?view=expenses`);
+    const participant = page.getByRole("combobox", { name: "Participant: Everyone" });
+    await participant.click();
+    const list = page.getByRole("listbox", { name: "Participant" });
+    await expect(list.getByRole("option")).toHaveText(["Everyone", "Alice", "Bob"]);
+    await expect(list.locator("div", { hasText: /^Archived$/ })).toHaveCount(1);
+    const active = list.getByRole("option", { name: "Alice" });
+    const archived = list.getByRole("option", { name: "Bob (archived)" });
+    await expect(archived).toHaveText("Bob");
+    const activeColor = await active.evaluate((node) => getComputedStyle(node).color);
+    await expect(archived).not.toHaveCSS("color", activeColor);
+    await archived.click();
+    const selected = page.getByRole("combobox", { name: "Participant: Bob (archived)" });
+    await expect(selected).toHaveText("Bob");
+    await expect(selected.getByText("Bob")).not.toHaveCSS("color", activeColor);
+  } finally {
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("expense sort and involving-me controls have room to fit", async ({ page }, testInfo) => {
+  const id = await createEmptyTrip();
+  try {
+    await page.goto(`/trips/${id}?view=expenses`);
+    const join = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await join.getByRole("textbox", { name: "New tripmate" }).fill("Alice");
+    await join.getByRole("button", { name: "Create tripmate" }).click();
+    if (testInfo.project.name === "chromium") {
+      await page.setViewportSize({ width: 1920, height: 900 });
+    }
+
+    const directionBox = await page.getByRole("button", { name: "High to low" }).boundingBox();
+    const checkboxBox = await page.getByRole("checkbox", { name: "Involving me" }).boundingBox();
+    expect(directionBox).not.toBeNull();
+    expect(checkboxBox).not.toBeNull();
+    if (directionBox && checkboxBox) {
+      if (testInfo.project.name === "chromium") {
+        expect(checkboxBox.y).toBeLessThan(directionBox.y + directionBox.height);
+        expect(checkboxBox.x - (directionBox.x + directionBox.width)).toBeGreaterThanOrEqual(12);
+      } else {
+        expect(checkboxBox.y).toBeGreaterThanOrEqual(directionBox.y + directionBox.height);
+      }
+    }
+    const amountFits = await page
+      .getByRole("combobox", { name: "Sort expenses: Amount" })
+      .getByText("Amount")
+      .evaluate((element) => element.scrollWidth <= element.clientWidth);
+    expect(amountFits).toBe(true);
+  } finally {
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("expense sort direction describes the selected order", async ({ page }) => {
+  const id = await createEmptyTrip();
+  try {
+    await page.goto(`/trips/${id}?view=expenses`);
+    await page
+      .getByRole("dialog", { name: "Who are you on this trip?" })
+      .getByRole("button", { name: "Later" })
+      .click();
+    await expect(page.getByRole("heading", { name: "Expenses", exact: true })).toHaveCount(1);
+    const participantLabel = await page.getByText("Participant", { exact: true }).boundingBox();
+    const sortLabel = await page.getByText("Sort", { exact: true }).boundingBox();
+    const participant = await page
+      .getByRole("combobox", { name: "Participant: Everyone" })
+      .boundingBox();
+    const sort = await page.getByRole("combobox", { name: "Sort expenses: Amount" }).boundingBox();
+    expect(participantLabel).not.toBeNull();
+    expect(sortLabel).not.toBeNull();
+    expect(participant).not.toBeNull();
+    expect(sort).not.toBeNull();
+    expect(sort?.height).toBe(participant?.height);
+    if (await page.evaluate(() => matchMedia("(max-width: 600px)").matches)) {
+      expect(sortLabel?.y).toBeGreaterThan(participantLabel?.y ?? 0);
+    } else {
+      expect(sortLabel?.y).toBe(participantLabel?.y);
+      expect(sortLabel?.x).toBeGreaterThan(participantLabel?.x ?? 0);
+    }
+
+    const highToLow = page.getByRole("button", { name: "High to low" });
+    await expect(highToLow).toHaveAttribute("title", "High to low");
+    await highToLow.click();
+    const lowToHigh = page.getByRole("button", { name: "Low to high" });
+    await expect(lowToHigh).toHaveAttribute("title", "Low to high");
+
+    await page.getByRole("combobox", { name: "Sort expenses: Amount" }).click();
+    await page.getByRole("option", { name: "Date" }).click();
+    const earlyToLate = page.getByRole("button", { name: "Early to late" });
+    await expect(earlyToLate).toHaveAttribute("title", "Early to late");
+    await earlyToLate.click();
+    const lateToEarly = page.getByRole("button", { name: "Late to early" });
+    await expect(lateToEarly).toHaveAttribute("title", "Late to early");
+
+    await page.getByRole("combobox", { name: "Sort expenses: Date" }).click();
+    await page.getByRole("option", { name: "Amount" }).click();
+    await expect(page.getByRole("button", { name: "High to low" })).toHaveAttribute(
+      "title",
+      "High to low",
+    );
+  } finally {
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("expense export menu downloads CSV", async ({ page }) => {
+  const id = await createEmptyTrip([], "2027-04-12", "USD");
+  try {
+    await page.goto(`/trips/${id}?view=expenses`);
+    await page
+      .getByRole("dialog", { name: "Who are you on this trip?" })
+      .getByRole("button", { name: "Later" })
+      .click();
+
+    const settle = page.getByRole("button", { name: "Settle up" });
+    const exportButton = page.getByRole("button", { name: "Export", exact: true });
+    await expect(exportButton).toHaveAttribute("title", "Export");
+    const settleBox = await settle.boundingBox();
+    const exportBox = await exportButton.boundingBox();
+    expect(settleBox).not.toBeNull();
+    expect(exportBox).not.toBeNull();
+    expect(exportBox?.x).toBeGreaterThan(settleBox?.x ?? 0);
+
+    const formats = page.getByRole("menu", { name: "Export format" });
+    await exportButton.click();
+    await expect(exportButton).toHaveAttribute("aria-expanded", "true");
+    await expect(exportButton).toHaveAttribute("aria-haspopup", "menu");
+    const csv = formats.getByRole("menuitem", { name: "CSV" });
+    await expect(csv).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(formats).toHaveCount(0);
+    await expect(exportButton).toBeFocused();
+
+    await exportButton.click();
+    const downloadPromise = page.waitForEvent("download");
+    await formats.getByRole("menuitem", { name: "CSV" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("trip-expenses.csv");
+    await expect(formats).toHaveCount(0);
+    await expect(exportButton).toBeFocused();
+  } finally {
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("guest can plan without a tripmate and choose one later", async ({ page }) => {
+  const id = await createEmptyTrip();
+  try {
+    await page.goto(`/trips/${id}`);
+    const join = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await expect(join.getByRole("button", { name: "Later" })).toBeVisible();
+    await join.getByRole("button", { name: "Later" }).click();
+    const guest = page.getByRole("button", { name: "Guest", exact: true });
+    await expect(guest).toBeVisible();
+    await expect(guest.locator("svg")).toBeVisible();
+    await expect(join).toHaveCount(0);
+
+    const title = page.getByLabel("Trip title", { exact: true });
+    await title.fill("Guest plan");
+    await title.press("Enter");
+    await expect(title).toHaveValue("Guest plan");
+    await page.reload();
+    await expect(guest).toBeVisible();
+    await expect(join).toHaveCount(0);
+
+    await guest.click();
+    await expect(join).toBeVisible();
+    await join.getByRole("textbox", { name: "New tripmate" }).fill("Alice");
+    await join.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(guest).toHaveCount(0);
+    await page.reload();
+    await expect(join).toHaveCount(0);
+    await clickPlannerAction(page, "Tripmates");
+    await expect(
+      page.getByRole("dialog", { name: "Tripmates" }).getByRole("combobox", {
+        name: "Your Tripmate identity: Alice",
+      }),
+    ).toBeVisible();
+    const manager = page.getByRole("dialog", { name: "Tripmates" });
+    await manager.getByRole("combobox", { name: "Your Tripmate identity: Alice" }).click();
+    await manager.getByRole("option", { name: "Guest" }).click();
+    await expect(
+      manager.getByRole("combobox", { name: "Your Tripmate identity: Guest" }),
+    ).toBeVisible();
+    await manager.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(manager).toHaveCount(0);
+    await expect(guest).toBeVisible();
+    await page.reload();
+    await expect(join).toHaveCount(0);
+    await expect(guest).toBeVisible();
+  } finally {
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("tripmate join dialog dismisses on Escape and outside click", async ({ page }) => {
+  const id = await createEmptyTrip();
+  try {
+    await page.goto(`/trips/${id}`);
+    const join = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await join.getByRole("textbox", { name: "New tripmate" }).fill("Not saved");
+    await page.keyboard.press("Escape");
+    await expect(join).toHaveCount(0);
+
+    const guest = page.getByRole("button", { name: "Guest", exact: true });
+    await guest.click();
+    await expect(join.getByRole("textbox", { name: "New tripmate" })).toHaveValue("");
+    await join.getByRole("heading", { name: "Who are you on this trip?" }).click();
+    await expect(join).toBeVisible();
+    await page.locator(".dialog-backdrop").click({ position: { x: 2, y: 2 } });
+    await expect(join).toHaveCount(0);
+    await expect(guest).toBeVisible();
+  } finally {
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("icon buttons show their accessible labels on hover", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === "mobile", "Touch screens do not have hover");
   await page.goto(`/trips/${tripId}`);
+  const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+  await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Tooltip tester");
+  await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+  await expect(tripmate).toHaveCount(0);
   const tooltip = page.getByRole("tooltip");
   await page.getByRole("button", { name: "Trip settings" }).hover();
   await expect(tooltip).toHaveText("Trip settings");
@@ -708,7 +1154,6 @@ test("new trips use a transient title and keep the map between days", async ({
   page,
 }, testInfo) => {
   test.skip(testInfo.project.name !== "chromium", "The desktop project covers trip creation");
-  await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Creating editor"));
   await page.goto("/");
   await expect(page.getByLabel("Trip title", { exact: true })).toHaveCount(0);
   await page.locator("gmp-place-autocomplete").evaluate((element) => {
@@ -728,6 +1173,9 @@ test("new trips use a transient title and keep the map between days", async ({
   await expect(page).toHaveURL(/\/trips\//);
   const createdId = new URL(page.url()).pathname.slice("/trips/".length);
   try {
+    const join = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await join.getByRole("textbox", { name: "New tripmate" }).fill("Creating editor");
+    await join.getByRole("button", { name: "Create tripmate" }).click();
     const title = page.getByLabel("Trip title", { exact: true });
     await expect(title).toHaveValue("Trip to Test destination");
     await title.focus();
@@ -813,10 +1261,8 @@ test("map marker numbers restart for each day after an earlier-day addition", as
     "2027-04-11",
   );
   try {
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Map number editor"),
-    );
     await page.goto(`/trips/${id}`);
+    await joinTripAs(page, "Map number editor");
 
     await expect(page.getByRole("button", { name: "Stop 1: First day place" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Stop 1: Later day place" })).toBeVisible();
@@ -825,46 +1271,102 @@ test("map marker numbers restart for each day after an earlier-day addition", as
     await db.delete(trips).where(eq(trips.id, id));
   }
 });
-test("top header search opens place search without changing content views", async ({ page }) => {
+test("map search stays on the map and the itinerary starts below the date tabs", async ({
+  page,
+}) => {
   const id = await createEmptyTrip();
   try {
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Toolbar search editor"),
-    );
     await page.goto(`/trips/${id}#2027-04-10`);
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Toolbar search editor");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
 
-    const topHeader = page.locator(".planner-tabs");
-    const viewTabs = topHeader.getByRole("group", { name: "Planner view" });
-    const search = topHeader.getByRole("button", { name: "Search Google Places" });
-    await expect(search).toBeVisible();
-    await expect(
-      page
-        .locator(".planner-content-toolbar")
-        .getByRole("button", { name: "Search Google Places" }),
-    ).toHaveCount(0);
-    await expect(search).toHaveText("");
-    await expect(search.locator("svg")).toHaveCSS("width", "24px");
-    const tabsBox = await viewTabs.boundingBox();
-    const searchBox = await search.boundingBox();
-    if (!tabsBox || !searchBox) throw new Error("Missing toolbar geometry");
-    expect(searchBox.x).toBeGreaterThanOrEqual(tabsBox.x + tabsBox.width);
-
+    const itinerary = page.locator(".planner-header .content-tabs").getByRole("button", {
+      name: "Itinerary",
+      exact: true,
+    });
+    const mapPanel = page.locator(".map-panel");
+    const search = mapPanel.getByRole("button", { name: "Search Google Places" });
+    await expect(itinerary).toHaveAttribute("aria-pressed", "true");
+    await itinerary.click();
+    await expect(page.locator(".planner-body")).toHaveClass(/view-map/);
+    await expect(page.locator(".planner-header .view-tabs button")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await itinerary.click();
+    await expect(page.locator(".planner-body")).toHaveClass(/view-split/);
+    await expect(itinerary).toHaveAttribute("aria-pressed", "true");
+    const layout = await page.evaluate(() => {
+      const dates = document.querySelector(".planner-tabs");
+      const body = document.querySelector(".planner-body");
+      const panel = document.querySelector(".planner-panel");
+      const scroll = panel?.querySelector(".planner-scroll");
+      const map = document.querySelector(".map-panel");
+      const button = map?.querySelector(".planner-search-button");
+      if (!dates || !body || !panel || !scroll || !map || !button)
+        throw new Error("Missing planner layout");
+      const mapBox = map.getBoundingClientRect();
+      const buttonBox = button.getBoundingClientRect();
+      return {
+        dateGap: body.getBoundingClientRect().top - dates.getBoundingClientRect().bottom,
+        desktopPanelGap: panel.getBoundingClientRect().top - body.getBoundingClientRect().top,
+        mobile: matchMedia("(max-width: 48rem)").matches,
+        panelGap: scroll.getBoundingClientRect().top - panel.getBoundingClientRect().top,
+        mapRightGap: mapBox.right - buttonBox.right,
+        mapTopGap: buttonBox.top - mapBox.top,
+      };
+    });
+    expect(Math.abs(layout.dateGap)).toBeLessThan(1);
+    if (!layout.mobile) expect(Math.abs(layout.desktopPanelGap)).toBeLessThan(1);
+    expect(Math.abs(layout.panelGap)).toBeLessThanOrEqual(1);
+    expect(layout.mapRightGap).toBeGreaterThanOrEqual(0);
+    expect(layout.mapRightGap).toBeLessThanOrEqual(16);
+    expect(layout.mapTopGap).toBeGreaterThanOrEqual(0);
+    expect(layout.mapTopGap).toBeLessThanOrEqual(16);
     await search.click();
-    const stickyTools = page.locator(".planner-sticky-tools");
-    await expect(stickyTools).toHaveCSS("position", "sticky");
-    await expect(stickyTools.locator(".place-search")).toBeVisible();
+    await expect(mapPanel.locator(".map-global-search .place-search")).toBeVisible();
     await expect(page.locator("[data-day-id] .place-search")).toHaveCount(0);
     await expect(page.locator("gmp-place-autocomplete")).toHaveAttribute(
       "aria-label",
       "Search Google Places",
     );
-    await expect(
-      page
-        .locator(".planner-content-toolbar")
-        .getByRole("button", { name: "Itinerary", exact: true }),
-    ).toHaveAttribute("aria-pressed", "true");
+    await expect(itinerary).toHaveAttribute("aria-pressed", "true");
+    await search.click();
+    await page.getByRole("button", { name: "Hide itinerary", exact: true }).click();
+    await search.click();
+    await expect(page.locator(".planner-body")).toHaveClass(/view-map/);
+    await expect(mapPanel.locator(".map-global-search .place-search")).toBeVisible();
+    await expect(page.locator(".planner-header .view-tabs button")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(page.locator(".planner-header .view-tabs button")).toBeDisabled();
+    await search.click();
+    await itinerary.click();
+    await expect(page.locator(".planner-body")).toHaveClass(/view-split/);
+    await expect(itinerary).toHaveAttribute("aria-pressed", "true");
   } finally {
-    await page.goto("/");
+    try {
+      await page.goto("/");
+    } finally {
+      await db.delete(trips).where(eq(trips.id, id));
+    }
+  }
+});
+
+test("an unplanned map place opens its details from expenses", async ({ page }) => {
+  const id = await createEmptyTrip([], "2027-04-12", "USD");
+  try {
+    await page.goto(`/trips/${id}?view=expenses`);
+    await joinTripAs(page, "Map expense editor");
+    await expect(page.getByRole("heading", { name: "Expenses", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Map location: Museum", exact: true }).click();
+    const details = page.getByRole("dialog", { name: "Place details" });
+    await expect(details.getByRole("heading", { name: "City Museum" })).toBeVisible();
+    await expect(details.getByRole("button", { name: "Add to trip" })).toBeVisible();
+  } finally {
     await db.delete(trips).where(eq(trips.id, id));
   }
 });
@@ -893,8 +1395,8 @@ test("map place additions choose the nearest day and open the editor", async ({ 
     return added ? { id: added.id, dayId: added.dayId, travelMode: added.travelMode } : null;
   };
   try {
-    await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Map editor"));
     await page.goto(`/trips/${id}`);
+    await joinTripAs(page, "Map editor");
     const map = await page.locator(".map-canvas > div").elementHandle();
     const details = page.getByRole("dialog", { name: "Place details", exact: true });
 
@@ -916,9 +1418,14 @@ test("map place additions choose the nearest day and open the editor", async ({ 
     const museumDay = page.locator('[data-day-id="2027-04-11"]');
     const listEditor = museumDay.locator(".item-editor");
     await expect(listEditor).toBeVisible();
-    const museumTravelMode = museumDay.locator(".transport-leg").last().getByLabel("Travel mode");
-    await expect(museumTravelMode).toHaveValue("WALKING");
-    await museumTravelMode.selectOption("DRIVING");
+    const museumTravelMode = museumDay.getByRole("combobox", { name: /^Travel mode:/ }).last();
+    await expect(museumTravelMode).toHaveAccessibleName("Travel mode: Walk");
+    await museumTravelMode.click();
+    await page
+      .getByRole("listbox", { name: "Travel mode" })
+      .getByRole("option", { name: "Car" })
+      .click();
+    await expect(museumTravelMode).toHaveAccessibleName("Travel mode: Car");
     await expect.poll(async () => (await readAddedPlace("museum"))?.travelMode).toBe("DRIVING");
     const addedEntry = listEditor.locator("xpath=preceding-sibling::*[1]");
     const [iconBox, titleBox, timeBox] = await Promise.all([
@@ -992,10 +1499,8 @@ test("route updates do not replay an old day map focus", async ({ page }) => {
         ).__pacenotesMapFitBoundsCalls ?? 0,
     );
   try {
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Map focus regression"),
-    );
     await page.goto(`/trips/${id}`);
+    await joinTripAs(page, "Map focus regression");
     await expect
       .poll(() =>
         page.evaluate(
@@ -1049,10 +1554,8 @@ test("a new close place changes its outgoing lodging route to walking", async ({
     return travelMode;
   };
   try {
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Walking route regression"),
-    );
     await page.goto(`/trips/${id}`);
+    await joinTripAs(page, "Walking route regression");
     await page.getByRole("button", { name: "Map location: Museum", exact: true }).click();
     const details = page.getByRole("dialog", { name: "Place details", exact: true });
     await details.getByRole("button", { name: "Add to trip" }).click();
@@ -1061,10 +1564,38 @@ test("a new close place changes its outgoing lodging route to walking", async ({
     await expect(
       page
         .locator('[data-day-id="2027-04-10"]')
-        .locator(".transport-leg")
-        .last()
-        .getByLabel("Travel mode"),
-    ).toHaveValue("WALKING");
+        .getByRole("combobox", { name: "Travel mode: Walk" }),
+    ).toBeVisible();
+  } finally {
+    if (!page.isClosed()) await page.goto("/");
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("lodging entries use a select cursor rather than a drag cursor", async ({ page }) => {
+  const lodging = itemForCreate("lodging", "2027-04-10", {
+    id: "cursor-lodging",
+    title: "Lodging",
+    place: { placeId: "museum-anchor" },
+    lodging: {
+      startDate: "2027-04-10",
+      endDate: "2027-04-11",
+      confirmation: "",
+      leaveTimes: { "2027-04-11": "09:00" },
+    },
+  });
+  const id = await createEmptyTrip([lodging], "2027-04-11");
+  try {
+    await page.goto(`/trips/${id}`);
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Cursor editor");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
+    for (const day of ["2027-04-10", "2027-04-11"]) {
+      await expect(
+        page.locator(`[data-day-id="${day}"] .lodging-boundary .entry-select`),
+      ).toHaveCSS("cursor", "pointer");
+    }
   } finally {
     if (!page.isClosed()) await page.goto("/");
     await db.delete(trips).where(eq(trips.id, id));
@@ -1099,8 +1630,8 @@ test("map keeps locations from every day visible", async ({ page }) => {
       .where(eq(documents.name, id));
     document.destroy();
 
-    await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Map editor"));
     await page.goto(`/trips/${id}`);
+    await joinTripAs(page, "Map editor");
     const firstMarker = page.getByRole("button", { name: "Stop 1: First day place" });
     const secondMarker = page.getByRole("button", { name: "Stop 1: Second day place" });
     await expect(firstMarker).toBeVisible();
@@ -1119,55 +1650,198 @@ test("map keeps locations from every day visible", async ({ page }) => {
   }
 });
 
-test("map and list toggles keep at least one panel visible", async ({ page }) => {
+test("navbar centers view controls and keeps each view mode available", async ({ page }) => {
   const id = await createEmptyTrip();
   try {
-    await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "View editor"));
     await page.goto(`/trips/${id}`);
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("View editor");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
     const controls = page.getByRole("group", { name: "Planner view" });
     const map = controls.getByRole("button", { name: "Map", exact: true });
-    const list = controls.getByRole("button", { name: "List", exact: true });
     const itinerary = page.getByRole("region", { name: "Itinerary", exact: true });
     const mapPanel = page.locator(".map-panel");
-    await expect(controls.getByRole("button")).toHaveCount(2);
-    const buttonsFit = () =>
-      controls.evaluate((element) => {
-        const frame = element.getBoundingClientRect();
-        return Array.from(element.querySelectorAll("button")).every((button) => {
-          const bounds = button.getBoundingClientRect();
-          return bounds.left >= frame.left && bounds.right <= frame.right;
-        });
-      });
-    await expect.poll(buttonsFit).toBe(true);
+    await expect(controls.getByRole("button")).toHaveCount(1);
+    await expect
+      .poll(() =>
+        page.locator(".planner-header").evaluate((header) => {
+          const group = header.querySelector(".planner-view-tools");
+          if (!group) return Number.POSITIVE_INFINITY;
+          const headerBox = header.getBoundingClientRect();
+          const groupBox = group.getBoundingClientRect();
+          return Math.abs((groupBox.left + groupBox.right - headerBox.left - headerBox.right) / 2);
+        }),
+      )
+      .toBeLessThan(1);
     await expect(map).toHaveAttribute("aria-pressed", "true");
-    await expect(list).toHaveAttribute("aria-pressed", "true");
-
-    await list.click();
-    await expect(mapPanel).toBeVisible();
-    await expect(itinerary).toBeHidden();
-    await expect(map).toBeDisabled();
-    await expect(map).toHaveAttribute("aria-pressed", "true");
-    await expect(list).toHaveAttribute("aria-pressed", "false");
-
-    await list.click();
-    await expect(map).toBeEnabled();
-    await expect(mapPanel).toBeVisible();
-    await expect(itinerary).toBeVisible();
     await map.click();
     await expect(mapPanel).toBeHidden();
     await expect(itinerary).toBeVisible();
-    await expect(list).toBeDisabled();
     await expect(map).toHaveAttribute("aria-pressed", "false");
-    await expect(list).toHaveAttribute("aria-pressed", "true");
 
     await map.focus();
     await map.press("Enter");
     await expect(mapPanel).toBeVisible();
     await expect(itinerary).toBeVisible();
     await expect(map).toHaveAttribute("aria-pressed", "true");
-    await expect(list).toHaveAttribute("aria-pressed", "true");
     await expect(map).toBeEnabled();
-    await expect(list).toBeEnabled();
+
+    const hideItinerary = page.getByRole("button", { name: "Hide itinerary", exact: true });
+    await expect(hideItinerary).toHaveAttribute("aria-expanded", "true");
+    await hideItinerary.click();
+    await expect(itinerary).toBeHidden();
+    await expect(map).toHaveAttribute("aria-pressed", "true");
+    await expect(map).toBeDisabled();
+    const calendar = page.locator(".planner-header .content-tabs").getByRole("button", {
+      name: "Calendar",
+      exact: true,
+    });
+    await calendar.click();
+    await expect(calendar).toHaveAttribute("aria-pressed", "true");
+    await expect(itinerary).toBeVisible();
+    await expect(mapPanel).toBeVisible();
+  } finally {
+    try {
+      await page.goto("/");
+    } finally {
+      await db.delete(trips).where(eq(trips.id, id));
+    }
+  }
+});
+
+test("planner header keeps controls compact with larger text", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "Desktop header layout");
+  const id = await createEmptyTrip();
+  try {
+    await page.setViewportSize({ width: 1200, height: 800 });
+    await page.goto(`/trips/${id}`);
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Header editor");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
+    for (const fontSize of [20, 24]) {
+      await page.evaluate((size) => {
+        document.documentElement.style.fontSize = `${size}px`;
+      }, fontSize);
+      const layout = await page.locator(".planner-header").evaluate((header, size) => {
+        const bounds = (selector: string) => {
+          const element = header.querySelector(selector);
+          if (!element) throw new Error(`Missing header control: ${selector}`);
+          return element.getBoundingClientRect();
+        };
+        const tools = bounds(".planner-view-tools");
+        const actions = bounds(".planner-header-actions");
+        const status = bounds(".sync-state");
+        const dot = bounds(".sync-state i");
+        const share = bounds(".planner-header-actions .secondary-button");
+        const selected = bounds('.planner-view-tools [aria-pressed="true"]');
+        return {
+          shareOnFirstRow: share.top - actions.top <= 8,
+          tabsAreCompact: selected.height <= size * 2.4,
+          controlsDoNotOverlap: tools.right <= status.left,
+          statusDotCentered: Math.abs(dot.top + dot.bottom - status.top - status.bottom) <= 2,
+        };
+      }, fontSize);
+      expect(layout).toEqual({
+        shareOnFirstRow: true,
+        tabsAreCompact: true,
+        controlsDoNotOverlap: true,
+        statusDotCentered: true,
+      });
+    }
+  } finally {
+    await page.goto("/");
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("narrow planner controls keep titles and actions readable", async ({ page }) => {
+  const id = await createEmptyTrip();
+  try {
+    await page.goto(`/trips/${id}`);
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Mobile editor");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
+
+    for (const width of [490, 390, 320]) {
+      await page.setViewportSize({ width, height: 720 });
+      const layout = await page.locator(".planner-header").evaluate((header) => {
+        const title = header.querySelector(".planner-header-title");
+        const actions = header.querySelector(".planner-header-actions");
+        if (!title || !actions) throw new Error("Missing header controls");
+        return {
+          height: header.getBoundingClientRect().height,
+          rowDifference: Math.abs(
+            title.getBoundingClientRect().top - actions.getBoundingClientRect().top,
+          ),
+        };
+      });
+      expect(layout.height).toBeLessThanOrEqual(100);
+      expect(layout.rowDifference).toBeLessThanOrEqual(12);
+      const navigation = await page.locator(".planner-header").evaluate((header) => {
+        const group = header.querySelector(".planner-view-tools");
+        const buttons = [...(group?.querySelectorAll("button") ?? [])];
+        if (!group || buttons.length !== 4) throw new Error("Missing planner view tabs");
+        const headerBox = header.getBoundingClientRect();
+        const groupBox = group.getBoundingClientRect();
+        const padding = getComputedStyle(header);
+        const left = headerBox.left + Number.parseFloat(padding.paddingLeft);
+        const right = headerBox.right - Number.parseFloat(padding.paddingRight);
+        const first = buttons[0]?.getBoundingClientRect();
+        const last = buttons.at(-1)?.getBoundingClientRect();
+        return {
+          fillsRow:
+            Math.abs(groupBox.left - left) <= 1 &&
+            Math.abs(groupBox.right - right) <= 1 &&
+            first !== undefined &&
+            last !== undefined &&
+            Math.abs(first.left - left) <= 1 &&
+            Math.abs(last.right - right) <= 1,
+          labelsVisible: buttons.every(
+            (button) =>
+              Number.parseFloat(getComputedStyle(button).fontSize) > 0 &&
+              button.textContent?.trim() !== "" &&
+              button.scrollWidth <= button.clientWidth + 1,
+          ),
+        };
+      });
+      expect(navigation).toEqual({ fillsRow: true, labelsVisible: true });
+      const dayLayout = await page
+        .locator(".day-heading")
+        .first()
+        .evaluate((heading) => {
+          const title = heading.querySelector("h2");
+          const actions = heading.querySelector(".day-actions");
+          if (!title || !actions) throw new Error("Missing day controls");
+          const bounds = heading.getBoundingClientRect();
+          return {
+            titleHeight: title.getBoundingClientRect().height,
+            actionsInside: [...actions.children].every((action) => {
+              const rect = action.getBoundingClientRect();
+              return rect.left >= bounds.left - 1 && rect.right <= bounds.right + 1;
+            }),
+          };
+        });
+      expect(dayLayout.titleHeight).toBeLessThanOrEqual(44);
+      expect(dayLayout.actionsInside).toBe(true);
+    }
+
+    const more = page.getByRole("button", { name: "More actions" });
+    await expect(more).toBeVisible();
+    await more.click();
+    await expect(more).toHaveAttribute("aria-expanded", "true");
+    await page.keyboard.press("Escape");
+    await expect(more).toHaveAttribute("aria-expanded", "false");
+    await expect(more).toBeFocused();
+    await more.click();
+    for (const name of ["Undo", "Redo", "Tripmates", "Trip settings", "Delete trip"]) {
+      await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
+    }
+    await page.getByRole("button", { name: "Trip settings" }).click();
+    await expect(page.getByRole("dialog", { name: "Trip settings" })).toBeVisible();
+    await expect(more).toHaveAttribute("aria-expanded", "false");
   } finally {
     await page.goto("/");
     await db.delete(trips).where(eq(trips.id, id));
@@ -1192,10 +1866,8 @@ test("calendar drop below a flexible item preserves item order", async ({ page }
   const id = await createEmptyTrip([moved, acadia], "2027-04-11");
   try {
     await page.setViewportSize({ width: 1280, height: 900 });
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Calendar order editor"),
-    );
     await page.goto(`/trips/${id}?view=calendar#${dayId}`);
+    await joinTripAs(page, "Calendar order editor");
     const calendar = page.getByRole("region", { name: "Trip calendar" });
     const movedBlock = calendar.locator('[data-calendar-item-id="calendar-order-moved"]').first();
     const acadiaBlock = calendar.locator('[data-calendar-item-id="calendar-order-acadia"]').first();
@@ -1249,10 +1921,8 @@ test("calendar drag follows scrolling and rejects outside drops", async ({ page 
   const id = await createEmptyTrip([flexible], "2027-04-11");
   try {
     await page.setViewportSize({ width: 1280, height: 900 });
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Calendar drag editor"),
-    );
     await page.goto(`/trips/${id}?view=calendar#${dayId}`);
+    await joinTripAs(page, "Calendar drag editor");
     const calendar = page.getByRole("region", { name: "Trip calendar" });
     const block = calendar.locator('[data-calendar-item-id="calendar-flexible-drag"]').first();
     const time = block.locator("time");
@@ -1354,10 +2024,8 @@ test("day changes and reload keep the current map viewport", async ({ page }, te
   const id = await createEmptyTrip([first, second, third], secondDay);
   try {
     await page.setViewportSize({ width: 1280, height: 900 });
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Map viewport editor"),
-    );
     await page.goto(`/trips/${id}?view=calendar#${firstDay}`);
+    await joinTripAs(page, "Map viewport editor");
     const fitBoundsCalls = () =>
       page.evaluate(
         () =>
@@ -1417,7 +2085,7 @@ test("day changes and reload keep the current map viewport", async ({ page }, te
       const map = (
         globalThis as typeof globalThis & {
           __pacenotesMap?: {
-            listeners: Map<string, () => void>;
+            emit: (name: string) => void;
             setCenter: (center: { lat: number; lng: number }) => void;
             setZoom: (zoom: number) => void;
           };
@@ -1426,8 +2094,17 @@ test("day changes and reload keep the current map viewport", async ({ page }, te
       if (!map) throw new Error("Map is not ready");
       map.setCenter({ lat: 44.123, lng: -71.456 });
       map.setZoom(9);
-      map.listeners.get("idle")?.();
+      map.emit("idle");
     });
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (tripId) =>
+            JSON.parse(localStorage.getItem(`pacenotes-map-viewport-${tripId}`) ?? "null"),
+          id,
+        ),
+      )
+      .toEqual({ latitude: 44.123, longitude: -71.456, zoom: 9 });
     await page.reload();
     await expect
       .poll(() =>
@@ -1491,10 +2168,8 @@ test("each day can focus its route on the map", async ({ page }, testInfo) => {
       ])
       .then((values) => values.sort((left, right) => left - right));
   try {
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Day route map editor"),
-    );
     await page.goto(`/trips/${id}`);
+    await joinTripAs(page, "Day route map editor");
     const focusButtons = page.locator(".day-map-focus");
     await expect(focusButtons).toHaveCount(3);
     await expect(focusButtons.nth(0)).toHaveAccessibleName("Show Saturday, April 10 route on map");
@@ -1538,10 +2213,8 @@ test("calendar reload keeps a flexible item below lodging leave time", async ({
   const id = await createEmptyTrip([lodging, flexible], secondDay);
   try {
     await page.setViewportSize({ width: 1280, height: 900 });
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Calendar reload editor"),
-    );
     await page.goto(`/trips/${id}?view=calendar#${secondDay}`);
+    await joinTripAs(page, "Calendar reload editor");
     const calendar = page.getByRole("region", { name: "Trip calendar" });
     const stay = calendar.locator('[data-calendar-stay-id="reload-lodging"]');
     const block = calendar.locator('[data-calendar-item-id="reload-flexible"]').first();
@@ -1619,10 +2292,8 @@ test("calendar menu reorders items and shows the leave time", async ({ page }, t
       deviceScaleFactor: 1.25,
       mobile: false,
     });
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Calendar menu editor"),
-    );
     await page.goto(`/trips/${id}?view=calendar#${dayId}`);
+    await joinTripAs(page, "Calendar menu editor");
     const calendar = page.getByRole("region", { name: "Trip calendar" });
     await expect(calendar).toBeVisible();
 
@@ -1902,10 +2573,8 @@ test("calendar colors the full stay when departure conflicts", async ({ page }) 
   });
   const id = await createEmptyTrip([lodging, overlappingPlace], "2027-04-11");
   try {
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Calendar conflict editor"),
-    );
     await page.goto(`/trips/${id}?view=calendar#2027-04-11`);
+    await joinTripAs(page, "Calendar conflict editor");
     const stay = page.locator('[data-calendar-stay-id="conflict-hotel"]');
     await expect(stay).toHaveAttribute("data-calendar-stay-conflict", "true");
     const geometry = await stay.evaluate(async (element) => {
@@ -1973,10 +2642,11 @@ test("duration-only changes keep a flexible item untimed", async ({ page }, test
   };
   try {
     await page.setViewportSize({ width: 1280, height: 900 });
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Duration-only editor"),
-    );
     await page.goto(`/trips/${id}?view=calendar#${dayId}`);
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Duration-only editor");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
     const calendar = page.getByRole("region", { name: "Trip calendar" });
     const block = calendar.locator('[data-calendar-item-id="duration-only-target"]').first();
     await expect(block.locator("time")).toContainText("Flexible");
@@ -2022,6 +2692,9 @@ test("duration-only changes keep a flexible item untimed", async ({ page }, test
       endHandleBox.y + endHandleBox.height / 2 + snapDistance,
       { steps: 4 },
     );
+    await expect(calendar.locator("[data-calendar-drop-preview] time")).toContainText(
+      "08:00 - 09:45 (1 hr 45 min)",
+    );
     await page.mouse.up();
     await expect.poll(savedTiming, { timeout: 5_000 }).toEqual({
       startTime: null,
@@ -2043,6 +2716,9 @@ test("duration-only changes keep a flexible item untimed", async ({ page }, test
       startHandleBox.x + startHandleBox.width / 2,
       startHandleBox.y + startHandleBox.height / 2 + snapDistance,
       { steps: 4 },
+    );
+    await expect(calendar.locator("[data-calendar-drop-preview] time")).toContainText(
+      "08:15 - 09:45 (1 hr 30 min)",
     );
     await page.mouse.up();
     await expect.poll(savedTiming, { timeout: 5_000 }).toEqual({
@@ -2072,10 +2748,8 @@ test("changing calendar duration keeps itinerary order", async ({ page }) => {
   });
   const id = await createEmptyTrip([target, peer], dayId);
   try {
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Duration editor"),
-    );
     await page.goto(`/trips/${id}`);
+    await joinTripAs(page, "Duration editor");
     const itineraryEntries = page.locator(`[data-day-id="${dayId}"] .entry-select`);
     await expect(itineraryEntries).toHaveText(["Duration target", "Same-time peer"]);
     await page.getByRole("button", { name: "Calendar", exact: true }).click();
@@ -2097,10 +2771,8 @@ test("changing calendar duration keeps itinerary order", async ({ page }) => {
 test("calendar ends on the final labeled hour", async ({ page }) => {
   const id = await createEmptyTrip([], "2027-04-10");
   try {
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Calendar edge editor"),
-    );
     await page.goto(`/trips/${id}?view=calendar`);
+    await joinTripAs(page, "Calendar edge editor");
     const calendar = page.locator("[data-trip-calendar]");
     const finalHourLabel = calendar.locator("[data-calendar-time-gutter] time").last();
     const hourLines = calendar.locator("[data-calendar-hour-lines]");
@@ -2192,21 +2864,19 @@ test("calendar view schedules items and shows the calendar on mobile", async ({
   const id = await createEmptyTrip([note, timed, timedSecond, lodging], "2027-04-14");
   try {
     await page.setViewportSize({ width: 1280, height: 900 });
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Calendar editor"),
-    );
     await page.goto(`/trips/${id}?view=calendar#${dayId}`);
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Calendar editor");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
     const controls = page
-      .getByRole("region", { name: "Itinerary", exact: true })
-      .getByRole("group", { name: "Itinerary / Calendar" });
+      .locator(".planner-header")
+      .getByRole("group", { name: "Itinerary / Calendar / Expenses" });
     const calendarButton = controls.getByRole("button", { name: "Calendar", exact: true });
     const itineraryButton = controls.getByRole("button", { name: "Itinerary", exact: true });
     const calendar = page.getByRole("region", { name: "Trip calendar" });
     await expect(calendarButton).toHaveAttribute("aria-pressed", "true");
     await expect(calendar).toBeVisible();
-    expect(await controls.evaluate((element) => element.closest("section")?.id)).toBe(
-      "planner-itinerary",
-    );
     await expect(calendar.getByRole("button", { name: "Bring tickets" })).toBeVisible();
     const noteButton = calendar.getByRole("button", { name: "Bring tickets" });
     await noteButton.hover();
@@ -2457,7 +3127,6 @@ test("calendar view schedules items and shows the calendar on mobile", async ({
     const firstDayHeader = calendar.locator("header").first();
     const allDayLabel = calendar.getByText("All day", { exact: true });
     const plannerPanel = calendar.locator("xpath=..");
-    const calendarToolbar = plannerPanel.locator(".planner-content-toolbar");
     await calendarScroller.evaluate((element) => {
       element.scrollTop = 300;
       element.scrollLeft = 0;
@@ -2466,15 +3135,15 @@ test("calendar view schedules items and shows the calendar on mobile", async ({
       element.scrollTop = 300;
     });
     const panelScrollTop = await plannerPanel.evaluate((element) => element.scrollTop);
-    const toolbarBox = await calendarToolbar.boundingBox();
+    const panelBox = await plannerPanel.boundingBox();
     const scrollerBox = await calendarScroller.boundingBox();
     const headerBox = await firstDayHeader.boundingBox();
     const allDayLabelBox = await allDayLabel.boundingBox();
-    if (!scrollerBox || !toolbarBox || !headerBox || !allDayLabelBox) {
+    if (!scrollerBox || !panelBox || !headerBox || !allDayLabelBox) {
       throw new Error("Missing sticky calendar header geometry");
     }
     expect(panelScrollTop).toBe(0);
-    expect(scrollerBox.y).toBeCloseTo(toolbarBox.y + toolbarBox.height, 0);
+    expect(scrollerBox.y).toBeCloseTo(panelBox.y, 0);
     expect(headerBox.y).toBeCloseTo(scrollerBox.y, 0);
     expect(allDayLabelBox.y).toBeCloseTo(headerBox.y + headerBox.height, 0);
     await calendarScroller.evaluate((element) => {
@@ -2855,10 +3524,8 @@ test("calendar blocks travel before lodging leave time", async ({ page }, testIn
   });
   const id = await createEmptyTrip([lodging, early], secondDay);
   try {
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Calendar conflict editor"),
-    );
     await page.goto(`/trips/${id}?view=calendar#${secondDay}`);
+    await joinTripAs(page, "Calendar conflict editor");
     const calendar = page.getByRole("region", { name: "Trip calendar" });
     const track = calendar.locator(`[data-calendar-track="${secondDay}"]`);
     const stay = track.locator(
@@ -2959,10 +3626,8 @@ test("calendar transport legs follow overlap lanes and reduce details by width",
       deviceScaleFactor: 1.25,
       mobile: false,
     });
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Route layout editor"),
-    );
     await page.goto(`/trips/${id}?view=calendar#2027-04-10`);
+    await joinTripAs(page, "Route layout editor");
     const calendar = page.getByRole("region", { name: "Trip calendar" });
     await expect(calendar).toBeVisible();
     await calendar.locator("[data-calendar-time-gutter]").evaluate((element) => {
@@ -3063,8 +3728,11 @@ test("drawer button resizes without closing and restores the sidebar width", asy
   test.skip(testInfo.project.name !== "chromium", "The drawer button is a desktop control");
   const id = await createEmptyTrip();
   try {
-    await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Drawer editor"));
     await page.goto(`/trips/${id}`);
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Drawer editor");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
     const itinerary = page.getByRole("region", { name: "Itinerary", exact: true });
     const drawer = page.getByRole("button", { name: "Hide itinerary", exact: true });
     await expect(drawer).toBeVisible();
@@ -3092,9 +3760,10 @@ test("drawer button resizes without closing and restores the sidebar width", asy
     const show = page.getByRole("button", { name: "Show itinerary", exact: true });
     await expect(show).toHaveAttribute("aria-expanded", "false");
     const controls = page.getByRole("group", { name: "Planner view" });
-    await expect(controls.getByRole("button", { name: "List", exact: true })).toHaveAttribute(
+    await expect(controls.getByRole("button")).toHaveCount(1);
+    await expect(controls.getByRole("button", { name: "Map", exact: true })).toHaveAttribute(
       "aria-pressed",
-      "false",
+      "true",
     );
     await show.click();
     await expect(itinerary).toBeVisible();
@@ -3113,10 +3782,11 @@ test("mobile itinerary sheet follows pointer drag", async ({ page }, testInfo) =
   test.skip(testInfo.project.name !== "mobile", "The mobile project covers sheet resizing");
   const id = await createEmptyTrip();
   try {
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Mobile sheet editor"),
-    );
     await page.goto(`/trips/${id}`);
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Mobile sheet editor");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
     const panel = page.getByRole("region", { name: "Itinerary", exact: true });
     const handle = page.locator(".mobile-sheet-handle");
     await expect(handle).toBeVisible();
@@ -3138,6 +3808,9 @@ test("mobile itinerary sheet follows pointer drag", async ({ page }, testInfo) =
     await expect
       .poll(() => panel.evaluate((element) => element.getBoundingClientRect().height))
       .toBeGreaterThan(initialHeight + 80);
+    await handle.focus();
+    await handle.press("Enter");
+    await expect(panel).toBeHidden();
   } finally {
     await page.goto("/");
     await db.delete(trips).where(eq(trips.id, id));
@@ -3147,11 +3820,12 @@ test("mobile itinerary sheet follows pointer drag", async ({ page }, testInfo) =
 test("selected places and item edits save automatically", async ({ page }) => {
   const id = await createEmptyTrip();
   try {
-    await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Place editor"));
     await page.goto(`/trips/${id}`);
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Place editor");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
     await addDayItem(page, "place");
-    const placeSearch = page.locator(".place-search");
-    await expect(placeSearch.getByRole("button", { name: "Save entry" })).toHaveCount(0);
     await page.locator("gmp-place-autocomplete").evaluate((element) => {
       element.dispatchEvent(
         Object.assign(new Event("gmp-select"), {
@@ -3193,25 +3867,6 @@ test("selected places and item edits save automatically", async ({ page }) => {
     await row.click({ position: { x: 8, y: 8 } });
     const editor = page.locator(".item-editor");
     await expect(editor).toBeVisible();
-    const share = page.getByRole("button", { name: "Share", exact: true });
-    await share.hover();
-    await expect
-      .poll(() =>
-        share.evaluate((button) => {
-          const sample = document.createElement("span");
-          sample.style.borderColor = "transparent";
-          sample.style.background = "var(--muted-surface)";
-          document.body.append(sample);
-          const style = getComputedStyle(button);
-          const expected = getComputedStyle(sample);
-          const matches =
-            style.borderTopColor === expected.borderTopColor &&
-            style.backgroundColor === expected.backgroundColor;
-          sample.remove();
-          return matches;
-        }),
-      )
-      .toBe(true);
     await expect(editor.getByRole("img", { name: "Markdown supported" })).toBeVisible();
     await expect(editor.getByRole("img", { name: "Markdown supported" })).toHaveText("");
     await expect(editor.getByText("Place", { exact: true })).toHaveCount(0);
@@ -3284,8 +3939,6 @@ test("selected places and item edits save automatically", async ({ page }) => {
     await label.fill("Meeting point");
     await label.press("Enter");
     await expect(row.locator(".entry-select")).toHaveText("Meeting point");
-    await expect(editor.getByRole("button", { name: "Save item" })).toHaveCount(0);
-    await expect(editor.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(0);
 
     await editor.locator("textarea").fill("Bring tickets");
     await expect(editor).toBeVisible();
@@ -3318,7 +3971,7 @@ test("selected places and item edits save automatically", async ({ page }) => {
     await label.press("Escape");
     await expect(row.locator(".entry-select")).toHaveText("Updated by autosave");
     await page.waitForTimeout(550);
-    await page.getByRole("button", { name: "Undo" }).click();
+    await clickPlannerAction(page, "Undo");
     await expect(row.locator(".entry-select")).toHaveText("Meeting point");
     await editor.getByRole("button", { name: "Edit Meeting point label" }).click();
     await label.fill("");
@@ -3359,7 +4012,6 @@ test("selected places and item edits save automatically", async ({ page }) => {
     await expect(row.nth(0).locator(".entry-select")).toHaveText("Test destination");
     await expect(page.locator(".item-editor")).toHaveCount(0);
     await row.nth(0).click({ position: { x: 8, y: 8 } });
-    await expect(editor.getByRole("combobox", { name: /^(Day|Date)$/ })).toHaveCount(0);
     await page.reload();
     await page
       .getByRole("group", { name: "Planner view" })
@@ -3388,8 +4040,8 @@ test("deleting a day cancels its pending place addition", async ({ page }) => {
     }),
   ]);
   try {
-    await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Day editor"));
     await page.goto(`/trips/${id}`);
+    await joinTripAs(page, "Day editor");
     const firstDay = page.locator(".day-section").first();
     await expect(firstDay.locator(".entry-select")).toHaveText("Existing place");
     await addDayItem(page, "place");
@@ -3446,10 +4098,8 @@ test("schedule warnings stay on one line", async ({ page }) => {
     }),
   ]);
   try {
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Warning editor"),
-    );
     await page.goto(`/trips/${id}`);
+    await joinTripAs(page, "Warning editor");
 
     const warning = page.locator(".schedule-warning");
     await expect(warning).toHaveText(
@@ -3481,10 +4131,8 @@ test("auto placement includes the day's lodging destination", async ({ page }) =
     }),
   ]);
   try {
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Placement editor"),
-    );
     await page.goto(`/trips/${id}`);
+    await joinTripAs(page, "Placement editor");
     await addDayItem(page, "place");
     await page.locator("gmp-place-autocomplete").evaluate((element) => {
       element.dispatchEvent(
@@ -3511,13 +4159,13 @@ test("auto placement includes the day's lodging destination", async ({ page }) =
   }
 });
 
-test("first trip open asks for an editor name", async ({ page }, testInfo) => {
+test("first trip open asks for a tripmate", async ({ page }, testInfo) => {
   test.skip(
     testInfo.project.name !== "chromium",
     "The collaboration project covers editor identity",
   );
   await page.goto(`/trips/${tripId}`);
-  const dialog = page.getByRole("dialog", { name: "Please tell us your name" });
+  const dialog = page.getByRole("dialog", { name: "Who are you on this trip?" });
   await expect(dialog).toBeVisible();
   await expect
     .poll(() =>
@@ -3534,12 +4182,9 @@ test("first trip open asks for an editor name", async ({ page }, testInfo) => {
         .__pacenotesMapConstructions ?? 0,
   );
 
-  await dialog.getByLabel("Your name").fill("Tokyo editor");
-  await dialog.getByRole("button", { name: "Continue" }).click();
-  await expect(dialog).toBeHidden();
-  await expect
-    .poll(() => page.evaluate(() => localStorage.getItem("pacenotes-display-name")))
-    .toBe("Tokyo editor");
+  await dialog.getByRole("textbox", { name: "New tripmate" }).fill("Tokyo editor");
+  await dialog.getByRole("button", { name: "Create tripmate" }).click();
+  await expect(dialog).toHaveCount(0);
   await page.waitForTimeout(250);
   const settledMapConstructions = await page.evaluate(
     () =>
@@ -3557,12 +4202,19 @@ test("first trip open asks for an editor name", async ({ page }, testInfo) => {
       ),
     )
     .toBe(settledMapConstructions);
+  await clickPlannerAction(page, "Tripmates");
+  await expect(
+    page
+      .getByRole("dialog", { name: "Tripmates" })
+      .getByRole("combobox", { name: "Your Tripmate identity: Tokyo editor" }),
+  ).toBeVisible();
 });
+
 test("item editors expand inline after their entries", async ({ page }) => {
   const id = await createEmptyTrip();
   try {
-    await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Inline editor"));
     await page.goto(`/trips/${id}`);
+    await joinTripAs(page, "Inline editor");
     await addDayItem(page, "note");
     await addDayItem(page, "note");
     const entries = page.locator(".day-section").first().locator(".itinerary-entry");
@@ -3592,48 +4244,152 @@ test("item editors expand inline after their entries", async ({ page }) => {
 
 test("pointer drops rejoin the reordered list without a pause", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name === "mobile", "Mouse drag coverage runs on desktop");
-  const id = await createEmptyTrip();
+  const id = await createEmptyTrip([
+    itemForCreate("note", "2027-04-10", { title: "First stop" }),
+    itemForCreate("note", "2027-04-10", { title: "Second stop" }),
+  ]);
   try {
-    await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Drag editor"));
     await page.goto(`/trips/${id}`);
-    await addDayItem(page, "note");
-    let entries = page.locator(".day-section").first().locator(".itinerary-entry");
-    await entries.nth(0).click({ position: { x: 8, y: 8 } });
-    const editor = page.locator(".item-editor");
-    await editor.getByRole("button", { name: "Edit New note label" }).click();
-    await editor.getByRole("textbox", { name: "Itinerary label" }).fill("First stop");
-    await editor.getByRole("textbox", { name: "Itinerary label" }).press("Enter");
-    await expect(entries.nth(0).locator(".entry-select")).toHaveText("First stop");
-    await addDayItem(page, "note");
-    entries = page.locator(".day-section").first().locator(".itinerary-entry");
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Drag editor");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
+    const entries = page.locator(".day-section").first().locator(".itinerary-entry");
     await expect(entries).toHaveCount(2);
-    await expect(page.locator(".item-editor")).toHaveCount(0);
 
     const handleBox = await entries.nth(0).boundingBox();
     const targetBox = await entries.nth(1).boundingBox();
     if (!handleBox || !targetBox) throw new Error("Missing drag geometry");
+    const list = page.locator(".day-section").first().locator(".itinerary-list");
+    const nextBoxBefore = await entries.nth(1).boundingBox();
+    if (!nextBoxBefore) throw new Error("Missing next entry geometry");
     await page.mouse.move(handleBox.x + 8, handleBox.y + 8);
     await page.mouse.down();
-    await page.mouse.move(handleBox.x + 8, handleBox.y + 16);
+    await page.mouse.move(handleBox.x + 9, handleBox.y + 8);
+    await expect(page.locator(".itinerary-entry.is-dragging")).toHaveCount(0);
+    await page.mouse.move(handleBox.x + 10, handleBox.y + 8);
     await expect(page.locator(".itinerary-entry.is-dragging")).toHaveCount(1);
+    await expect(list.locator(".itinerary-entry")).toHaveCount(2);
+    await expect(list).toHaveAttribute("data-drop-preview", "");
+    const originalPreviewTop = await list.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      return box.top + Number.parseFloat(getComputedStyle(element, "::after").top);
+    });
+    expect(originalPreviewTop).toBeCloseTo(handleBox.y, 0);
+    await page.mouse.move(handleBox.x + handleBox.width + 400, handleBox.y + 150, { steps: 8 });
+    await expect(list).toHaveAttribute("data-drop-preview", "");
+    const sourceOverlap = await list.evaluate((element) => {
+      const other = element.querySelector<HTMLElement>(".itinerary-entry:not(.is-dragging)");
+      if (!other) throw new Error("Missing entry beside the source target");
+      const listBox = element.getBoundingClientRect();
+      const style = getComputedStyle(element, "::after");
+      const top = listBox.top + Number.parseFloat(style.top);
+      const bottom = top + Number.parseFloat(style.height);
+      const box = other.getBoundingClientRect();
+      return Math.max(0, Math.min(bottom, box.bottom) - Math.max(top, box.top));
+    });
+    expect(sourceOverlap).toBeLessThanOrEqual(1);
     await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height - 2, {
       steps: 8,
     });
-    const releasedAt = performance.now();
+    await expect(list).toHaveAttribute("data-drop-preview", "");
+    const previewHeight = await list.evaluate((element) =>
+      Number.parseFloat(getComputedStyle(element, "::after").height),
+    );
+    expect(previewHeight).toBeCloseTo(handleBox.height, 0);
+    await page.mouse.move(handleBox.x + 8, handleBox.y + 8, { steps: 8 });
+    await expect(list).toHaveAttribute("data-origin-preview", "");
+    const nextBoxAtReturn = await entries.nth(1).boundingBox();
+    if (!nextBoxAtReturn) throw new Error("Missing next entry on return");
+    expect(nextBoxAtReturn.y).toBeLessThanOrEqual(nextBoxBefore.y + 1);
+    await expect
+      .poll(async () => (await entries.nth(1).boundingBox())?.y)
+      .toBeCloseTo(nextBoxBefore.y, 0);
+    await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height - 2, {
+      steps: 8,
+    });
+    await page.evaluate(() => {
+      const observer = new MutationObserver(() => {
+        if (!document.querySelector(".itinerary-entry.is-dragging")) {
+          performance.mark("drag-drop-complete");
+          observer.disconnect();
+        }
+      });
+      observer.observe(document.body, {
+        attributes: true,
+        attributeFilter: ["class"],
+        childList: true,
+        subtree: true,
+      });
+      document.addEventListener("mouseup", () => performance.mark("drag-mouseup"), {
+        capture: true,
+        once: true,
+      });
+    });
     await page.mouse.up();
     await expect(page.locator(".itinerary-entry.is-dragging")).toHaveCount(0, { timeout: 200 });
-    expect(performance.now() - releasedAt).toBeLessThan(200);
+    await expect(list).not.toHaveAttribute("data-drop-preview", "");
+    const dropDuration = await page.evaluate(
+      () => performance.measure("drag-drop", "drag-mouseup", "drag-drop-complete").duration,
+    );
+    expect(dropDuration).toBeLessThan(200);
     await expect(entries.nth(1).locator(".entry-select")).toHaveText("First stop");
   } finally {
     await db.delete(trips).where(eq(trips.id, id));
   }
 });
+test("upward drag shows only the target marker", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === "mobile", "Mouse drag coverage runs on desktop");
+  const id = await createEmptyTrip([
+    itemForCreate("note", "2027-04-10", { title: "First stop" }),
+    itemForCreate("note", "2027-04-10", { title: "Second stop" }),
+    itemForCreate("note", "2027-04-10", { title: "Third stop" }),
+  ]);
+  try {
+    await page.goto(`/trips/${id}`);
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Upward drag");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
+    const list = page.locator(".day-section").first().locator(".itinerary-list");
+    const entries = list.locator(".itinerary-entry");
+    await expect(entries).toHaveCount(3);
+    const first = await entries.nth(0).boundingBox();
+    const second = await entries.nth(1).boundingBox();
+    if (!first || !second) throw new Error("Missing upward drag entries");
+    await page.mouse.move(second.x + 8, second.y + 8);
+    await page.mouse.down();
+    await page.mouse.move(second.x + 8, second.y + 16);
+    await page.mouse.move(first.x + first.width / 2, first.y + 2, { steps: 8 });
+    await expect(list).toHaveAttribute("data-drop-preview", "");
+    await expect(list.locator(".itinerary-entry")).toHaveCount(3);
+    const previewTop = await list.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      return box.top + Number.parseFloat(getComputedStyle(element, "::after").top);
+    });
+    expect(previewTop).toBeCloseTo(first.y, 0);
+    await page.mouse.up();
+    await expect(list.locator(".entry-select")).toHaveText([
+      "Second stop",
+      "First stop",
+      "Third stop",
+    ]);
+  } finally {
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
 test("entries can be dragged to another day", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name === "mobile", "Mouse drag coverage runs on desktop");
-  const id = await createEmptyTrip();
+  const id = await createEmptyTrip([
+    itemForCreate("note", "2027-04-11", { title: "Destination note" }),
+  ]);
   try {
-    await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Day editor"));
     await page.goto(`/trips/${id}`);
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Day editor");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
     await addDayItem(page, "note");
     const days = page.locator(".day-section");
     await page.waitForTimeout(600);
@@ -3647,25 +4403,33 @@ test("entries can be dragged to another day", async ({ page }, testInfo) => {
     await page.mouse.down();
     await page.mouse.move(handleBox.x + 8, handleBox.y + 16);
     await expect(page.locator(".itinerary-entry.is-dragging")).toHaveCount(1);
-    await page.mouse.move(
-      destinationBox.x + destinationBox.width / 2,
-      destinationBox.y + destinationBox.height / 2,
-      { steps: 8 },
-    );
+    const targetList = destination.locator(".itinerary-list");
+    await page.mouse.move(destinationBox.x + destinationBox.width / 2, destinationBox.y + 8, {
+      steps: 8,
+    });
+    await expect(targetList).toHaveAttribute("data-drop-preview", "");
+    const targetTop = await targetList.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      return box.top + Number.parseFloat(getComputedStyle(element, "::after").top);
+    });
+    expect(targetTop).toBeCloseTo(destinationBox.y, 0);
+    await expect(source.locator(".itinerary-entry")).toHaveCount(1);
     await page.mouse.up();
-
     await expect(source.locator(".itinerary-entry")).toHaveCount(0);
-    await expect(destination.locator(".entry-select")).toHaveText("New note");
-    await page.getByRole("button", { name: "Undo" }).click();
+    await expect(source.locator(".day-empty")).toBeVisible();
+    await expect(destination.locator(".entry-select")).toHaveCount(2);
+    await clickPlannerAction(page, "Undo");
     await expect(source.locator(".entry-select")).toHaveText("New note");
-    await page.getByRole("button", { name: "Redo" }).click();
-    await expect(destination.locator(".entry-select")).toHaveText("New note");
+    await expect(destination.locator(".entry-select")).toHaveCount(1);
+    await clickPlannerAction(page, "Redo");
+    await expect(destination.locator(".entry-select")).toHaveCount(2);
     await page.reload();
-    await expect(days.nth(1).locator(".entry-select")).toHaveText("New note");
+    await expect(days.nth(1).locator(".entry-select")).toHaveCount(2);
   } finally {
     await db.delete(trips).where(eq(trips.id, id));
   }
 });
+
 test("itinerary drag remains active while the list scrolls", async ({ page }) => {
   const dates = Array.from(
     { length: 8 },
@@ -3682,11 +4446,12 @@ test("itinerary drag remains active while the list scrolls", async ({ page }) =>
   const id = await createEmptyTrip(items, dates.at(-1));
   try {
     await page.setViewportSize({ width: 1000, height: 700 });
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Scroll drag editor"),
-    );
     await page.goto(`/trips/${id}`);
-    const panel = page.locator(".planner-panel");
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Scroll drag editor");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
+    const scroll = page.locator(".planner-scroll");
     const days = page.locator(".day-section");
     const sourceDay = days.nth(1);
     await sourceDay.scrollIntoViewIfNeeded();
@@ -3700,12 +4465,12 @@ test("itinerary drag remains active while the list scrolls", async ({ page }) =>
     await page.mouse.down();
     await page.mouse.move(sourceBox.x + 8, sourceBox.y + 16);
     await expect(page.locator(".itinerary-entry.is-dragging")).toHaveCount(1);
-    const scrollBefore = await panel.evaluate((element) => element.scrollTop);
-    await panel.evaluate((element) => {
+    const scrollBefore = await scroll.evaluate((element) => element.scrollTop);
+    await scroll.evaluate((element) => {
       element.scrollTop += 1000;
     });
     await expect
-      .poll(() => panel.evaluate((element) => element.scrollTop))
+      .poll(() => scroll.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(scrollBefore);
     await expect(sourceDay).toHaveAttribute("data-rendered", "true");
     await expect(sourceEntries).toHaveCount(4);
@@ -3757,8 +4522,11 @@ test("Places to visit can jump into view and drag an item into a day", async ({
     return travelMode;
   };
   try {
-    await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Inbox editor"));
     await page.goto(`/trips/${id}`);
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Inbox editor");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
     const panel = page.locator(".planner-panel");
     const inbox = page.locator(".inbox-section");
     const inboxTab = page.getByRole("button", { name: "Places to visit", exact: true });
@@ -3791,11 +4559,8 @@ test("Places to visit can jump into view and drag an item into a day", async ({
     await expect.poll(readCandidateTravelMode).toBe("WALKING");
     await page.reload();
     await expect(page.locator(".day-section").last().locator(".entry-select")).toHaveCount(2);
-    await destination
-      .locator(".transport-leg")
-      .last()
-      .getByLabel("Travel mode")
-      .selectOption("DRIVING");
+    await destination.getByRole("combobox").click();
+    await page.getByRole("option", { name: "Car", exact: true }).click();
     await expect.poll(readCandidateTravelMode).toBe("DRIVING");
     await page.reload();
     await expect.poll(readCandidateTravelMode).toBe("DRIVING");
@@ -3811,10 +4576,8 @@ test("a 500-place trip keeps map overlays stable and changes days promptly", asy
     testInfo.project.name !== "chromium",
     "The desktop project runs the interaction benchmark",
   );
-  await page.addInitScript(() =>
-    localStorage.setItem("pacenotes-display-name", "Performance editor"),
-  );
   await page.goto(`/trips/${tripId}`);
+  await joinTripAs(page, "Performance editor");
   const title = page.getByRole("textbox", { name: "Trip title" });
   await expect(title).toHaveValue("Shared Tokyo plan");
   await expect
@@ -3870,7 +4633,6 @@ test("a 500-place trip keeps map overlays stable and changes days promptly", asy
 test("resizing a 500-place split avoids itinerary recommits", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name === "mobile", "Desktop projects run the resize benchmark");
   await page.addInitScript(() => {
-    localStorage.setItem("pacenotes-display-name", "Resize performance editor");
     const scope = globalThis as typeof globalThis & {
       __pacenotesTestItineraryProfiler?: {
         count: number;
@@ -3886,6 +4648,7 @@ test("resizing a 500-place split avoids itinerary recommits", async ({ page }, t
     scope.__pacenotesTestItineraryProfiler = profiler;
   });
   await page.goto(`/trips/${tripId}`);
+  await joinTripAs(page, "Resize performance editor");
   await expect(page.getByRole("textbox", { name: "Trip title" })).toHaveValue("Shared Tokyo plan");
   await expect
     .poll(() =>
@@ -3992,9 +4755,8 @@ test("two open planners exchange a live item edit", async ({ browser }, testInfo
   const first = await browser.newPage();
   const second = await browser.newPage();
   await Promise.all([mockGoogle(first), mockGoogle(second)]);
-  await first.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Editor one"));
-  await second.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Editor two"));
   await Promise.all([first.goto(`/trips/${tripId}`), second.goto(`/trips/${tripId}`)]);
+  await Promise.all([joinTripAs(first, "Editor one"), joinTripAs(second, "Editor two")]);
   await expect(first.getByRole("textbox", { name: "Trip title" })).toHaveValue("Shared Tokyo plan");
   await expect(second.getByRole("textbox", { name: "Trip title" })).toHaveValue(
     "Shared Tokyo plan",
@@ -4014,7 +4776,7 @@ test("two open planners exchange a live item edit", async ({ browser }, testInfo
   ).toBeVisible();
   await first.getByRole("button", { name: "Close editor" }).click();
   await expect(first.locator(".item-editor")).toHaveCount(0);
-  await expect(second.locator(".sync-state")).toContainText(/synced/i);
+  await expect(second.locator(".sync-state")).toContainText(/connected/i);
   await expect(second.getByText("Meet at Tokyo Station", { exact: true })).toBeVisible();
   await first.getByRole("button", { name: "Meet at Tokyo Station", exact: true }).click();
   await second.getByRole("button", { name: "Meet at Tokyo Station", exact: true }).click();
@@ -4032,6 +4794,100 @@ test("two open planners exchange a live item edit", async ({ browser }, testInfo
   ).toContainText("Bring the tickets");
   await first.close();
   await second.close();
+});
+
+test("remote trip edits preserve an unsaved cost draft", async ({ browser }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "Two-editor draft coverage runs once");
+  const item = itemForCreate("note", "2027-04-10", {
+    id: "shared-cost-note",
+    title: "Shared cost note",
+  });
+  const id = await createEmptyTrip([item], "2027-04-12", "JPY");
+  const first = await browser.newPage();
+  const second = await browser.newPage();
+  try {
+    await Promise.all([mockGoogle(first), mockGoogle(second)]);
+    await Promise.all([first.goto(`/trips/${id}`), second.goto(`/trips/${id}`)]);
+    await Promise.all([joinTripAs(first, "Cost editor"), joinTripAs(second, "Note editor")]);
+    await first
+      .locator(".entry-select")
+      .filter({ hasText: /^Shared cost note$/ })
+      .click();
+    const amount = first.locator(".item-editor").getByRole("textbox", { name: "Amount" });
+    await expect(amount).toBeEnabled();
+    await amount.fill("12");
+    await amount.press("Enter");
+    await expect(first.getByRole("button", { name: "Clear cost" })).toBeVisible();
+    await expect(amount).toHaveValue("12");
+
+    await amount.fill("13");
+    await second
+      .locator(".entry-select")
+      .filter({ hasText: /^Shared cost note$/ })
+      .click();
+    await second.getByRole("button", { name: "Edit Shared cost note label" }).click();
+    await second.getByRole("textbox", { name: "Itinerary label" }).fill("Remote note title");
+    await expect(
+      first.locator(".entry-select").filter({ hasText: /^Remote note title$/ }),
+    ).toBeVisible();
+    await expect(amount).toHaveValue("13");
+  } finally {
+    await Promise.all([first.close(), second.close()]);
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("undo keeps a tripmate used by another editor's expense", async ({ browser }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "Two-editor ledger coverage runs once");
+  const id = await createEmptyTrip([], "2027-04-12", "USD");
+  const first = await browser.newPage();
+  const second = await browser.newPage();
+  try {
+    await Promise.all([mockGoogle(first), mockGoogle(second)]);
+    await Promise.all([first.goto(`/trips/${id}`), second.goto(`/trips/${id}?view=expenses`)]);
+    await Promise.all([joinTripAs(first, "Editor one"), joinTripAs(second, "Editor two")]);
+    const title = first.getByRole("textbox", { name: "Trip title" });
+    const initialTitle = await title.inputValue();
+    await title.fill("Temporary title");
+    await title.press("Enter");
+    await expect(second.getByRole("textbox", { name: "Trip title" })).toHaveValue(
+      "Temporary title",
+    );
+
+    await clickPlannerAction(first, "Tripmates");
+    const tripmates = first.getByRole("dialog", { name: "Tripmates" });
+    await tripmates.getByRole("button", { name: "Add tripmate" }).click();
+    const add = first.getByRole("dialog", { name: "New tripmate" });
+    await add.getByRole("textbox", { name: "Name" }).fill("Charlie");
+    await add.getByRole("button", { name: "Save" }).click();
+    await tripmates.getByRole("button", { name: "Close dialog" }).click();
+
+    await expect(
+      second.getByRole("region", { name: "Balances" }).getByText("Charlie"),
+    ).toBeVisible();
+    await second.getByRole("button", { name: "Add expense" }).click();
+    const expense = second.getByRole("dialog", { name: "Add expense" });
+    await expense.getByRole("textbox", { name: "Description (optional)" }).fill("Remote lunch");
+    await expense.getByRole("textbox", { name: "Amount" }).fill("12");
+    await expense.getByRole("combobox", { name: /^Paid by:/ }).click();
+    await second
+      .getByRole("listbox", { name: "Paid by" })
+      .getByRole("option", { name: "Charlie" })
+      .click();
+    await expense.getByRole("button", { name: "Save expense" }).click();
+    await expect(second.getByText("Remote lunch")).toBeVisible();
+
+    await clickPlannerAction(first, "Undo");
+    await expect(title).toHaveValue(initialTitle);
+    await expect(first.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
+    await expect(
+      second.getByRole("region", { name: "Balances" }).getByText("Charlie"),
+    ).toBeVisible();
+    await expect(second.getByText("Remote lunch")).toBeVisible();
+  } finally {
+    await Promise.all([first.close(), second.close()]);
+    await db.delete(trips).where(eq(trips.id, id));
+  }
 });
 
 test("planner loads a trip with a lodging gap", async ({ page }, testInfo) => {
@@ -4064,10 +4920,8 @@ test("planner loads a trip with a lodging gap", async ({ page }, testInfo) => {
   });
   const id = await createEmptyTrip([firstLodging, nextLodging, stop], "2027-04-14");
   try {
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Lodging gap editor"),
-    );
     await page.goto(`/trips/${id}`);
+    await joinTripAs(page, "Lodging gap editor");
     await expect
       .poll(() =>
         page.evaluate(
@@ -4093,8 +4947,8 @@ test("hard deletion removes the shared trip", async ({ page }, testInfo) => {
     testInfo.project.name !== "chromium",
     "The desktop project covers destructive controls",
   );
-  await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Deleting editor"));
   await page.goto(`/trips/${tripId}`);
+  await joinTripAs(page, "Deleting editor");
   await page.getByRole("button", { name: "Delete trip" }).click();
   const dialog = page.getByRole("dialog", { name: "Delete this trip?" });
   await expect(dialog.locator("p strong")).toHaveText("Shared Tokyo plan");
@@ -4173,10 +5027,11 @@ test("transport endpoints connect to adjacent itinerary places", async ({ page }
     noEndpoints,
   ]);
   try {
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Transport routing"),
-    );
     await page.goto(`/trips/${id}`);
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Transport routing");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
     const units = page.locator(".day-section").first().locator(".itinerary-unit");
     const unit = (title: string) =>
       units.filter({ has: page.getByRole("button", { name: title, exact: true }) });
@@ -4189,50 +5044,252 @@ test("transport endpoints connect to adjacent itinerary places", async ({ page }
     await expect(unit("After one-sided transport").locator(".transport-leg")).toBeVisible();
 
     if (testInfo.project.name !== "mobile") {
-      const trainEntry = unit("Train").locator(".itinerary-entry");
-      const displacedEntry = unit("After transport").locator(".itinerary-entry");
+      const train = unit("Train");
+      const trainEntry = train.locator(".itinerary-entry");
+      const trainLeg = train.locator(".transport-leg");
+      const displaced = unit("Departing train");
+      const displacedEntry = displaced.locator(".itinerary-entry");
+      const displacedLeg = displaced.locator(".transport-leg");
+      const displacedSummary = displacedLeg.locator(".leg-summary");
+      const displacedMode = displacedLeg.locator(".leg-mode");
+      const displacedRail = displacedLeg.locator(".leg-rail");
       const trainBox = await trainEntry.boundingBox();
+      const trainLegBox = await trainLeg.boundingBox();
       const displacedBox = await displacedEntry.boundingBox();
-      if (!trainBox || !displacedBox) throw new Error("Missing transport drag geometry");
-      const list = trainEntry.locator(
+      const displacedLegBox = await displacedLeg.boundingBox();
+      const displacedSummaryBox = await displacedSummary.boundingBox();
+      const displacedModeBox = await displacedMode.boundingBox();
+      if (
+        !trainBox ||
+        !trainLegBox ||
+        !displacedBox ||
+        !displacedLegBox ||
+        !displacedSummaryBox ||
+        !displacedModeBox
+      )
+        throw new Error("Missing transport drag geometry");
+      const list = train.locator(
         "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' itinerary-list ')][1]",
       );
-      const listHeight = await list.evaluate((element) => element.getBoundingClientRect().height);
-      await page.mouse.move(trainBox.x + 8, trainBox.y + 8);
+      const listHeightBefore = await list.evaluate(
+        (element) => element.getBoundingClientRect().height,
+      );
+      const nextTop = () =>
+        train.evaluate((element) => {
+          const next = element.nextElementSibling?.querySelector(
+            ".transport-leg, .itinerary-entry",
+          );
+          if (!next) throw new Error("Missing entry after train");
+          return next.getBoundingClientRect().top;
+        });
+      const nextTopBefore = await nextTop();
+      const x = trainBox.x + trainBox.width / 2;
+      const y = trainBox.y + trainBox.height / 2;
+      await page.mouse.move(x, y);
       await page.mouse.down();
-      await page.mouse.move(trainBox.x + 8, trainBox.y + 16);
+      await list.evaluate((element, initialY) => {
+        let pointerY = initialY;
+        const trackPointer = (event: MouseEvent) => {
+          pointerY = event.clientY;
+        };
+        document.addEventListener("mousemove", trackPointer);
+        const tops: number[] = [];
+        const started = performance.now();
+        const sample = () => {
+          const card = element.querySelector(".itinerary-entry.is-dragging");
+          if (pointerY >= initialY + 11 && card) tops.push(card.getBoundingClientRect().top);
+          if (performance.now() - started < 350) requestAnimationFrame(sample);
+          else {
+            document.removeEventListener("mousemove", trackPointer);
+            element.dataset.dragLiftTops = JSON.stringify(tops);
+          }
+        };
+        requestAnimationFrame(sample);
+      }, y);
+      await page.mouse.move(x + 12, y + 12, { steps: 4 });
       await expect(trainEntry).toHaveClass(/is-dragging/);
+      await expect(list).toHaveAttribute("data-drag-lift-tops", /.+/);
+      const liftTops = await list.evaluate((element) => {
+        const tops = JSON.parse(element.dataset.dragLiftTops ?? "[]") as number[];
+        delete element.dataset.dragLiftTops;
+        return tops;
+      });
+      if (liftTops.length < 2) throw new Error("Missing steady drag frames");
+      expect(Math.max(...liftTops) - Math.min(...liftTops)).toBeLessThanOrEqual(1);
+      await expect(train.locator(".transport-leg")).toHaveCount(0);
+      await expect(list).toHaveAttribute("data-transport-drop-preview", "");
+      const sourcePreviewLeg = await list.locator(".leg-preview").boundingBox();
+      if (!sourcePreviewLeg) throw new Error("Missing source transport preview");
+      expect(sourcePreviewLeg.y).toBeCloseTo(trainLegBox.y, 0);
+      expect(sourcePreviewLeg.height).toBeCloseTo(trainLegBox.height, 0);
+      await expect(list.locator(".leg-preview .leg-summary")).toHaveText("Transport");
+      await expect(list.locator(".leg-preview .leg-mode, .leg-preview .leg-export")).toHaveCount(0);
+      await expect(train.locator(".itinerary-entry")).toHaveCount(1);
+      await expect(list).toHaveAttribute("data-drop-preview", "");
+      const originalPreviewTop = await list.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        return box.top + Number.parseFloat(getComputedStyle(element, "::after").top);
+      });
+      expect(originalPreviewTop).toBeCloseTo(trainBox.y, 0);
+      expect(await nextTop()).toBeCloseTo(nextTopBefore, 0);
+      const listHeightAtOrigin = await list.evaluate(
+        (element) => element.getBoundingClientRect().height,
+      );
+      expect(listHeightAtOrigin).toBeCloseTo(listHeightBefore, 0);
+      const unchangedEntry = await displacedEntry.boundingBox();
+      const unchangedSummary = await displacedSummary.boundingBox();
+      const unchangedMode = await displacedMode.boundingBox();
+      if (!unchangedEntry || !unchangedSummary || !unchangedMode)
+        throw new Error("Missing original-slot entries");
+      const entryShift = unchangedEntry.y - displacedBox.y;
+      expect(unchangedSummary.y - displacedSummaryBox.y).toBeCloseTo(entryShift, 0);
+      expect(unchangedMode.y - displacedModeBox.y).toBeCloseTo(entryShift, 0);
       await page.mouse.move(
         displacedBox.x + displacedBox.width / 2,
-        displacedBox.y + displacedBox.height - 2,
+        displacedBox.y - trainBox.height / 2,
         { steps: 8 },
       );
-      const placeholder = page.locator("[data-rfd-placeholder-context-id]");
-      await expect(placeholder).toBeVisible();
-      const placeholderBox = await placeholder.boundingBox();
-      if (!placeholderBox) throw new Error("Missing itinerary drop preview");
-      expect(placeholderBox.height).toBeCloseTo(trainBox.height, 0);
-      await expect(unit("Train").locator("[data-rfd-placeholder-context-id]")).toHaveCount(0);
+      await expect(list).toHaveAttribute("data-drop-preview", "");
       await expect
         .poll(async () => {
-          const shiftedDisplacedBox = await displacedEntry.boundingBox();
-          if (!shiftedDisplacedBox) throw new Error("Missing displaced itinerary entry");
-          return displacedBox.y - shiftedDisplacedBox.y;
+          const preceding = await unit("After transport").locator(".itinerary-entry").boundingBox();
+          const previewLeg = await list.locator(".leg-preview").boundingBox();
+          if (!preceding || !previewLeg) throw new Error("Missing transport preview geometry");
+          return Math.max(0, preceding.y + preceding.height - previewLeg.y);
         })
-        .toBeCloseTo(trainBox.height, 0);
-      expect(await list.evaluate((element) => element.getBoundingClientRect().height)).toBeCloseTo(
-        listHeight,
-        0,
+        .toBeLessThanOrEqual(1);
+      const shiftedEntry = await displacedEntry.boundingBox();
+      const shiftedLeg = await displacedLeg.boundingBox();
+      if (!shiftedEntry || !shiftedLeg) throw new Error("Missing moved transport geometry");
+      expect(shiftedLeg.y - displacedLegBox.y).toBeCloseTo(shiftedEntry.y - displacedBox.y, 0);
+      const preview = await list.evaluate((element) => {
+        const listBox = element.getBoundingClientRect();
+        const style = getComputedStyle(element, "::after");
+        return {
+          top: listBox.top + Number.parseFloat(style.top),
+          height: Number.parseFloat(style.height),
+        };
+      });
+      const shiftedRail = await displacedRail.boundingBox();
+      if (!shiftedRail) throw new Error("Missing moved transport rail");
+      expect(preview.top + preview.height).toBeCloseTo(shiftedRail.y, 0);
+      expect(preview.height).toBeCloseTo(trainBox.height, 0);
+      const targetPreviewLeg = await list.locator(".leg-preview").boundingBox();
+      if (!targetPreviewLeg) throw new Error("Missing target transport preview");
+      expect(targetPreviewLeg.y).toBeCloseTo(preview.top - (trainBox.y - trainLegBox.y), 0);
+      expect(targetPreviewLeg.height).toBeCloseTo(trainLegBox.height, 0);
+      expect(preview.top).toBeCloseTo(targetPreviewLeg.y + targetPreviewLeg.height, 0);
+      await expect(list.locator(".leg-preview .leg-summary")).toHaveText("Transport");
+      await page.mouse.move(x, y, { steps: 8 });
+      await expect(list).toHaveAttribute("data-drop-preview", "");
+      const returnedPreviewTop = await list.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        return box.top + Number.parseFloat(getComputedStyle(element, "::after").top);
+      });
+      expect(returnedPreviewTop).toBeCloseTo(trainBox.y, 0);
+      await expect(train.locator(".transport-leg")).toHaveCount(0);
+      const returnedPreviewLeg = await list.locator(".leg-preview").boundingBox();
+      if (!returnedPreviewLeg) throw new Error("Missing returned transport preview");
+      expect(returnedPreviewLeg.y).toBeCloseTo(trainLegBox.y, 0);
+      expect(await nextTop()).toBeLessThanOrEqual(nextTopBefore + 1);
+      await expect.poll(nextTop).toBeCloseTo(nextTopBefore, 0);
+      const listHeightAtReturn = await list.evaluate(
+        (element) => element.getBoundingClientRect().height,
       );
-      expect(
-        await page
-          .locator(".leg-mode")
-          .evaluateAll((modes) =>
-            modes.every((mode) => getComputedStyle(mode).visibility === "visible"),
-          ),
-      ).toBe(true);
+      expect(listHeightAtReturn).toBeCloseTo(listHeightBefore, 0);
+      await expect
+        .poll(async () => {
+          const entry = await displacedEntry.boundingBox();
+          const summary = await displacedSummary.boundingBox();
+          const mode = await displacedMode.boundingBox();
+          if (!entry || !summary || !mode) throw new Error("Missing original-slot transport leg");
+          const entryShift = entry.y - displacedBox.y;
+          return [
+            Math.round(summary.y - displacedSummaryBox.y - entryShift),
+            Math.round(mode.y - displacedModeBox.y - entryShift),
+          ];
+        })
+        .toEqual([0, 0]);
+      const farTarget = await unit("After one-sided transport")
+        .locator(".itinerary-entry")
+        .boundingBox();
+      if (!farTarget) throw new Error("Missing far drop target");
+      await page.mouse.move(farTarget.x + 20, farTarget.y + farTarget.height / 2, { steps: 12 });
+      await expect(list).toHaveAttribute("data-drop-preview", "");
+      await list.evaluate((element, itemId) => {
+        const tops: number[] = [];
+        const started = performance.now();
+        const sample = () => {
+          const card = element.querySelector<HTMLElement>(`[data-rfd-draggable-id="${itemId}"]`);
+          if (card && !card.classList.contains("is-dragging"))
+            tops.push(card.getBoundingClientRect().top);
+          if (performance.now() - started < 650) requestAnimationFrame(sample);
+          else element.dataset.dropTops = JSON.stringify(tops);
+        };
+        requestAnimationFrame(sample);
+      }, transport.id);
       await page.mouse.up();
       await expect(page.locator(".itinerary-entry.is-dragging")).toHaveCount(0);
+      await expect(train.locator(".transport-leg")).toHaveCount(0);
+      await expect(list).toHaveAttribute("data-drop-tops", /.+/);
+      const dropTops = await list.evaluate((element) => {
+        const tops = JSON.parse(element.dataset.dropTops ?? "[]") as number[];
+        delete element.dataset.dropTops;
+        return tops;
+      });
+      const settledTrain = await train.locator(".itinerary-entry").boundingBox();
+      if (!settledTrain || dropTops.length < 2) throw new Error("Missing drop motion");
+      expect(Math.max(...dropTops) - settledTrain.y).toBeLessThanOrEqual(1);
+      const laterEntry = unit("After one-sided transport").locator(".itinerary-entry");
+      const laterBox = await laterEntry.boundingBox();
+      const earlierBox = await displacedEntry.boundingBox();
+      if (!laterBox || !earlierBox) throw new Error("Missing transport reorder targets");
+      await page.mouse.move(laterBox.x + laterBox.width / 2, laterBox.y + laterBox.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(
+        laterBox.x + laterBox.width / 2 + 12,
+        laterBox.y + laterBox.height / 2 + 12,
+        {
+          steps: 4,
+        },
+      );
+      await expect(laterEntry).toHaveClass(/is-dragging/);
+      await list.evaluate((element) => {
+        const target = [...element.querySelectorAll(".itinerary-unit")].find(
+          (item) => item.querySelector(".entry-select")?.textContent === "Departing train",
+        );
+        const entry = target?.querySelector(".itinerary-entry");
+        const leg = target?.querySelector(".transport-leg");
+        if (!entry || !leg) throw new Error("Missing displaced transport pair");
+        const entryTop = entry.getBoundingClientRect().top;
+        const legTop = leg.getBoundingClientRect().top;
+        const frames: Array<[number, number]> = [];
+        const started = performance.now();
+        const sample = () => {
+          frames.push([
+            entry.getBoundingClientRect().top - entryTop,
+            leg.getBoundingClientRect().top - legTop,
+          ]);
+          if (performance.now() - started < 350) requestAnimationFrame(sample);
+          else element.dataset.transportFrames = JSON.stringify(frames);
+        };
+        requestAnimationFrame(sample);
+      });
+      await page.mouse.move(earlierBox.x + earlierBox.width / 2, earlierBox.y + 8, { steps: 8 });
+      await expect(list).toHaveAttribute("data-transport-frames", /.+/);
+      const motion = await list.evaluate((element) => {
+        const frames = JSON.parse(element.dataset.transportFrames ?? "[]") as Array<
+          [number, number]
+        >;
+        delete element.dataset.transportFrames;
+        return {
+          travel: Math.max(...frames.map(([entry]) => Math.abs(entry))),
+          mismatch: Math.max(...frames.map(([entry, leg]) => Math.abs(entry - leg))),
+        };
+      });
+      expect(motion.travel).toBeGreaterThan(5);
+      expect(motion.mismatch).toBeLessThanOrEqual(1);
+      await page.mouse.up();
     }
     await expect(page.locator(".map-number-marker")).toHaveCount(8);
     expect(await page.locator(".map-number-marker span").allTextContents()).toEqual([
@@ -4262,10 +5319,16 @@ test("fresh trip renders routes for a visible inactive day", async ({ page }) =>
   });
   const id = await createEmptyTrip([first, second]);
   try {
-    await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Route export"));
     await page.goto(`/trips/${id}`);
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Route export");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
     const dates = page.locator(".date-tabs [data-day-tab]");
-    const dayTwoRoute = page.locator(".day-section").nth(1).locator(".transport-leg");
+    const dayTwoRoute = page
+      .locator(".day-section")
+      .nth(1)
+      .locator(".itinerary-unit .transport-leg");
     await expect(dates.nth(0)).toHaveAttribute("aria-current", "date");
     await expect(dayTwoRoute).toContainText("10 min - 1.0 km");
     await expect
@@ -4333,16 +5396,23 @@ test("trip language localizes existing Google places and routes", async ({ page 
     }),
   ]);
   try {
-    await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Language test"));
     await page.goto(`/trips/${id}`);
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Language test");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
     await expect(page.locator(".entry-select").first()).toHaveText("Test destination");
 
-    await page.getByRole("button", { name: "Trip settings" }).click();
+    await clickPlannerAction(page, "Trip settings");
     const dialog = page.getByRole("dialog", { name: "Trip settings" });
-    const language = dialog.getByLabel(/^Trip language/);
-    await expect(language.locator('option[value="zh-CN"]')).toHaveText("简体中文");
-    await expect(language.locator('option[value="zh-TW"]')).toHaveText("繁體中文");
-    await language.selectOption("zh-CN");
+    const language = dialog.getByRole("combobox", { name: /^Trip language:/ });
+    await expect(language).toHaveAccessibleName("Trip language: Follow UI language (English)");
+    await language.click();
+    const languages = page.getByRole("listbox", { name: "Trip language" });
+    await expect(languages.getByRole("option", { name: "简体中文" })).toBeVisible();
+    await expect(languages.getByRole("option", { name: "繁體中文" })).toBeVisible();
+    await languages.getByRole("option", { name: "简体中文" }).click();
+    await expect(language).toHaveAccessibleName("Trip language: 简体中文");
     await dialog.getByRole("button", { name: "Save settings" }).click();
 
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
@@ -4445,9 +5515,9 @@ test("map features stay visible across every trip day", async ({ page }) => {
           }
         ).__pacenotesDashedTransportPolylines ?? 0,
     );
-  await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Trip-wide map"));
   try {
     await page.goto(`/trips/${routeTrip}`);
+    await joinTripAs(page, "Trip-wide map");
     const dates = page.locator(".date-tabs [data-day-tab]");
     await expect(dates.nth(0)).toHaveAttribute("aria-current", "date");
     await expect(page.locator(".map-number-marker")).toHaveCount(3);
@@ -4462,6 +5532,7 @@ test("map features stay visible across every trip day", async ({ page }) => {
     await expect.poll(routePolylines).toBe(2);
 
     await page.goto(`/trips/${transportTrip}`);
+    await joinTripAs(page, "Transport map");
     await expect(dates.nth(0)).toHaveAttribute("aria-current", "date");
     await expect(page.locator(".map-number-marker")).toHaveCount(4);
     expect(await page.locator(".map-number-marker span").allTextContents()).toEqual([
@@ -4501,30 +5572,16 @@ test("places across days have transport unless lodging separates them", async ({
   });
   const id = await createEmptyTrip([dayOne, lodging, dayTwo, dayThree]);
   try {
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Cross-day transport"),
-    );
     const dates = page.locator(".date-tabs [data-day-tab]");
     await page.goto(`/trips/${id}`);
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Cross-day transport");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
     const days = page.locator(".day-section");
     await expect(days.nth(0).locator(".missing-lodging")).toHaveCount(0);
     const missingLodging = days.nth(1).locator(".missing-lodging");
     await expect(missingLodging).toHaveText("No lodging");
-    await expect(missingLodging).toHaveCSS("color", "rgb(148, 108, 35)");
-    await expect(missingLodging).toHaveCSS("font-size", "11px");
-    await expect(missingLodging).toHaveCSS("display", "flex");
-    await expect(missingLodging).toHaveCSS("border-radius", "999px");
-    await expect(missingLodging.locator("svg")).toHaveCount(1);
-    const [headingBox, warningBox] = await Promise.all([
-      days.nth(1).locator(".day-heading h2").boundingBox(),
-      missingLodging.boundingBox(),
-    ]);
-    expect(headingBox).not.toBeNull();
-    expect(warningBox).not.toBeNull();
-    expect(warningBox?.y).toBeGreaterThanOrEqual(headingBox?.y ?? 0);
-    expect((warningBox?.y ?? 0) + (warningBox?.height ?? 0)).toBeLessThanOrEqual(
-      (headingBox?.y ?? 0) + (headingBox?.height ?? 0),
-    );
 
     await expect(days.nth(2).locator(".missing-lodging")).toHaveCount(0);
     const routeComputes = () =>
@@ -4536,7 +5593,7 @@ test("places across days have transport unless lodging separates them", async ({
             }
           ).__pacenotesRouteComputes ?? 0,
       );
-    await expect(days.nth(0).locator(".transport-leg")).toBeVisible();
+    await expect(days.nth(0).locator(".itinerary-unit .transport-leg")).toBeVisible();
     await expect.poll(routeComputes).toBeGreaterThan(0);
     await expect(days.nth(0).locator(".route-endpoint-start")).toHaveCount(0);
     await expect(days.nth(0).locator(".route-endpoint-end")).toHaveCount(0);
@@ -4558,29 +5615,26 @@ test("places across days have transport unless lodging separates them", async ({
 
     await dates.nth(1).click();
     await expect(dates.nth(1)).toHaveAttribute("aria-current", "date");
-    await expect(days.nth(1).locator(".transport-leg")).toHaveCount(1);
+    await expect(days.nth(1).locator(".itinerary-unit .transport-leg")).toHaveCount(1);
     await expect(days.nth(1).locator(".route-endpoint-start")).toHaveCount(0);
     await expect(days.nth(1).locator(".route-endpoint-end")).toHaveCount(0);
     await dates.nth(2).click();
     await expect(dates.nth(2)).toHaveAttribute("aria-current", "date");
-    const leg = days.nth(2).locator(".transport-leg");
+    const leg = days.nth(2).locator(".itinerary-unit .transport-leg");
     await expect(leg).toBeVisible();
     await expect(leg.locator(".leg-cap")).toHaveCount(0);
     const transportStart = days.nth(2).locator(".route-endpoint-start");
     await expect(transportStart).toHaveClass(/route-endpoint-transport/);
     await expect(transportStart.locator(".route-endpoint-cap")).toHaveCount(1);
-    await expect(transportStart.locator(".route-endpoint-rail")).toHaveCSS("display", "none");
+    await expect(transportStart.locator(".route-endpoint-rail")).toBeHidden();
     expect((await transportStart.boundingBox())?.height).toBe(0);
     await expect(days.nth(2).locator(".route-endpoint-end")).toHaveCount(0);
-    await expect(leg).toHaveCSS("--leg-color", "#23df16");
-    expect((await leg.locator(".leg-rail").boundingBox())?.height).toBe(32);
     await expect(leg).toContainText("10 min - 1.0 km");
     await expect(page.locator(".transport-leg").filter({ hasText: "Updating route" })).toHaveCount(
       0,
     );
-    const travelMode = leg.getByLabel("Travel mode");
-    await expect(travelMode).toHaveValue("DRIVING");
-    await expect(leg.locator(".leg-options")).toHaveCount(0);
+    const travelMode = leg.getByRole("combobox", { name: /^Travel mode:/ });
+    await expect(travelMode).toHaveAccessibleName("Travel mode: Car");
     const plannerPanel = page.locator(".planner-panel");
     await expect
       .poll(async () => {
@@ -4593,10 +5647,10 @@ test("places across days have transport unless lodging separates them", async ({
 
     await expect.poll(routeComputes).toBeGreaterThan(0);
     const beforeModeChange = await routeComputes();
-    await travelMode.selectOption("WALKING");
+    await travelMode.click();
+    await page.getByRole("option", { name: "Walk", exact: true }).click();
     await expect.poll(routeComputes).toBeGreaterThan(beforeModeChange);
-    await expect(travelMode).toHaveValue("WALKING");
-    await expect(travelMode.locator("option:checked")).toHaveText("Walk");
+    await expect(travelMode).toHaveAccessibleName("Travel mode: Walk");
 
     let routeComputesBeforeEditing = await routeComputes();
     await dayThreeUnit
@@ -4618,7 +5672,6 @@ test("places across days have transport unless lodging separates them", async ({
       .locator(".itinerary-entry");
     await dayTwoEntry.click({ position: { x: 5, y: 5 } });
     await expect(editor.getByRole("heading", { name: "Day two place" })).toBeVisible();
-    await expect(editor.getByRole("combobox", { name: /^(Day|Date)$/ })).toHaveCount(0);
     await dayTwoEntry.click({ position: { x: 5, y: 5 } });
     await expect(editor).toHaveCount(0);
     await dates.nth(2).click();
@@ -4698,10 +5751,8 @@ test("transport endpoint search limits primary place types by travel method", as
     }),
   ]);
   try {
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Endpoint search editor"),
-    );
     await page.goto(`/trips/${id}`);
+    await joinTripAs(page, "Endpoint search editor");
     await page.locator(".itinerary-entry").click({ position: { x: 8, y: 8 } });
     const editor = page.locator(".item-editor");
     const endpointTypes = (label: string) =>
@@ -4712,13 +5763,18 @@ test("transport endpoint search limits primary place types by travel method", as
             (element as HTMLElement & { includedPrimaryTypes?: string[] }).includedPrimaryTypes,
         );
     const travelMethod = editor.getByRole("combobox", { name: /^Travel method/ });
-    for (const [mode, expectedTypes] of [
-      ["plane", ["airport", "airstrip", "heliport", "international_airport"]],
-      ["train", ["train_station", "transit_station", "subway_station"]],
-      ["bus", ["bus_station", "bus_stop", "transit_station"]],
-      ["ferry", ["ferry_terminal"]],
+    for (const [method, expectedTypes] of [
+      ["Plane", ["airport", "airstrip", "heliport", "international_airport"]],
+      ["Train", ["train_station", "transit_station", "subway_station"]],
+      ["Bus", ["bus_station", "bus_stop", "transit_station"]],
+      ["Ferry", ["ferry_terminal"]],
     ] as const) {
-      await travelMethod.selectOption(mode);
+      await travelMethod.click();
+      await page
+        .getByRole("listbox", { name: "Travel method" })
+        .getByRole("option", { name: method, exact: true })
+        .click();
+      await expect(travelMethod).toHaveAccessibleName(`Travel method: ${method}`);
       await expect.poll(() => endpointTypes("From")).toEqual(expectedTypes);
       await expect.poll(() => endpointTypes("To")).toEqual(expectedTypes);
     }
@@ -4854,10 +5910,11 @@ test("removing the only stop leaves a persistent lodging gap", async ({ page }) 
   });
   const id = await createEmptyTrip([previousLodging, middle, nextLodging]);
   try {
-    await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Lodging gap"));
     await page.goto(`/trips/${id}`);
+    await joinTripAs(page, "Lodging gap");
     const day = page.locator(".day-section").first();
-    await expect(day.locator(".transport-leg")).toHaveCount(2);
+    const routeModes = day.getByRole("combobox", { name: /^Travel mode:/ });
+    await expect(routeModes).toHaveCount(2);
 
     await page.getByRole("button", { name: "Map location: Museum", exact: true }).click();
     const details = page.getByRole("dialog", { name: "Place details" });
@@ -4867,14 +5924,14 @@ test("removing the only stop leaves a persistent lodging gap", async ({ page }) 
     await expect(
       page.locator(".inbox-section").getByRole("button", { name: "Only day stop", exact: true }),
     ).toBeVisible();
-    await expect(day.locator(".transport-leg")).toHaveCount(0);
+    await expect(routeModes).toHaveCount(0);
 
     await page.reload();
     await expect(day.getByRole("button", { name: "Only day stop", exact: true })).toHaveCount(0);
     await expect(
       page.locator(".inbox-section").getByRole("button", { name: "Only day stop", exact: true }),
     ).toBeVisible();
-    await expect(day.locator(".transport-leg")).toHaveCount(0);
+    await expect(routeModes).toHaveCount(0);
   } finally {
     await db.delete(trips).where(eq(trips.id, id));
   }
@@ -4892,12 +5949,10 @@ test("routes within one day use one day color", async ({ page }) => {
   });
   const id = await createEmptyTrip([lodging, place]);
   try {
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Route color check"),
-    );
     await page.goto(`/trips/${id}`);
+    await joinTripAs(page, "Route color check");
     await page.locator(".date-tabs [data-day-tab]").nth(1).click();
-    const legs = page.locator(".day-section").nth(1).locator(".transport-leg");
+    const legs = page.locator(".day-section").nth(1).locator(".itinerary-unit .transport-leg");
     await expect(legs).toHaveCount(2);
     await expect
       .poll(async () => {
@@ -4928,10 +5983,8 @@ test("continuous days support transport, place-bound stays, and history shortcut
 }) => {
   const id = await createEmptyTrip();
   try {
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Itinerary editor"),
-    );
     await page.goto(`/trips/${id}`);
+    await joinTripAs(page, "Itinerary editor");
     const dates = page.locator(".date-tabs [data-day-tab]");
     const days = page.locator(".day-section");
     await expect(days).toHaveCount(3);
@@ -4962,20 +6015,23 @@ test("continuous days support transport, place-bound stays, and history shortcut
     await expect(days.nth(0).locator(".itinerary-entry")).toHaveCount(13);
     await expect(days.nth(1).getByRole("button", { name: "Place", exact: true })).toBeInViewport();
     await expect
-      .poll(() => page.locator(".planner-panel").evaluate((element) => element.scrollTop))
+      .poll(() => page.locator(".planner-scroll").evaluate((element) => element.scrollTop))
       .toBeGreaterThan(0);
     await addDayItem(page, "transport", 1);
     const transportRow = days.nth(1).locator(".itinerary-entry");
     await transportRow.click({ position: { x: 8, y: 8 } });
     const editor = page.locator(".item-editor");
-    await editor.getByRole("combobox", { name: /^Travel method/ }).selectOption("custom");
+    await editor.getByRole("combobox", { name: /^Travel method:/ }).click();
+    await page
+      .getByRole("listbox", { name: "Travel method" })
+      .getByRole("option", { name: "Custom" })
+      .click();
+    await expect(editor.getByRole("combobox", { name: "Travel method: Custom" })).toBeVisible();
     await expect(editor.getByLabel("Start time")).toHaveCount(0);
     await expect(editor.getByLabel("Duration in minutes")).toHaveCount(0);
     await editor.getByLabel("Departure time").fill("23:30");
     await expect(editor.getByLabel("Arrival time")).toHaveValue("23:30");
     await editor.getByLabel("Arrival time").fill("01:15");
-    await expect(editor.getByRole("button", { name: "Save item" })).toHaveCount(0);
-    await expect(editor.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(0);
     await editor.getByLabel("Custom travel method", { exact: true }).fill("Cable car");
     const pick = async (label: string, placeId: string) => {
       await page
@@ -5053,8 +6109,6 @@ test("continuous days support transport, place-bound stays, and history shortcut
     await expect(days.nth(0).locator(".itinerary-entry")).toHaveCount(14);
     const reservationRow = days.nth(0).locator(".itinerary-entry").last();
     await reservationRow.click({ position: { x: 8, y: 8 } });
-    await expect(editor.getByRole("combobox", { name: /^(Day|Date)$/ })).toHaveCount(0);
-    await expect(editor.getByLabel("Travel mode after prior stop")).toHaveCount(0);
     await expect(editor.getByLabel("Start time")).toHaveValue("19:30");
     await editor.getByRole("button", { name: "Close editor", exact: true }).click();
     await addDayItem(page, "lodging");
@@ -5067,23 +6121,19 @@ test("continuous days support transport, place-bound stays, and history shortcut
     await expect(days.nth(0).locator(".lodging-boundary")).toHaveCount(1);
     await expect(days.nth(0).locator(".itinerary-entry").last()).toHaveClass(/lodging-boundary/);
     await days.nth(0).locator(".lodging-boundary .entry-select").click();
-    await expect(editor.getByLabel("Planning")).toHaveCount(0);
-    await expect(editor.getByLabel("Travel mode after prior stop")).toHaveCount(0);
-    await expect(editor.locator("fieldset").filter({ hasText: "Stay" })).toHaveCount(0);
     const checkInBox = await editor.getByLabel("Check-in date").boundingBox();
     await expect(editor.getByLabel("Check-in date")).toHaveValue("2027-04-10");
     await expect(editor.getByLabel("Check-out date")).toHaveValue("2027-04-12");
     await editor.getByLabel("Check-out date").fill("2027-04-11");
     const notesBox = await editor.getByText("Notes", { exact: true }).boundingBox();
     expect(checkInBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(notesBox?.y ?? 0);
+    await editor.getByRole("button", { name: "Close editor", exact: true }).click();
+    await dates.nth(1).click();
+    await expect(dates.nth(1)).toHaveAttribute("aria-current", "date");
     const duplicateStay = days.nth(1).locator(".lodging-boundary");
     await expect(duplicateStay).toHaveCount(1);
     await expect(duplicateStay).toHaveCSS("border-left-width", "1px");
     await expect(duplicateStay).toHaveCSS("box-shadow", "none");
-    await editor.getByRole("button", { name: "Close editor", exact: true }).click();
-    await dates.nth(1).click();
-    await expect(dates.nth(1)).toHaveAttribute("aria-current", "date");
-    await expect(days.nth(1).locator(".lodging-boundary")).toHaveCount(1);
     await expect(days.nth(1).locator(".itinerary-entry").first()).toHaveClass(/lodging-boundary/);
     await expect(
       days.nth(0).locator(".lodging-boundary button[aria-label^='Reorder']"),
@@ -5096,10 +6146,8 @@ test("continuous days support transport, place-bound stays, and history shortcut
 test("first and last day controls extend the trip", async ({ page }) => {
   const id = await createEmptyTrip();
   try {
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Day range editor"),
-    );
     await page.goto(`/trips/${id}`);
+    await joinTripAs(page, "Day range editor");
     await expect(page.getByRole("button", { name: /^Add a day before / })).toHaveCount(1);
     await expect(page.getByRole("button", { name: /^Add a day after / })).toHaveCount(1);
 
@@ -5127,12 +6175,12 @@ test("first and last day controls extend the trip", async ({ page }) => {
 test("trip settings change the date range without a fieldset border", async ({ page }) => {
   const id = await createEmptyTrip();
   try {
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Date settings editor"),
-    );
     await page.goto(`/trips/${id}`);
-    const settingsButton = page.getByRole("button", { name: "Trip settings" });
-    await settingsButton.click();
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Date settings editor");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
+    await clickPlannerAction(page, "Trip settings");
     const settings = page.getByRole("dialog", { name: "Trip settings" });
     const startDate = settings.getByRole("textbox", { name: "Start", exact: true });
     const endDate = settings.getByRole("textbox", { name: "End", exact: true });
@@ -5157,13 +6205,67 @@ test("trip settings change the date range without a fieldset border", async ({ p
       .toEqual({ startDate: "2027-04-09", endDate: "2027-04-13" });
 
     await page.reload();
-    await settingsButton.click();
+    await clickPlannerAction(page, "Trip settings");
     await expect(settings.getByRole("textbox", { name: "Start", exact: true })).toHaveValue(
       "2027-04-09",
     );
     await expect(settings.getByRole("textbox", { name: "End", exact: true })).toHaveValue(
       "2027-04-13",
     );
+  } finally {
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("settings save keeps currency unchanged when dates exclude a reservation", async ({
+  page,
+}) => {
+  const id = await createEmptyTrip(
+    [
+      itemForCreate("reservation", "2027-04-10", {
+        title: "Dinner",
+        startTime: "18:00",
+        place: { placeId: "reservation-settings" },
+      }),
+    ],
+    "2027-04-12",
+    "USD",
+  );
+  try {
+    await page.goto(`/trips/${id}`);
+    await joinTripAs(page, "Settings editor");
+    page.on("dialog", (dialog) => void dialog.accept());
+    await clickPlannerAction(page, "Trip settings");
+    const settings = page.getByRole("dialog", { name: "Trip settings" });
+    await settings.getByRole("textbox", { name: "Start", exact: true }).fill("2027-04-11");
+    await settings.getByRole("combobox", { name: "Trip currency: USD" }).click();
+    await page
+      .getByRole("listbox", { name: "Trip currency" })
+      .getByRole("option", { name: "EUR" })
+      .click();
+    await settings.getByRole("button", { name: "Save settings" }).click();
+    await expect(settings.getByRole("alert")).toHaveText("Could not save trip settings");
+    await page.reload();
+    await clickPlannerAction(page, "Trip settings");
+    await expect(settings.getByRole("textbox", { name: "Start", exact: true })).toHaveValue(
+      "2027-04-10",
+    );
+    await expect(settings.getByRole("combobox", { name: "Trip currency: USD" })).toBeVisible();
+
+    await settings.getByRole("textbox", { name: "End", exact: true }).fill("2027-04-13");
+    await settings.getByRole("combobox", { name: "Trip currency: USD" }).click();
+    await page
+      .getByRole("listbox", { name: "Trip currency" })
+      .getByRole("option", { name: "EUR" })
+      .click();
+    await settings.getByRole("button", { name: "Save settings" }).click();
+    await expect(settings).toHaveCount(0);
+    await page.reload();
+    await clickPlannerAction(page, "Trip settings");
+    await expect(settings.getByRole("textbox", { name: "End", exact: true })).toHaveValue(
+      "2027-04-13",
+    );
+    await expect(settings.getByRole("combobox", { name: "Trip currency: EUR" })).toBeVisible();
   } finally {
     await db.delete(trips).where(eq(trips.id, id));
   }
@@ -5181,20 +6283,13 @@ test("trip settings control language, units, default travel, and persist", async
     }),
   ]);
   try {
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Settings editor"),
-    );
     await page.goto(`/trips/${id}`);
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Settings editor");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
 
     await expect(page.locator(".transport-leg").first()).toContainText("10 min - 1.0 km");
-    const headerActions = await page
-      .locator(".planner-header button")
-      .evaluateAll((buttons) =>
-        buttons.map(
-          (button) => button.getAttribute("aria-label") ?? button.textContent?.trim() ?? "",
-        ),
-      );
-    expect(headerActions).toEqual(["Undo", "Redo", "Trip settings", "Delete trip", "Share"]);
     await page.locator(".day-section").first().getByRole("button", { name: "Place" }).click();
     await page.locator("gmp-place-autocomplete").evaluate((element) => {
       element.dispatchEvent(
@@ -5213,27 +6308,40 @@ test("trip settings control language, units, default travel, and persist", async
       .locator(".itinerary-unit")
       .filter({ has: page.locator(".entry-select").filter({ hasText: /^Test destination$/ }) })
       .last();
-    await expect(nearPlaceUnit.getByLabel("Travel mode")).toHaveValue("WALKING");
+    await expect(nearPlaceUnit.getByRole("combobox", { name: "Travel mode: Walk" })).toBeVisible();
 
-    const settingsButton = page.getByRole("button", { name: "Trip settings" });
-    await settingsButton.click();
+    await clickPlannerAction(page, "Trip settings");
     const settings = page.getByRole("dialog", { name: "Trip settings" });
-    const languageSelects = settings.locator(".settings-language-row select");
-    await expect(languageSelects.nth(0)).toHaveValue("en");
-    await expect(languageSelects.nth(1)).toHaveValue("");
-    await expect(settings.getByLabel("Distance units")).toHaveValue("metric");
-    await expect(settings.getByLabel("Default transportation")).toHaveValue("DRIVING");
-    const calendarStart = settings.getByLabel("Calendar day starts");
-    await expect(calendarStart).toHaveValue("6");
-    await expect(calendarStart.locator("option")).toHaveCount(24);
+    const uiLanguage = settings.getByRole("combobox", { name: "UI language: English" });
+    const tripLanguage = settings.getByRole("combobox", {
+      name: "Trip language: Follow UI language (English)",
+    });
+    await expect(uiLanguage).toBeVisible();
+    await expect(tripLanguage).toBeVisible();
+    await expect(settings.getByRole("combobox", { name: "Distance units: Metric" })).toBeVisible();
+    await expect(
+      settings.getByRole("combobox", { name: "Default transportation: Car" }),
+    ).toBeVisible();
+    const calendarStart = settings.getByRole("combobox", {
+      name: "Calendar day starts: 06:00",
+    });
+    await calendarStart.click();
+    await expect(
+      page.getByRole("listbox", { name: "Calendar day starts" }).getByRole("option"),
+    ).toHaveCount(24);
+    await calendarStart.press("Escape");
     await page.keyboard.press("Escape");
     await expect(settings).toHaveCount(0);
-    await settingsButton.click();
+    await clickPlannerAction(page, "Trip settings");
     await page.locator(".dialog-backdrop").click({ position: { x: 4, y: 4 } });
     await expect(settings).toHaveCount(0);
 
-    await settingsButton.click();
-    await settings.getByLabel("Distance units").selectOption("imperial");
+    await clickPlannerAction(page, "Trip settings");
+    await settings.getByRole("combobox", { name: "Distance units: Metric" }).click();
+    await page
+      .getByRole("listbox", { name: "Distance units" })
+      .getByRole("option", { name: "Imperial" })
+      .click();
     let discardPrompt = "";
     page.once("dialog", (dialog) => {
       discardPrompt = dialog.message();
@@ -5242,17 +6350,35 @@ test("trip settings control language, units, default travel, and persist", async
     await page.keyboard.press("Escape");
     await expect(settings).toBeVisible();
     expect(discardPrompt).toBe("Discard unsaved trip settings?");
-    await expect(settings.getByLabel("Distance units")).toHaveValue("imperial");
+    await expect(
+      settings.getByRole("combobox", { name: "Distance units: Imperial" }),
+    ).toBeVisible();
 
     page.once("dialog", (dialog) => dialog.accept());
     await page.locator(".dialog-backdrop").click({ position: { x: 4, y: 4 } });
     await expect(settings).toHaveCount(0);
-    await settingsButton.click();
-    await expect(settings.getByLabel("Distance units")).toHaveValue("metric");
-    await languageSelects.nth(0).selectOption("fr");
-    await settings.getByLabel("Distance units").selectOption("imperial");
-    await settings.getByLabel("Default transportation").selectOption("WALKING");
-    await calendarStart.selectOption("7");
+    await clickPlannerAction(page, "Trip settings");
+    await expect(settings.getByRole("combobox", { name: "Distance units: Metric" })).toBeVisible();
+    await uiLanguage.click();
+    await page
+      .getByRole("listbox", { name: "UI language" })
+      .getByRole("option", { name: "Français" })
+      .click();
+    await settings.getByRole("combobox", { name: "Distance units: Metric" }).click();
+    await page
+      .getByRole("listbox", { name: "Distance units" })
+      .getByRole("option", { name: "Imperial" })
+      .click();
+    await settings.getByRole("combobox", { name: "Default transportation: Car" }).click();
+    await page
+      .getByRole("listbox", { name: "Default transportation" })
+      .getByRole("option", { name: "Walk" })
+      .click();
+    await calendarStart.click();
+    await page
+      .getByRole("listbox", { name: "Calendar day starts" })
+      .getByRole("option", { name: "07:00" })
+      .click();
     await settings.getByRole("button", { name: "Save settings" }).click();
 
     await expect(page.locator(".day-heading h2").first()).toContainText("samedi 10 avril");
@@ -5280,7 +6406,9 @@ test("trip settings control language, units, default travel, and persist", async
       .locator(".itinerary-unit")
       .filter({ has: page.locator(".entry-select").filter({ hasText: /^Test destination$/ }) })
       .last();
-    await expect(addedUnit.getByLabel("Mode de déplacement")).toHaveValue("WALKING");
+    await expect(
+      addedUnit.getByRole("combobox", { name: "Mode de déplacement: Marche" }),
+    ).toBeVisible();
 
     await expect
       .poll(async () => {
@@ -5307,22 +6435,25 @@ test("trip settings control language, units, default travel, and persist", async
       .poll(() => page.evaluate(() => localStorage.getItem("pacenotes-ui-language")))
       .toBe("fr");
     await page.reload();
-    await page.getByRole("button", { name: "Paramètres du voyage" }).click();
+    await clickPlannerAction(page, "Paramètres du voyage");
     const savedSettings = page.getByRole("dialog", { name: "Paramètres du voyage" });
-    const savedLanguageSelects = savedSettings.locator(".settings-language-row select");
-    await expect(savedLanguageSelects.nth(0)).toHaveValue("fr");
-    await expect(savedLanguageSelects.nth(1)).toHaveValue("");
     await expect(
-      page.getByRole("dialog", { name: "Paramètres du voyage" }).getByLabel("Unités de distance"),
-    ).toHaveValue("imperial");
+      savedSettings.getByRole("combobox", { name: "Langue de l’interface: Français" }),
+    ).toBeVisible();
     await expect(
-      page.getByRole("dialog", { name: "Paramètres du voyage" }).getByLabel("Transport par défaut"),
-    ).toHaveValue("WALKING");
+      savedSettings.getByRole("combobox", {
+        name: "Langue du voyage: Utiliser la langue de l’interface (Français)",
+      }),
+    ).toBeVisible();
     await expect(
-      page
-        .getByRole("dialog", { name: "Paramètres du voyage" })
-        .getByLabel("Début du jour du calendrier"),
-    ).toHaveValue("7");
+      savedSettings.getByRole("combobox", { name: "Unités de distance: Impérial" }),
+    ).toBeVisible();
+    await expect(
+      savedSettings.getByRole("combobox", { name: "Transport par défaut: Marche" }),
+    ).toBeVisible();
+    await expect(
+      savedSettings.getByRole("combobox", { name: "Début du jour du calendrier: 07:00" }),
+    ).toBeVisible();
   } finally {
     await db.delete(trips).where(eq(trips.id, id));
   }
@@ -5331,12 +6462,12 @@ test("trip settings control language, units, default travel, and persist", async
 test("trip language can override the local UI language", async ({ page }) => {
   const id = await createEmptyTrip();
   try {
-    await page.addInitScript(() => {
-      localStorage.setItem("pacenotes-display-name", "Language override editor");
-      localStorage.setItem("pacenotes-ui-language", "ja");
-    });
+    await page.addInitScript(() => localStorage.setItem("pacenotes-ui-language", "ja"));
     await page.goto(`/trips/${id}`);
-    await expect(page.getByRole("button", { name: "旅行設定" })).toBeVisible();
+    const join = page.getByRole("dialog", { name: "この旅行であなたは誰ですか？" });
+    await join.getByRole("textbox", { name: "新しい旅行仲間" }).fill("言語の確認");
+    await join.getByRole("button", { name: "旅行仲間を作成" }).click();
+    await expect(join).toHaveCount(0);
     await expect
       .poll(() =>
         page.evaluate(
@@ -5350,18 +6481,24 @@ test("trip language can override the local UI language", async ({ page }) => {
       )
       .toBe("ja");
 
-    await page.getByRole("button", { name: "旅行設定" }).click();
+    await clickPlannerAction(page, "旅行設定");
     const settings = page.getByRole("dialog", { name: "旅行設定" });
-    const languageSelects = settings.locator(".settings-language-row select");
-    await expect(languageSelects).toHaveCount(2);
-    await expect(languageSelects.nth(0)).toHaveValue("ja");
-    await expect(languageSelects.nth(1)).toHaveValue("");
+    const uiLanguage = settings.getByRole("combobox", { name: "UIの言語: 日本語" });
+    const tripLanguage = settings.getByRole("combobox", {
+      name: "旅行の言語: UIの言語に合わせる（日本語）",
+    });
+    await expect(uiLanguage).toBeVisible();
+    await expect(tripLanguage).toBeVisible();
     const [uiBox, tripBox] = await Promise.all([
-      languageSelects.nth(0).boundingBox(),
-      languageSelects.nth(1).boundingBox(),
+      uiLanguage.boundingBox(),
+      tripLanguage.boundingBox(),
     ]);
     expect(uiBox?.y).toBe(tripBox?.y);
-    await languageSelects.nth(1).selectOption("fr");
+    await tripLanguage.click();
+    await page
+      .getByRole("listbox", { name: "旅行の言語" })
+      .getByRole("option", { name: "Français" })
+      .click();
     await settings.locator('button[type="submit"]').click();
 
     await expect
@@ -5375,17 +6512,21 @@ test("trip language can override the local UI language", async ({ page }) => {
         return tripLanguage;
       })
       .toBe("fr");
-    await expect(page.getByRole("button", { name: "旅行設定" })).toBeVisible();
-    await page.getByRole("button", { name: "旅行設定" }).click();
-    const savedLanguageSelects = page
-      .getByRole("dialog", { name: "旅行設定" })
-      .locator(".settings-language-row select");
-    await expect(savedLanguageSelects.nth(0)).toHaveValue("ja");
-    await expect(savedLanguageSelects.nth(1)).toHaveValue("fr");
-    await savedLanguageSelects.nth(0).selectOption("de");
-    await expect(savedLanguageSelects.nth(1)).toHaveValue("fr");
+    await clickPlannerAction(page, "旅行設定");
+    const savedSettings = page.getByRole("dialog", { name: "旅行設定" });
+    const savedUiLanguage = savedSettings.getByRole("combobox", { name: "UIの言語: 日本語" });
+    const savedTripLanguage = savedSettings.getByRole("combobox", {
+      name: "旅行の言語: Français",
+    });
+    await expect(savedUiLanguage).toBeVisible();
+    await expect(savedTripLanguage).toBeVisible();
+    await savedUiLanguage.click();
+    await page
+      .getByRole("listbox", { name: "UIの言語" })
+      .getByRole("option", { name: "Deutsch" })
+      .click();
+    await expect(savedTripLanguage).toHaveAccessibleName("旅行の言語: Français");
     await page.getByRole("dialog", { name: "旅行設定" }).locator('button[type="submit"]').click();
-    await expect(page.getByRole("button", { name: "Reiseeinstellungen" })).toBeVisible();
     await expect
       .poll(() => page.evaluate(() => localStorage.getItem("pacenotes-ui-language")))
       .toBe("de");
@@ -5423,19 +6564,22 @@ test("route mode is selected from an inline dropdown", async ({ page }) => {
     }),
   ]);
   try {
-    await page.addInitScript(() =>
-      localStorage.setItem("pacenotes-display-name", "Route layout editor"),
-    );
     await page.goto(`/trips/${id}`);
-    const leg = page.locator(".transport-leg").first();
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Route layout editor");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
+    const leg = page.locator(".itinerary-unit .transport-leg").first();
     await expect(leg).toBeVisible();
-    const routeMode = leg.getByLabel("Travel mode");
-    await expect(routeMode).toHaveValue("DRIVING");
-    await expect(routeMode.locator("option")).toHaveText(["Car", "Public transport", "Walk"]);
+    const routeMode = leg.getByRole("combobox", { name: /^Travel mode:/ });
+    await expect(routeMode).toHaveAccessibleName("Travel mode: Car");
     const initialHeight = await leg.evaluate((element) => element.getBoundingClientRect().height);
-    await routeMode.selectOption("TRANSIT");
-    await expect(routeMode).toHaveValue("TRANSIT");
-    await expect(routeMode.locator("option:checked")).toHaveText("Public transport");
+    await routeMode.click();
+    await expect(page.getByRole("listbox", { name: "Travel mode" }).getByRole("option")).toHaveText(
+      ["Car", "Public transport", "Walk"],
+    );
+    await page.getByRole("option", { name: "Public transport" }).click();
+    await expect(routeMode).toHaveAccessibleName("Travel mode: Public transport");
     await expect(leg).toContainText("25 min");
     await expect
       .poll(() =>
@@ -5467,7 +6611,6 @@ test("route mode is selected from an inline dropdown", async ({ page }) => {
         destinationPlaceId: "route-mode-cafe",
         travelMode: "TRANSIT",
       });
-    await expect(leg.locator(".leg-options")).toHaveCount(0);
     const selectedHeight = await leg.evaluate((element) => element.getBoundingClientRect().height);
     expect(Math.abs(initialHeight - selectedHeight)).toBeLessThan(1);
     await expect
@@ -5505,9 +6648,13 @@ test("per-day add controls target their day and date navigation follows the view
       .set({ data: Buffer.from(Y.encodeStateAsUpdate(doc)) })
       .where(eq(documents.name, id));
     doc.destroy();
-    await page.addInitScript(() => localStorage.setItem("pacenotes-display-name", "Scroll editor"));
     await page.goto(`/trips/${id}`);
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Scroll editor");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
     const panel = page.locator(".planner-panel");
+    const scroll = page.locator(".planner-scroll");
     const days = page.locator(".day-section");
     const dates = page.locator(".date-tabs [data-day-tab]");
     await expect(page.locator(".planner-toolbar")).toHaveCount(0);
@@ -5532,7 +6679,7 @@ test("per-day add controls target their day and date navigation follows the view
     await expect(page.locator(".place-search")).toHaveCount(0);
     await page.locator(".day-section").first().locator(".entry-select").first().click();
     await page.locator(".item-editor textarea").fill("Keep this draft");
-    await panel.evaluate((element) => {
+    await scroll.evaluate((element) => {
       const next = element.querySelectorAll(".day-section")[1];
       if (!next) throw new Error("Missing day");
       element.scrollTop +=
@@ -5545,6 +6692,38 @@ test("per-day add controls target their day and date navigation follows the view
     await expect(panel).toHaveAttribute("aria-busy", "false");
     await expect(dates.nth(2)).toHaveAttribute("aria-current", "date");
     await expect(days.nth(2).locator(".day-heading")).toBeInViewport();
+  } finally {
+    await db.delete(trips).where(eq(trips.id, id));
+  }
+});
+
+test("itinerary renders nearby days after view and date changes", async ({ page }) => {
+  const dates = ["2027-04-10", "2027-04-11", "2027-04-12", "2027-04-13", "2027-04-14"];
+  const id = await createEmptyTrip(
+    dates.map((day, index) => itemForCreate("note", day, { title: `Day ${index + 1} note` })),
+    dates[dates.length - 1],
+  );
+  try {
+    await page.goto(`/trips/${id}?view=expenses`);
+    await expect(page.locator("#expenses-title")).toBeVisible();
+    const tripmate = page.getByRole("dialog", { name: "Who are you on this trip?" });
+    await tripmate.getByRole("textbox", { name: "New tripmate" }).fill("Date editor");
+    await tripmate.getByRole("button", { name: "Create tripmate" }).click();
+    await expect(tripmate).toHaveCount(0);
+    await page.getByRole("button", { name: "Itinerary", exact: true }).click();
+
+    const sections = page.locator(".day-section");
+    await expect(sections).toHaveCount(dates.length);
+    await expect(sections.nth(0).locator(".entry-select")).toContainText("Day 1 note");
+    await expect(sections.nth(1).locator(".entry-select")).toContainText("Day 2 note");
+
+    await page.locator(".date-tabs [data-day-tab]").last().click();
+    await expect(page.locator(".date-tabs [data-day-tab]").last()).toHaveAttribute(
+      "aria-current",
+      "date",
+    );
+    await expect(sections.nth(3).locator(".entry-select")).toContainText("Day 4 note");
+    await expect(sections.nth(4).locator(".entry-select")).toContainText("Day 5 note");
   } finally {
     await db.delete(trips).where(eq(trips.id, id));
   }

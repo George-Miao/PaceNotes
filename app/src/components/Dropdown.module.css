@@ -1,0 +1,149 @@
+.root {
+  min-width: 0;
+  width: 100%;
+}
+
+.trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 2.25rem;
+  padding: 0.4rem 0.625rem;
+  border: var(--line) solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--raised);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.trigger:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.trigger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.value {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.value.muted .text {
+  color: var(--muted);
+}
+
+.placeholder {
+  color: var(--muted);
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 1.5rem;
+  min-height: 1.25rem;
+  color: var(--accent-ink);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.icon svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.chevron {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  color: var(--muted);
+}
+
+.compact .trigger {
+  min-height: 2.25rem;
+  padding: 0.3rem 0.5rem;
+}
+
+.list {
+  position: fixed;
+  inset: auto;
+  z-index: 100;
+  margin: 0;
+  padding: 0.25rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: var(--line) solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--raised);
+  box-shadow: var(--shadow-panel);
+  color: var(--ink);
+}
+
+.separator {
+  height: var(--line);
+  margin: 0.25rem 0.5rem;
+  background: var(--border);
+}
+.groupLabel {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0.4rem 0.5rem 0.15rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.groupLabel::after {
+  content: "";
+  flex: 1;
+  height: var(--line);
+  background: var(--border);
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 2.25rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.option.active {
+  background: var(--muted-surface);
+}
+
+.option.muted {
+  color: var(--muted);
+}
+
+.option.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
