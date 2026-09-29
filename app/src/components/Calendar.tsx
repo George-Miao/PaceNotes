@@ -293,6 +293,10 @@ export function Calendar({
     () => new Map(activePreviews.map((candidate) => [candidate.itemId, candidate])),
     [activePreviews],
   );
+  const resizeDuration =
+    gesture?.type === "item" && gesture.edge !== "move" && preview
+      ? formatTravelDuration(preview.durationMinutes, language)
+      : null;
   const effectiveItems = useMemo(
     () =>
       activePreviews.length > 0
@@ -1361,6 +1365,9 @@ export function Calendar({
                   <time>
                     {rollingTimeForCalendarMinute(segment.startMinute, calendarStartHour)} -{" "}
                     {rollingTimeForCalendarMinute(segment.endMinute, calendarStartHour)}
+                    {resizeDuration && segment.item.id === preview?.itemId
+                      ? ` (${resizeDuration})`
+                      : null}
                   </time>
                 </div>
               ))}
