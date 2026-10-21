@@ -143,7 +143,7 @@ Use a reverse proxy with TLS. Route normal requests and WebSocket upgrades for `
 
 ## Outbound HTTPS certificates
 
-The Nix web image gives Node a public CA bundle for outbound HTTPS requests. If a proxy signs these requests with a private CA, get the root CA certificate from the network operator. Add a local `compose.override.yaml` next to `compose.yaml`:
+The published Nix image uses the NSS 3.131.1 CA bundle and excludes the Comodo AAA Services root. Local Docker builds install Debian CA certificates and exclude the eMudhra G3 and Comodo AAA roots. Both images use their system CA bundle instead of Node's older built-in roots. Rebuild or pull the new image and replace the web container to apply the change. If a proxy signs outbound HTTPS requests with a private CA, get its root certificate from the network operator. Add a local `compose.override.yaml` next to `compose.yaml`:
 
 ```yaml
 services:

@@ -24,6 +24,22 @@
           pkgs = import nixpkgs { inherit system; };
           inherit (pkgs) lib;
           pnpm = pkgs.pnpm_11;
+          # NSS 3.131.1 removes the compromised eMudhra root. Its cross-sign
+          # also requires excluding the Comodo root until the chain is safe.
+          trustedCacert =
+            (pkgs.cacert.override {
+              blacklist = [ "Comodo AAA Services root" ];
+            }).overrideAttrs
+              (_: {
+                version = "3.131.1";
+                src = pkgs.fetchurl {
+                  urls = [
+                    "https://hg-edge.mozilla.org/projects/nss/raw-file/NSS_3_131_1_RTM/lib/ckfw/builtins/certdata.txt"
+                    "https://raw.githubusercontent.com/nss-dev/nss/refs/tags/NSS_3_131_1_RTM/lib/ckfw/builtins/certdata.txt"
+                  ];
+                  hash = "sha256-PsK00kDcEsdH6vRQBh24SvdXxIO72jAvninOtdcL5RA=";
+                };
+              });
           app = pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
             pname = "pacenotes";
             version = "0.3.1";
@@ -80,7 +96,7 @@
               name = "pacenotes-root";
               paths = [
                 pkgs.nodejs_24
-                pkgs.cacert
+                trustedCacert
                 app
               ];
               pathsToLink = [
@@ -93,7 +109,7 @@
               WorkingDir = "/lib/pacenotes";
               Env = [
                 "NODE_ENV=production"
-                "NODE_USE_SYSTEM_CA=1"
+                "NODE_OPTIONS=--use-openssl-ca"
                 "SSL_CERT_DIR=/etc/ssl/certs"
                 "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
                 "PORT=3000"
@@ -111,7 +127,7 @@
             name = "build-patched-motis";
             runtimeInputs = with pkgs; [
               bzip2
-              cacert
+              trustedCacert
               cmake
               coreutils
               curl
