@@ -103,14 +103,76 @@ jobs:
             --creds "${GHCR_USER}:${GHCR_TOKEN}" \
             "docker://${IMAGE_NAME}:${PRIMARY_TAG}"
 
+  mcp-binaries:
+    name: Build MCP ${{ matrix.target }}
+    if: github.ref_type == 'tag'
+    needs: verify
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: bun-linux-x64
+            asset: pacenotes-mcp-linux-x64
+          - runner: macos-15-intel
+            target: bun-darwin-x64
+            asset: pacenotes-mcp-macos-x64
+          - runner: macos-15
+            target: bun-darwin-arm64
+            asset: pacenotes-mcp-macos-arm64
+          - runner: windows-2025
+            target: bun-windows-x64
+            asset: pacenotes-mcp-windows-x64.exe
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - name: Install app dependencies
+        run: pnpm --dir app install --frozen-lockfile
+      - name: Build standalone MCP executable
+        run: pnpm --dir app build:mcp-cli --target=${{ matrix.target }} --outfile=dist/${{ matrix.asset }}
+      - name: Smoke standalone executable
+        shell: bash
+        run: |
+          "app/dist/${{ matrix.asset }}" --version
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: pacenotes-mcp-${{ matrix.target }}
+          path: app/dist/pacenotes-mcp-*
+          if-no-files-found: error
+
   release:
     name: Create GitHub release
     if: github.ref_type == 'tag'
-    needs: publish
+    needs: [publish, mcp-binaries]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
+      - name: Download MCP executables
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pacenotes-mcp-*
+          path: dist
+          merge-multiple: true
+      - name: Write executable checksums
+        shell: bash
+        run: |
+          cd dist
+          sha256sum pacenotes-mcp-* > SHA256SUMS
       - name: Publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -120,7 +182,7 @@ jobs:
           image_ref="${IMAGE_NAME}:${GITHUB_REF_NAME}"
           image_url="https://github.com/${GITHUB_REPOSITORY}/pkgs/container/pacenotes"
           printf -v image_note "Container image: [\`%s\`](%s)" "$image_ref" "$image_url"
-          gh release create "$GITHUB_REF_NAME" \
+          gh release create "$GITHUB_REF_NAME" dist/pacenotes-mcp-* dist/SHA256SUMS \
             --verify-tag \
             --generate-notes \
             --notes "$image_note" \

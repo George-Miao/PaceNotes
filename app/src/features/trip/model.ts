@@ -61,6 +61,7 @@ export type TripItem = {
   lodging: Lodging | null;
   transport: Transport | null;
   travelMode: TravelMode;
+  timeChoice?: "earlier" | "later" | null;
 };
 
 export type TripDay = {
@@ -198,6 +199,7 @@ export const tripItemSchema = z
       .nullable()
       .default(null),
     travelMode: travelModeSchema,
+    timeChoice: z.enum(["earlier", "later"]).nullable().default(null),
   })
   .refine((item) => item.type === "place" || Boolean(item.place) || item.title.length > 0, {
     path: ["title"],

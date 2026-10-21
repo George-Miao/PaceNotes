@@ -10,9 +10,11 @@
   "license": "AGPL-3.0-or-later",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build && pnpm check:bundles && pnpm build:workers && pnpm typecheck",
+    "build": "vite build && pnpm check:bundles && pnpm build:workers && pnpm typecheck && pnpm check:openrpc",
     "build:workers": "esbuild src/db/migrate.ts --bundle --platform=node --format=esm --outfile=.output/migrate/index.mjs && esbuild src/launch.mjs --bundle --platform=node --format=esm --external:./migrate/index.mjs --external:./server/index.mjs --outfile=.output/start.mjs",
     "check:bundles": "node scripts/check-bundle-size.mjs",
+    "check:openrpc": "tsx scripts/generate-openrpc.mjs --check",
+    "build:mcp-cli": "bun build src/mcp-cli/index.ts --compile",
     "start": "node .output/start.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
@@ -49,6 +51,7 @@
     "rehype-sanitize": "6.0.0",
     "unified": "11.0.5",
     "workbox-window": "7.4.1",
+    "ws": "8.21.3",
     "yjs": "13.6.27",
     "zod": "4.4.3"
   },
@@ -61,6 +64,7 @@
     "@types/node": "24.10.1",
     "@types/react": "19.2.5",
     "@types/react-dom": "19.2.3",
+    "@types/ws": "8.18.1",
     "@vitejs/plugin-react": "6.0.1",
     "drizzle-kit": "0.31.10",
     "esbuild": "0.27.7",

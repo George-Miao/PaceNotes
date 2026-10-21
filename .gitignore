@@ -17,3 +17,6 @@ app/.lighthouseci/
 prototype/*/node_modules/
 prototype/*/dist/
 prototype/*/*.tsbuildinfo
+
+sdk/python/**/__pycache__/
+sdk/python/*.egg-info/

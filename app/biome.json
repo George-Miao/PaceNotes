@@ -4,6 +4,7 @@
     "includes": [
       "**",
       "!!src/routeTree.gen.ts",
+      "!!openrpc.json",
       "!!node_modules",
       "!!.output",
       "!!dist",

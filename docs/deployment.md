@@ -17,6 +17,27 @@ Optional server-only routing settings:
 
 Do not add these settings to browser public configuration. The PaceNotes server sends only bounded, validated Japan public transport requests to MOTIS.
 
+## Optional external API and MCP
+
+Set `PACENOTES_EXTERNAL_ENABLED=true` to enable `/api/v1/rpc`, `/api/v1/events`, `/api/v1/ws`, `/api/v1/openrpc.json`, and `/mcp/v1/*`. The default is `false`. Every trip ID grants edit access. The API and MCP do not offer trip deletion. Use HTTPS and do not log request paths for MCP trip endpoints.
+
+For place search and trip creation without an explicit IANA time zone, set `GOOGLE_MAPS_SERVER_API_KEY`. Create a separate server key in the Google Cloud project. Restrict it to Places API (New). If the server has a fixed public egress address, restrict the key to that address too. Do not put this key in browser configuration. A Place Details request for `timeZone.id` uses a paid Pro SKU. Set Places project quotas and billing alerts. A trip creation call with an explicit valid `timeZone` does not need this provider lookup.
+
+Set `PACENOTES_EXTERNAL_ALLOWED_ORIGINS` to a comma-separated list of exact browser origins that can use MCP or the JSON-RPC WebSocket. A server client without an Origin can connect. HTTP JSON-RPC and SSE allow cross-origin browser requests, so keep trip IDs private. Do not use a wildcard in this list.
+
+These optional values set requests per minute. The defaults apply when a value is absent:
+
+| Setting | Default |
+| --- | ---: |
+| `PACENOTES_EXTERNAL_CLIENT_RPM` | 120 |
+| `PACENOTES_EXTERNAL_TRIP_RPM` | 240 |
+| `PACENOTES_EXTERNAL_SEARCH_CLIENT_RPM` | 30 |
+| `PACENOTES_EXTERNAL_SEARCH_TRIP_RPM` | 60 |
+
+Each value must be a positive integer. The separate trip creation limit stays at 10 per client address per hour. Google project quotas are still needed for paid calls. Add the external settings to `.env` for either Compose file. Both files pass them to the web process. `FRANKFURTER_URL` selects the existing server-only exchange-rate endpoint; it defaults to `https://api.frankfurter.dev`.
+
+Route HTTP and WebSocket upgrades for `/api/v1/ws` and `/sync` to the same web process. Route `/api/v1/*` and `/mcp/v1/*` to that process too. Read [external API and MCP](external-api.md) before you expose these paths.
+
 ## Create the required values
 
 Only `GOOGLE_MAPS_API_KEY` comes from Google as a credential. `GOOGLE_MAP_ID` is a public identifier. Create `RATE_LIMIT_SALT` locally. Obtain the production `DATABASE_URL` from the PostgreSQL operator. Set `PORT` from the deployment address.

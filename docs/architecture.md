@@ -16,6 +16,12 @@ Each trip ID is one Hocuspocus document name. `/sync` accepts a connection only 
 
 A hard delete marks the trip as deleting, closes its live connections, and deletes its database records through a cascade.
 
+## Opt-in external interfaces
+
+The same Nitro process serves JSON-RPC v1 at `/api/v1/rpc`, SSE notices at `/api/v1/events`, JSON-RPC WebSocket at `/api/v1/ws`, and MCP at `/mcp/v1/*`. All are off unless `PACENOTES_EXTERNAL_ENABLED=true`. The HTTP and MCP handlers call one server action module. It validates wire input, checks live record versions, applies changes to the shared Hocuspocus document, and returns saved data. No second client trip store exists.
+
+PostgreSQL stores 24-hour creation idempotency rows and request rate buckets. A record creation writes its result and receipt in one Yjs transaction before it marks the PostgreSQL claim complete. Event listeners watch the shared document, including browser edits, and send changed record IDs. SSE, WebSocket, and MCP events have no replay. The OpenRPC contract in `app/openrpc.json` defines the HTTP method shapes. Source clients in TypeScript, Python, and Rust use that contract.
+
 ## Provider and time data
 
 PaceNotes stores only Google Place IDs. Google names, addresses, coordinates, reviews, photos, and route data remain transient.

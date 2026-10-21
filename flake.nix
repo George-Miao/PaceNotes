@@ -68,8 +68,15 @@
               inherit (finalAttrs) pname version src;
               inherit pnpm;
               fetcherVersion = 4;
-              hash = "sha256-05xxnUdO276sH3q8naNu1KshbS4GrqIaWH6knu6pfcU=";
+              hash = "sha256-QjCaQGLJkAljWlZU/6HHzBPuWupLlPvTvi0BViDNkdc=";
             };
+            preBuild = ''
+              # pnpmConfigHook skips scripts and pnpm 11.22 omits root binary links.
+              # Reinstall from its offline store with approved builds enabled.
+              rm -rf node_modules
+              pnpm install --offline --frozen-lockfile
+              test -x node_modules/.bin/vite
+            '';
             buildPhase = ''
               runHook preBuild
               pnpm build

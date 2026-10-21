@@ -1,4 +1,14 @@
-import { customType, index, pgTable, text, timestamp, varchar } from "drizzle-orm/pg-core";
+import {
+  customType,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  varchar,
+} from "drizzle-orm/pg-core";
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   dataType: () => "bytea",
@@ -32,6 +42,32 @@ export const creationEvents = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("creation_events_client_time_idx").on(table.clientHash, table.createdAt)],
+);
+
+export const externalIdempotency = pgTable(
+  "external_idempotency",
+  {
+    scope: varchar("scope", { length: 128 }).notNull(),
+    method: varchar("method", { length: 64 }).notNull(),
+    key: varchar("key", { length: 128 }).notNull(),
+    requestHash: varchar("request_hash", { length: 64 }).notNull(),
+    response: jsonb("response").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.scope, table.method, table.key] }),
+    index("external_idempotency_expiry_idx").on(table.expiresAt),
+  ],
+);
+
+export const externalRateBuckets = pgTable(
+  "external_rate_buckets",
+  {
+    scope: varchar("scope", { length: 128 }).notNull(),
+    bucket: timestamp("bucket", { withTimezone: true }).notNull(),
+    count: integer("count").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.scope, table.bucket] })],
 );
 
 export const dataMigrations = pgTable("data_migrations", {

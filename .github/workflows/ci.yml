@@ -20,6 +20,27 @@ jobs:
       - name: Build Docker image
         run: nix build .#docker
 
+  client-libraries:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python SDK
+        run: python -m pip install -e ./sdk/python
+      - name: Check Python SDK source
+        run: python -m compileall -q sdk/python/pacenotes
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Check Rust SDK format
+        run: cargo fmt --manifest-path sdk/rust/Cargo.toml --check
+      - name: Test Rust reqwest backend
+        run: cargo test --manifest-path sdk/rust/Cargo.toml --no-default-features --features reqwest
+      - name: Test Rust Cyper backend
+        run: cargo test --manifest-path sdk/rust/Cargo.toml --no-default-features --features cyper
+
   browser:
     runs-on: ubuntu-latest
     services:
@@ -40,6 +61,7 @@ jobs:
       DATABASE_URL: postgres://pacenotes:pacenotes-test@127.0.0.1:5432/pacenotes
       RATE_LIMIT_SALT: browser-test
       GOOGLE_MAPS_API_KEY: test-google-maps-browser-key
+      PACENOTES_EXTERNAL_ENABLED: "true"
       GOOGLE_MAP_ID: test-google-map-id
       CI: true
     steps:

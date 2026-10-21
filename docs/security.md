@@ -8,6 +8,14 @@ Trip pages use `noindex`, `nofollow`, `noarchive`, and `no-referrer`. PaceNotes 
 
 Do not put private, regulated, or safety-critical data in a trip. Anyone who receives the URL can copy it. Hard deletion cannot remove a copy that a browser or editor already saved.
 
+## External access
+
+`PACENOTES_EXTERNAL_ENABLED` is off by default. When it is on, JSON-RPC takes the trip ID in an `Authorization: Bearer` header. A remote MCP trip endpoint holds the same ID in its path. Treat both as secrets. Do not put a bearer value in a WebSocket query string, a screenshot, a client log, or a public MCP configuration file. The new interfaces cannot hard-delete a trip. A person with the web trip URL can still delete it.
+
+HTTP JSON-RPC allows any browser Origin. MCP and the JSON-RPC WebSocket require an exact allowed Origin when a browser sends one. An Origin check is not authentication: a native client can send no Origin. Keep MCP trip request paths out of reverse-proxy and access logs. Do not publish raw SDK traces. Use TLS for all external traffic.
+
+Creates use 24-hour idempotency receipts in PostgreSQL, with a live Yjs receipt for trip records. Rate limits use a hashed client address and a trip scope. The web process does not log the address or the trip content. Set Google API quotas for paid place search and Place Details calls. Use a server-only Places key that is separate from the browser key.
+
 ## Input and content
 
 All network and persistence seams validate structured input. Notes use CommonMark with a limited GFM subset. Raw HTML is skipped. The rendered tree passes through `rehype-sanitize`. Links open with `noreferrer`.

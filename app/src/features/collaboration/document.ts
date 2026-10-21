@@ -213,6 +213,28 @@ export function createTripmate(document: Y.Doc, friend: Friend): void {
   writeFriends(document, [friend], "create-tripmate");
 }
 
+export function removeTripmate(document: Y.Doc, id: string): void {
+  const parsed = financialIdSchema.parse(id);
+  for (const record of document.getMap<Y.Map<unknown>>(expensesKey).values()) {
+    if (!(record instanceof Y.Map)) continue;
+    const expense = expenseSchema.safeParse(record.toJSON());
+    if (
+      expense.success &&
+      (expense.data.payerId === parsed || splitParticipants(expense.data).has(parsed))
+    ) {
+      throw new Error("Tripmate has financial records");
+    }
+  }
+  for (const record of document.getMap<Y.Map<unknown>>(settlementsKey).values()) {
+    if (!(record instanceof Y.Map)) continue;
+    const payment = settlementSchema.safeParse(record.toJSON());
+    if (payment.success && (payment.data.fromId === parsed || payment.data.toId === parsed)) {
+      throw new Error("Tripmate has financial records");
+    }
+  }
+  document.transact(() => document.getMap(friendsKey).delete(parsed), "remove-tripmate");
+}
+
 function writeExpense(document: Y.Doc, expense: Expense, origin: string): void {
   const parsed = expenseSchema.parse(expense);
   if (!currencySchema.safeParse(document.getMap(metadataKey).get("currency")).success) {
@@ -455,6 +477,7 @@ export function moveTripItem(
   startTime: string | null,
   ids: string[],
   travelMode: TripItem["travelMode"] | undefined = undefined,
+  timeChoice: TripItem["timeChoice"] = undefined,
 ): void {
   const item = document.getMap<Y.Map<unknown>>(itemsKey).get(id);
   if (!item) return;
@@ -464,6 +487,7 @@ export function moveTripItem(
       id,
       dayId,
       startTime,
+      ...(timeChoice !== undefined ? { timeChoice } : {}),
       ...(travelMode ? { travelMode } : {}),
     }),
   );
@@ -472,6 +496,7 @@ export function moveTripItem(
     if (item.get("dayId") !== next.dayId) syncExpenseDateForItem(document, id, next.dayId);
     item.set("dayId", next.dayId);
     item.set("startTime", next.startTime);
+    if (timeChoice !== undefined) item.set("timeChoice", next.timeChoice);
     if (travelMode) item.set("travelMode", next.travelMode);
     if (order.length > 0) order.delete(0, order.length);
     if (ids.length > 0) order.insert(0, ids);

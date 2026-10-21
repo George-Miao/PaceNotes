@@ -15,6 +15,13 @@
       "when": 1787616000001,
       "tag": "0001_google_place_ids",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787616000002,
+      "tag": "0002_external_access",
+      "breakpoints": true
     }
   ]
 }
